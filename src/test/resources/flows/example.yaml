@@ -1,0 +1,13 @@
+id: example
+namespace: io.kestra.templates
+
+tasks:
+- id: date
+  type: io.kestra.plugin.templates.Example
+  format: "{{taskrun.startDate}}"
+- id: task-id
+  type: io.kestra.plugin.templates.Example
+  format: "{{task.id}}"
+- id: flow-id
+  type: io.kestra.plugin.templates.Example
+  format: "{{outputs['task-id'].child.value}}"
