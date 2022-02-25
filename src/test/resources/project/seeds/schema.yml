@@ -1,0 +1,10 @@
+version: 2
+
+seeds:
+  - name: zipcode
+    description: "a seed table"
+    docs:
+      show: true
+    columns:
+      - name: zipcode_id
+      - name: zipcode_name

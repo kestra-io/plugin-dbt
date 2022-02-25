@@ -1,0 +1,31 @@
+version: 2
+
+models:
+  - name: requests
+    columns:
+      - name: unique_key
+        tests:
+          - unique
+          - not_null
+      - name: source
+        tests:
+          - not_null
+      - name: status
+        tests:
+          - not_null
+      - name: map_name
+      - name: status_change_date
+        tests:
+          - not_null
+  - name: stations
+    columns:
+      - name: station_id
+        tests:
+          - unique
+          - not_null
+      - name: name
+        tests:
+          - not_null
+      - name: status
+        tests:
+          - not_null
