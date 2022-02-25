@@ -1,0 +1,41 @@
+id: full
+namespace: io.kestra.dbt
+inputs:
+  - name: path
+    type: STRING
+
+tasks:
+- id: worker
+  type: io.kestra.core.tasks.flows.Worker
+  tasks:
+    - id: clone
+      type: io.kestra.core.tasks.scripts.Bash
+      commands:
+        - 'cp -R {{ inputs.path }}* {{workingDir}}'
+    - id: setup
+      type: io.kestra.plugin.dbt.cli.Setup
+      profiles:
+        unit-kestra:
+          outputs:
+            dev:
+              dataset: kestra_unit_test_us
+              fixed_retries: 1
+              location: US
+              method: oauth
+              priority: interactive
+              project: kestra-unit-test
+              threads: 1
+              timeout_seconds: 300
+              type: bigquery
+          target: dev
+      requirements:
+        - dbt-bigquery
+      # runner: DOCKER
+      # dockerOptions:
+      #   image: python:3.9
+    - id: run
+      type: io.kestra.plugin.dbt.cli.Build
+      thread: 16
+      # runner: DOCKER
+      # dockerOptions:
+      #   image: python:3.9
