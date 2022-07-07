@@ -44,9 +44,6 @@ dependencies {
 
     // kestra
     compileOnly group: "io.kestra", name: "core", version: kestraVersion
-
-    // libs included in the final jar
-    api group: 'com.google.code.gson', name: 'gson', version: '2.9.0'
 }
 
 
