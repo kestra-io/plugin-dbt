@@ -33,7 +33,7 @@ class BuildRunnerTest {
     protected LocalFlowRepositoryLoader repositoryLoader;
 
     @BeforeEach
-    private void init() throws IOException, URISyntaxException {
+    protected void init() throws IOException, URISyntaxException {
         repositoryLoader.load(Objects.requireNonNull(BuildRunnerTest.class.getClassLoader().getResource("flows")));
         this.runner.run();
     }
