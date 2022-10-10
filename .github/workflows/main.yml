@@ -48,7 +48,11 @@ jobs:
 
       # Gradle check
       - name: Build with Gradle
-        run: ./gradlew check
+        env:
+          DBT_APPLICATION: ${{ secrets.DBT_APPLICATION }}
+        run: |
+          echo $DBT_APPLICATION | base64 -d > src/test/resources/application-test.yml
+          ./gradlew check
 
       # Publish
       - name: Publish package to Sonatype
