@@ -1,4 +1,4 @@
-package io.kestra.plugin.dbt.cli.models;
+package io.kestra.plugin.dbt.models;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.micronaut.core.annotation.Introspected;
