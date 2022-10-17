@@ -7,7 +7,7 @@ plugins {
     id 'ru.vyarus.github-info' version '1.4.0'
     id 'signing'
     id "io.github.gradle-nexus.publish-plugin" version "1.1.0"
-    id "com.github.ben-manes.versions" version "0.42.0"
+    id "com.github.ben-manes.versions" version "0.43.0"
     id 'net.researchgate.release' version '3.0.2'
 }
 
@@ -27,6 +27,12 @@ description 'Dbt Plugin for Kestra'
 tasks.withType(JavaCompile) {
     options.encoding = "UTF-8"
     options.compilerArgs.add("-parameters")
+}
+
+configurations.all {
+    resolutionStrategy {
+        force("org.slf4j:slf4j-api:1.7.36")
+    }
 }
 
 dependencies {

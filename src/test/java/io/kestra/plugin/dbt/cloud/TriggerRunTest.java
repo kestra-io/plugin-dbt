@@ -7,6 +7,7 @@ import io.kestra.core.utils.TestsUtils;
 import io.micronaut.context.annotation.Value;
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -30,6 +31,7 @@ class TriggerRunTest {
     private String jobId;
 
     @Test
+    @Disabled("Trial account can't trigger run through api")
     void run() throws Exception {
         TriggerRun task = TriggerRun.builder()
             .id(IdUtils.create())
