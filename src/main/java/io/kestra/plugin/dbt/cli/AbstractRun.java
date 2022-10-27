@@ -1,6 +1,8 @@
 package io.kestra.plugin.dbt.cli;
 
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
+import io.kestra.core.models.annotations.Example;
+import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.runners.RunContext;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -15,6 +17,60 @@ import java.util.stream.Collectors;
 @EqualsAndHashCode
 @Getter
 @NoArgsConstructor
+@Plugin(
+    examples = {
+        @Example(
+            full = true,
+            title = "Invoke a build command on bigquery",
+            code = {
+                "id: dbt-run",
+                "namespace: io.kestra.tests",
+                "",
+                "tasks:",
+                "  - id: worker",
+                "    type: io.kestra.core.tasks.flows.Worker",
+                "    tasks:",
+                "      - id: bash",
+                "        type: io.kestra.core.tasks.scripts.Bash",
+                "        commands:",
+                "          - git clone https://github.com/<< organization >>/dbt-project .",
+                "        dockerOptions:",
+                "          image: bitnami/git:latest",
+                "        inputFiles:",
+                "          sa.json: |",
+                "            { service account json key }",
+                "        warningOnStdErr: false",
+                "      - id: dbt-setup",
+                "        type: io.kestra.plugin.dbt.cli.Setup",
+                "        dockerOptions:",
+                "          image: python:3.9",
+                "        profiles:",
+                "          unit-kestra:",
+                "            outputs:",
+                "              dev:",
+                "                type: bigquery",
+                "                dataset: <<dataset>>",
+                "                fixed_retries: 1",
+                "                keyfile: sa.json",
+                "                location: US",
+                "                method: service-account",
+                "                priority: interactive",
+                "                project: <<project>>",
+                "                threads: 1",
+                "                timeout_seconds: 300",
+                "            target: dev",
+                "        requirements:",
+                "          - dbt-bigquery",
+                "        runner: DOCKER",
+                "      - id: dbt-build",
+                "        type: io.kestra.plugin.dbt.cli.Build",
+                "        dockerOptions:",
+                "          image: python:3.9",
+                "        runner: DOCKER"
+            }
+        )
+    }
+)
 public abstract class AbstractRun extends AbstractDbt {
     @Schema(
         title = "Specify number of threads to use while executing models."
