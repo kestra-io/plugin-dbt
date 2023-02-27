@@ -12,7 +12,9 @@ import io.micronaut.http.MutableHttpRequest;
 import io.micronaut.http.client.DefaultHttpClientConfiguration;
 import io.micronaut.http.client.HttpClient;
 import io.micronaut.http.client.exceptions.HttpClientResponseException;
+import io.micronaut.http.client.netty.DefaultHttpClient;
 import io.micronaut.http.client.netty.NettyHttpClientFactory;
+import io.micronaut.http.codec.MediaTypeCodecRegistry;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -47,8 +49,13 @@ public abstract class AbstractDbtCloud extends Task implements DynamicTask {
 
     private static final NettyHttpClientFactory FACTORY = new NettyHttpClientFactory();
 
-    protected HttpClient client() throws IllegalVariableEvaluationException, MalformedURLException, URISyntaxException {
-        return FACTORY.createClient(URI.create("https://cloud.getdbt.com").toURL(), new DefaultHttpClientConfiguration());
+    protected HttpClient client(RunContext runContext) throws IllegalVariableEvaluationException, MalformedURLException, URISyntaxException {
+        MediaTypeCodecRegistry mediaTypeCodecRegistry = runContext.getApplicationContext().getBean(MediaTypeCodecRegistry.class);
+
+        DefaultHttpClient client = (DefaultHttpClient) FACTORY.createClient(URI.create("https://cloud.getdbt.com").toURL(), new DefaultHttpClientConfiguration());
+        client.setMediaTypeCodecRegistry(mediaTypeCodecRegistry);
+
+        return client;
     }
 
     protected <REQ, RES> HttpResponse<RES> request(RunContext runContext, MutableHttpRequest<REQ> request, Argument<RES> argument) throws HttpClientResponseException {
@@ -57,7 +64,7 @@ public abstract class AbstractDbtCloud extends Task implements DynamicTask {
                 .bearerAuth(runContext.render(this.token))
                 .contentType(MediaType.APPLICATION_JSON);
 
-            try (HttpClient client = this.client()) {
+            try (HttpClient client = this.client(runContext)) {
                 return client.toBlocking().exchange(request, argument);
             }
         } catch (HttpClientResponseException e) {
