@@ -32,23 +32,52 @@ class DbtLogParser extends AbstractLogThread {
         try {
             Map<String, Object> jsonLog = (Map<String, Object>) MAPPER.readValue(line, Object.class);
 
-            HashMap<String, Object> additional = new HashMap<>(jsonLog);
-            additional.remove("ts");
-            additional.remove("pid");
+            String level;
+            String ts;
+            String thread;
+            String type;
+            String msg;
+            HashMap<String, Object> additional = new HashMap<>();
+
+            if (jsonLog.containsKey("info")) {
+                Map<String, Object> infoLog = (Map<String, Object>) jsonLog.get("info");
+
+                level = (String) infoLog.get("level");
+                ts = (String) infoLog.get("ts");
+                thread = (String) infoLog.get("thread");
+                type = (String) infoLog.get("name");
+                msg = (String) infoLog.get("msg");
+
+                additional.putAll(infoLog);
+            } else {
+                level = (String) jsonLog.get("level");
+                ts = (String) jsonLog.get("ts");
+                thread = (String) jsonLog.get("thread_name");
+                type = (String) jsonLog.get("type");
+                msg = (String) jsonLog.get("msg");
+            }
+
+            additional.remove("category");
+            additional.remove("code");
             additional.remove("invocation_id");
             additional.remove("level");
             additional.remove("log_version");
             additional.remove("code");
             additional.remove("msg");
+            additional.remove("thread");
             additional.remove("thread_name");
             additional.remove("type");
+            additional.remove("name");
+            additional.remove("ts");
+            additional.remove("pid");
+            additional.remove("extra");
 
             String format = "[Date: {}] [Thread: {}] [Type: {}] {}{}";
             String[] args = new String[]{
-                (String) jsonLog.get("ts"),
-                (String) jsonLog.get("thread_name"),
-                (String) jsonLog.get("type"),
-                jsonLog.get("msg") != null ? jsonLog.get("msg") + " " : "",
+                ts,
+                thread,
+                type,
+                msg != null ? msg + " " : "",
                 additional.size() > 0 ? additional.toString() : ""
             };
 
@@ -64,7 +93,7 @@ class DbtLogParser extends AbstractLogThread {
                 }
             }
 
-            switch ((String) jsonLog.get("level")) {
+            switch (level) {
                 case "debug":
                     logger.debug(format, (Object[]) args);
                     break;

@@ -51,7 +51,7 @@ public class Setup extends AbstractPython implements RunnableTask<ScriptOutput> 
             this.workingDirectory = runContext.tempDir();
         }
 
-        String command = this.virtualEnvCommand(runContext, runContext.render(this.getRequirements()));
+        String command = this.virtualEnvCommand(runContext, this.getRequirements() != null ? runContext.render(this.getRequirements()) : null);
 
         RunResult runResult = this.run(
             runContext,
