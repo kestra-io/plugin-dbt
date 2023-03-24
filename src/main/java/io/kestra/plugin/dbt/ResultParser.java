@@ -104,7 +104,6 @@ public abstract class ResultParser {
                         .state(state)
                         .attempts(java.util.List.of(TaskRunAttempt.builder()
                             .state(state)
-                            .metrics(metrics)
                             .build()
                         ))
                         .build()
