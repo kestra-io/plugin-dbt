@@ -28,7 +28,7 @@ public abstract class AbstractDbt extends AbstractBash implements RunnableTask<S
     @Schema(
         title = "Stop execution upon a first failure."
     )
-    @PluginProperty(dynamic = false)
+    @PluginProperty
     Boolean failFast = false;
 
     @Builder.Default
@@ -37,7 +37,7 @@ public abstract class AbstractDbt extends AbstractBash implements RunnableTask<S
         description = "Examples include --models that selects nothing, deprecations, configurations with no " +
             "associated models, invalid test configurations, and missing sources/refs in tests."
     )
-    @PluginProperty(dynamic = false)
+    @PluginProperty
     Boolean warnError = false;
 
     @Builder.Default
@@ -45,7 +45,7 @@ public abstract class AbstractDbt extends AbstractBash implements RunnableTask<S
         title = "Display debug logging during dbt execution.",
         description = "Useful for debugging and making bug reports."
     )
-    @PluginProperty(dynamic = false)
+    @PluginProperty
     Boolean debug = false;
 
     @Builder.Default
@@ -66,8 +66,8 @@ public abstract class AbstractDbt extends AbstractBash implements RunnableTask<S
         ScriptOutput run = run(runContext, throwSupplier(() -> {
             java.util.List<String> commands = new ArrayList<>(java.util.List.of(
                 runContext.render(dbtPath),
-                "--log-format=json",
-                "--profiles-dir=" + this.workingDirectory.resolve(".profile").toAbsolutePath()
+                "--log-format json",
+                "--profiles-dir " + this.workingDirectory.resolve(".profile").toAbsolutePath()
             ));
 
             if (this.debug) {
