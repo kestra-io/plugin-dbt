@@ -10,7 +10,6 @@ import lombok.*;
 import lombok.experimental.SuperBuilder;
 
 import java.util.ArrayList;
-import java.util.stream.Collectors;
 
 @SuperBuilder
 @ToString
@@ -75,7 +74,7 @@ public abstract class AbstractRun extends AbstractDbt {
     @Schema(
         title = "Specify number of threads to use while executing models."
     )
-    @PluginProperty(dynamic = false)
+    @PluginProperty
     Integer thread;
 
     @Builder.Default
@@ -83,7 +82,7 @@ public abstract class AbstractRun extends AbstractDbt {
         title = "If specified, dbt will drop incremental models and fully-recalculate the incremental table " +
             "from the model definition."
     )
-    @PluginProperty(dynamic = false)
+    @PluginProperty
     Boolean fullRefresh = false;
 
     @Schema(
@@ -117,7 +116,7 @@ public abstract class AbstractRun extends AbstractDbt {
         java.util.List<String> commands = new ArrayList<>(java.util.List.of(this.command()));
 
         if (this.thread != null) {
-            commands.add("--thread=" + this.thread);
+            commands.add("--thread " + this.thread);
         }
 
         if (this.fullRefresh) {
@@ -125,19 +124,19 @@ public abstract class AbstractRun extends AbstractDbt {
         }
 
         if (this.target != null) {
-            commands.add("--target=" + runContext.render(this.target));
+            commands.add("--target " + runContext.render(this.target));
         }
 
         if (this.selector != null) {
-            commands.add("--selector=" + runContext.render(this.selector));
+            commands.add("--selector " + runContext.render(this.selector));
         }
 
         if (this.select != null) {
-            commands.add("--select=" + String.join(" ", runContext.render(this.select)));
+            commands.add("--select " + String.join(" ", runContext.render(this.select)));
         }
 
         if (this.exclude != null) {
-            commands.add("--exclude=" + String.join(" ", runContext.render(this.exclude)));
+            commands.add("--exclude " + String.join(" ", runContext.render(this.exclude)));
         }
 
         return commands;
