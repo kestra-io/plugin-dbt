@@ -106,7 +106,8 @@ nexusPublishing {
 jar {
     manifest {
         attributes(
-                "X-Kestra-Title": project.name,
+                "X-Kestra-Name": project.name,
+                "X-Kestra-Title": "dbt",
                 "X-Kestra-Group": project.group + ".dbt",
                 "X-Kestra-Description": project.description,
                 "X-Kestra-Version": project.version
