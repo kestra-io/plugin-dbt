@@ -48,6 +48,13 @@ public abstract class AbstractDbt extends AbstractBash implements RunnableTask<S
     @PluginProperty
     Boolean debug = false;
 
+    @Schema(
+        title = "Which directory to look in for the dbt_project.yml file.",
+        description = "Default is the current working directory and its parents."
+    )
+    @PluginProperty
+    String projectDir;
+
     @Builder.Default
     @Schema(
         title = "The path to dbt cli"
@@ -70,9 +77,14 @@ public abstract class AbstractDbt extends AbstractBash implements RunnableTask<S
                 "--profiles-dir " + this.workingDirectory.resolve(".profile").toAbsolutePath()
             ));
 
+            if (this.projectDir != null) {
+                commands.add("--project-dir " + runContext.render(this.projectDir));
+            }
+
             if (this.debug) {
                 commands.add("--debug");
             }
+
 
             if (this.failFast) {
                 commands.add("--fail-fast");
