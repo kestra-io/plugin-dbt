@@ -118,7 +118,7 @@ public abstract class AbstractRun extends AbstractDbt {
             "--profiles-dir " + this.workingDirectory.resolve(".profile").toAbsolutePath()));
 
         if (this.thread != null) {
-            commands.add("--thread " + this.thread);
+            commands.add("--threads " + this.thread);
         }
 
         if (this.fullRefresh) {
