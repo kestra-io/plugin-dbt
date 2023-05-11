@@ -73,8 +73,7 @@ public abstract class AbstractDbt extends AbstractBash implements RunnableTask<S
         ScriptOutput run = run(runContext, throwSupplier(() -> {
             java.util.List<String> commands = new ArrayList<>(java.util.List.of(
                 runContext.render(dbtPath),
-                "--log-format json",
-                "--profiles-dir " + this.workingDirectory.resolve(".profile").toAbsolutePath()
+                "--log-format json"
             ));
 
             if (this.projectDir != null) {
