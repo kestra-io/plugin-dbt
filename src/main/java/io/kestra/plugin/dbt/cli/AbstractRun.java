@@ -113,10 +113,12 @@ public abstract class AbstractRun extends AbstractDbt {
 
     @Override
     protected java.util.List<String> commands(RunContext runContext) throws IllegalVariableEvaluationException {
-        java.util.List<String> commands = new ArrayList<>(java.util.List.of(this.command()));
+        java.util.List<String> commands = new ArrayList<>(java.util.List.of(
+            this.command(),
+            "--profiles-dir " + this.workingDirectory.resolve(".profile").toAbsolutePath()));
 
         if (this.thread != null) {
-            commands.add("--thread " + this.thread);
+            commands.add("--threads " + this.thread);
         }
 
         if (this.fullRefresh) {
