@@ -2,7 +2,6 @@ package io.kestra.plugin.dbt.cli;
 
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.PluginProperty;
-import io.kestra.core.models.tasks.DynamicTask;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.tasks.scripts.AbstractBash;
@@ -23,7 +22,7 @@ import static io.kestra.core.utils.Rethrow.throwSupplier;
 @EqualsAndHashCode
 @Getter
 @NoArgsConstructor
-public abstract class AbstractDbt extends AbstractBash implements RunnableTask<ScriptOutput>, DynamicTask {
+public abstract class AbstractDbt extends AbstractBash implements RunnableTask<ScriptOutput> {
     @Builder.Default
     @Schema(
         title = "Stop execution upon a first failure."
