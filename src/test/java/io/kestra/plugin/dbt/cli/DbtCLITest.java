@@ -10,6 +10,7 @@ import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,7 +25,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 
 @MicronautTest
-class CommandsTest {
+class DbtCLITest {
     @Inject
     private RunContextFactory runContextFactory;
 
@@ -41,40 +42,48 @@ class CommandsTest {
 
     @Test
     void run() throws Exception {
-        Commands execute = Commands.builder()
+        DbtCLI execute = DbtCLI.builder()
             .id(IdUtils.create())
-            .type(Commands.class.getName())
-            .profiles(Map.of(
-                "unit-kestra", Map.of(
-                    "outputs", Map.of(
-                            "dev", Map.of("dataset", "kestra_unit_test_us",
-                            "fixed_retries", "1",
-                            "location", "US",
-                            "method", "oauth",
-                            "priority", "interactive",
-                            "project", "kestra-unit-test",
-                            "threads", "1",
-                            "timeout_seconds", "300",
-                            "type", "bigquery"
-                        )
-                    ),
-                    "target", "dev"
-                )))
+            .type(DbtCLI.class.getName())
+            .profiles("""
+                    unit-kestra:
+                      outputs:
+                        dev:
+                          dataset: kestra_unit_test_us
+                          fixed_retries: 1
+                          location: US
+                          method: service-account
+                          priority: interactive
+                          project: kestra-unit-test
+                          threads: 1
+                          timeout_seconds: 300
+                          type: bigquery
+                          keyfile: sa.json
+                      target: dev
+                    """
+            )
             .docker(DockerOptions.builder()
                 .image("ghcr.io/dbt-labs/dbt-bigquery")
                 .entryPoint(List.of())
-                .volumes(List.of())
                 .build()
             )
-            .commands(List.of("dbt build --profiles-dir {{ profileDir }}"))
+            .commands(List.of("dbt build"))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
 
-        copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), runContext.tempDir(true));
+        Path workingDir = runContext.tempDir(true);
+        copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), workingDir);
+        createSaFile(workingDir);
 
         ScriptOutput runOutput = execute.run(runContext);
 
         assertThat(runOutput.getExitCode(), is(0));
+    }
+
+    private void createSaFile(Path workingDir) throws IOException {
+        Path existingSa = Path.of(System.getenv("GOOGLE_APPLICATION_CREDENTIALS"));
+        Path workingDirSa = workingDir.resolve("sa.json");
+        Files.copy(existingSa, workingDirSa);
     }
 }
