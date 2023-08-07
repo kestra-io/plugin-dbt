@@ -20,4 +20,9 @@ public class List extends AbstractRun {
     protected String command() {
         return "list";
     }
+
+    @Override
+    protected void parseResults(RunContext runContext) {
+        // 'dbt list' didn't return any result files.
+    }
 }

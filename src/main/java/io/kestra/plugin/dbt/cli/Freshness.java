@@ -19,5 +19,9 @@ public class Freshness extends AbstractRun {
     @Override
     protected String command() {
         return "freshness";
+
+    @Override
+    protected void parseResults(RunContext runContext) {
+        // 'dbt source freshness' didn't return any result files.
     }
 }

@@ -97,10 +97,14 @@ public abstract class AbstractDbt extends AbstractBash implements RunnableTask<S
             return String.join(" ", commands);
         }));
 
-        ResultParser.parseRunResult(runContext, this.workingDirectory.resolve("target/run_results.json").toFile());
-        ResultParser.parseManifest(runContext, this.workingDirectory.resolve("target/manifest.json").toFile());
+        parseResults(runContext);
 
         return run;
+    }
+
+    protected void parseResults(RunContext runContext) throws IllegalVariableEvaluationException, IOException {
+        ResultParser.parseRunResult(runContext, this.workingDirectory.resolve("target/run_results.json").toFile());
+        ResultParser.parseManifest(runContext, this.workingDirectory.resolve("target/manifest.json").toFile());
     }
 
     @Override

@@ -20,4 +20,9 @@ public class Deps extends AbstractRun {
     protected String command() {
         return "deps";
     }
+
+    @Override
+    protected void parseResults(RunContext runContext) {
+        // 'dbt deps' didn't return any result files.
+    }
 }
