@@ -13,12 +13,13 @@ import lombok.experimental.SuperBuilder;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Invoke dbt `freshness` command"
+    title = "Invoke dbt `source freshness` command"
 )
 public class Freshness extends AbstractRun {
     @Override
     protected String command() {
-        return "freshness";
+        return "source freshness";
+    }
 
     @Override
     protected void parseResults(RunContext runContext) {
