@@ -3,7 +3,6 @@ package io.kestra.plugin.dbt;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
-import io.kestra.core.models.executions.AbstractMetricEntry;
 import io.kestra.core.models.executions.TaskRun;
 import io.kestra.core.models.executions.TaskRunAttempt;
 import io.kestra.core.models.executions.metrics.Counter;
@@ -12,11 +11,11 @@ import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.WorkerTaskResult;
 import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.utils.IdUtils;
-import io.kestra.plugin.dbt.models.Manifest;
 import io.kestra.plugin.dbt.models.RunResult;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.URI;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -27,14 +26,11 @@ public abstract class ResultParser {
     static final protected ObjectMapper MAPPER = JacksonMapper.ofJson(false)
         .setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
-    public static Manifest parseManifest(RunContext runContext, File file) throws IOException {
-        return MAPPER.readValue(
-            file,
-            Manifest.class
-        );
+    public static URI parseManifest(RunContext runContext, File file) throws IOException {
+        return runContext.putTempFile(file);
     }
 
-    public static RunResult parseRunResult(RunContext runContext, File file) throws IOException, IllegalVariableEvaluationException {
+    public static URI parseRunResult(RunContext runContext, File file) throws IOException, IllegalVariableEvaluationException {
         RunResult result = MAPPER.readValue(
             file,
             RunResult.class
@@ -75,22 +71,18 @@ public abstract class ResultParser {
                     )
                 );
 
-                java.util.List<AbstractMetricEntry<?>> metrics = r.getAdapterResponse()
+                r.getAdapterResponse()
                     .entrySet()
                     .stream()
                     .map(e -> {
-                        switch (e.getKey()) {
-                            case "rows_affected":
-                                return Counter.of("rows.affected", Double.valueOf(e.getValue()));
-                            case "bytes_processed":
-                                return Counter.of("bytes.processed", Double.valueOf(e.getValue()));
-                        }
-
-                        return null;
+                        return switch (e.getKey()) {
+                            case "rows_affected" -> Counter.of("rows.affected", Double.valueOf(e.getValue()));
+                            case "bytes_processed" -> Counter.of("bytes.processed", Double.valueOf(e.getValue()));
+                            default -> null;
+                        };
                     })
                     .filter(Objects::nonNull)
-                    .peek(runContext::metric)
-                    .collect(Collectors.toList());
+                    .forEach(runContext::metric);
 
                 return WorkerTaskResult.builder()
                     .taskRun(TaskRun.builder()
@@ -114,6 +106,6 @@ public abstract class ResultParser {
 
         runContext.dynamicWorkerResult(workerTaskResults);
 
-        return result;
+        return runContext.putTempFile(file);
     }
 }
