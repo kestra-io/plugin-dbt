@@ -21,6 +21,7 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
 import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @MicronautTest
 class BuildTest {
@@ -75,5 +76,7 @@ class BuildTest {
         ScriptOutput runOutput = task.run(runContext);
 
         assertThat(runOutput.getExitCode(), is(0));
+        assertTrue(runOutput.getOutputFiles().containsKey("run_results.json"));
+        assertTrue(runOutput.getOutputFiles().containsKey("manifest.json"));
     }
 }
