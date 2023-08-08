@@ -3,6 +3,7 @@ package io.kestra.plugin.dbt.cli;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.runners.RunContext;
+import io.kestra.core.tasks.scripts.ScriptOutput;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -69,7 +70,7 @@ public class Deps extends AbstractRun {
     }
 
     @Override
-    protected void parseResults(RunContext runContext) {
+    protected void parseResults(RunContext runContext, ScriptOutput scriptOutput) {
         // 'dbt deps' didn't return any result files.
     }
 }

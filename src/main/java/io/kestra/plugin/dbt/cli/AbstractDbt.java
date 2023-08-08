@@ -14,6 +14,7 @@ import lombok.experimental.SuperBuilder;
 import org.slf4j.Logger;
 
 import java.io.IOException;
+import java.net.URI;
 import java.util.ArrayList;
 
 import static io.kestra.core.utils.Rethrow.throwSupplier;
@@ -98,14 +99,16 @@ public abstract class AbstractDbt extends AbstractBash implements RunnableTask<S
             return String.join(" ", commands);
         }));
 
-        parseResults(runContext);
+        parseResults(runContext, run);
 
         return run;
     }
 
-    protected void parseResults(RunContext runContext) throws IllegalVariableEvaluationException, IOException {
-        ResultParser.parseRunResult(runContext, this.workingDirectory.resolve("target/run_results.json").toFile());
-        ResultParser.parseManifest(runContext, this.workingDirectory.resolve("target/manifest.json").toFile());
+    protected void parseResults(RunContext runContext, ScriptOutput scriptOutput) throws IllegalVariableEvaluationException, IOException {
+        URI results = ResultParser.parseRunResult(runContext, this.workingDirectory.resolve("target/run_results.json").toFile());
+        scriptOutput.getOutputFiles().put("run_results.json", results);
+        URI manifest = ResultParser.parseManifest(runContext, this.workingDirectory.resolve("target/manifest.json").toFile());
+        scriptOutput.getOutputFiles().put("manifest.json", manifest);
     }
 
     @Override
