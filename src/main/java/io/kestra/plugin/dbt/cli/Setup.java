@@ -1,6 +1,8 @@
 package io.kestra.plugin.dbt.cli;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.kestra.core.models.annotations.Example;
+import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
@@ -30,7 +32,33 @@ import javax.validation.constraints.NotNull;
 @NoArgsConstructor
 @Schema(
     title = "Setup dbt",
-    description = "Install pip package & init profile directory"
+    description = "Install pip dependencies and initialize the profile directory"
+)
+@Plugin(
+    examples = {
+        @Example(
+            full = true,
+            title = "Setup dbt by installing pip dependencies and initializing the profile directory",
+            code = """
+                namespace: io.kestra.tests
+                id: dbt-build
+                tasks:
+                  - id: working-directory
+                    type: io.kestra.core.tasks.flows.WorkingDirectory
+                    tasks:
+                    - id: cloneRepository
+                      type: io.kestra.plugin.git.Clone
+                      url: https://github.com/dbt-labs/jaffle_shop
+                      branch: main
+                      - id: dbt-build
+                        type: io.kestra.plugin.dbt.cli.Setup
+                        runner: DOCKER
+                        dbtPath: /usr/local/bin/dbt
+                        dockerOptions:
+                          image: ghcr.io/kestra-io/dbt-bigquery:latest
+                """
+        )
+    }
 )
 public class Setup extends AbstractPython implements RunnableTask<ScriptOutput> {
     static final private ObjectMapper MAPPER = JacksonMapper.ofYaml();

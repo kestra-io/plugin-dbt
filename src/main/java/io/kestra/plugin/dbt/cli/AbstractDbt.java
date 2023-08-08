@@ -13,6 +13,7 @@ import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.slf4j.Logger;
 
+import java.io.IOException;
 import java.util.ArrayList;
 
 import static io.kestra.core.utils.Rethrow.throwSupplier;
@@ -25,14 +26,14 @@ import static io.kestra.core.utils.Rethrow.throwSupplier;
 public abstract class AbstractDbt extends AbstractBash implements RunnableTask<ScriptOutput> {
     @Builder.Default
     @Schema(
-        title = "Stop execution upon a first failure."
+        title = "Stop execution at the first failure."
     )
     @PluginProperty
     Boolean failFast = false;
 
     @Builder.Default
     @Schema(
-        title = "If dbt would normally warn, instead raise an exception.",
+        title = "When dbt would normally warn, raise an exception.",
         description = "Examples include --models that selects nothing, deprecations, configurations with no " +
             "associated models, invalid test configurations, and missing sources/refs in tests."
     )
@@ -56,7 +57,7 @@ public abstract class AbstractDbt extends AbstractBash implements RunnableTask<S
 
     @Builder.Default
     @Schema(
-        title = "The path to dbt cli"
+        title = "The path to the dbt CLI"
     )
     @PluginProperty(dynamic = true)
     String dbtPath = "./bin/dbt";
