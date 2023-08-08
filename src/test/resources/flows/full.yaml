@@ -14,6 +14,7 @@ tasks:
         - 'cp -R {{ inputs.path }}* {{workingDir}}'
     - id: setup
       type: io.kestra.plugin.dbt.cli.Setup
+      warningOnStdErr: false
       profiles:
         unit-kestra:
           outputs:
