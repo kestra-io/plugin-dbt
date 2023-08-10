@@ -279,8 +279,8 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
         return Output.builder()
             .runId(runId)
-            .runResults(runContext.putTempFile(runResultsArtifact.toFile()))
-            .manifest(runContext.putTempFile(manifestArtifact.toFile()))
+            .runResults(runResultsArtifact.toFile().exists() ? runContext.putTempFile(runResultsArtifact.toFile()) : null)
+            .manifest(manifestArtifact.toFile().exists() ? runContext.putTempFile(manifestArtifact.toFile()) : null)
             .build();
     }
 
