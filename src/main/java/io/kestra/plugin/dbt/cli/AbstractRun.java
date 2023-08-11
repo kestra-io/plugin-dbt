@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 
 @SuperBuilder
@@ -53,13 +54,13 @@ public abstract class AbstractRun extends AbstractDbt {
     @PluginProperty(dynamic = true)
     java.util.List<String> exclude;
 
-    abstract protected String command();
+    abstract protected String dbtCommand();
 
     @Override
-    protected java.util.List<String> commands(RunContext runContext) throws IllegalVariableEvaluationException {
+    protected java.util.List<String> dbtCommands(RunContext runContext, Path workingDirectory) throws IllegalVariableEvaluationException {
         java.util.List<String> commands = new ArrayList<>(java.util.List.of(
-            this.command(),
-            "--profiles-dir " + this.workingDirectory.resolve(".profile").toAbsolutePath()));
+            this.dbtCommand(),
+            "--profiles-dir " + workingDirectory.resolve(".profile").toAbsolutePath()));
 
         if (this.thread != null) {
             commands.add("--threads " + this.thread);
