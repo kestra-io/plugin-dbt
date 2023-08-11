@@ -55,12 +55,12 @@ import javax.validation.constraints.NotNull;
                     tasks:
                     - id: cloneRepository
                       type: io.kestra.plugin.git.Clone
-                      url: https://github.com/dbt-labs/jaffle_shop
+                      url: https://github.com/kestra-io/dbt-demo
                       branch: main
                     - id: localFiles
                       type: io.kestra.core.tasks.storages.LocalFiles
                       inputs:
-                        sa.json: "{{ secret(GCP_CREDS) }}"
+                        sa.json: "{{ secret('GCP_CREDS') }}"
                     - id: dbt-build
                       type: io.kestra.plugin.dbt.cli.DbtCLI
                       runner: DOCKER
@@ -77,7 +77,7 @@ import javax.validation.constraints.NotNull;
                               location: EU
                               method: service-account
                               priority: interactive
-                              project: methodical-mesh-238712
+                              project: yourBigQueryProject
                               threads: 8
                               timeout_seconds: 300
                           target: dev

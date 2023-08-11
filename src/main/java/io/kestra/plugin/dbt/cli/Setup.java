@@ -48,7 +48,7 @@ import javax.validation.constraints.NotNull;
                     tasks:
                     - id: cloneRepository
                       type: io.kestra.plugin.git.Clone
-                      url: https://github.com/dbt-labs/jaffle_shop
+                      url: https://github.com/kestra-io/dbt-demo
                       branch: main
                       - id: dbt-build
                         type: io.kestra.plugin.dbt.cli.Setup

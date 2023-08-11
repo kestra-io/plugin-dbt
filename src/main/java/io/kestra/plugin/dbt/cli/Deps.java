@@ -34,7 +34,7 @@ import lombok.experimental.SuperBuilder;
                     tasks:
                     - id: cloneRepository
                       type: io.kestra.plugin.git.Clone
-                      url: https://github.com/dbt-labs/jaffle_shop
+                      url: https://github.com/kestra-io/dbt-demo
                       branch: main
                       - id: dbt-deps
                         type: io.kestra.plugin.dbt.cli.Deps
