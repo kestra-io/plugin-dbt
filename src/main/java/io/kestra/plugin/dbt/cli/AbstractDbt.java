@@ -218,9 +218,18 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     }
 
     protected void parseResults(RunContext runContext, Path workingDirectory, ScriptOutput scriptOutput) throws IllegalVariableEvaluationException, IOException {
-        URI results = ResultParser.parseRunResult(runContext, workingDirectory.resolve("target/run_results.json").toFile());
-        scriptOutput.getOutputFiles().put("run_results.json", results);
-        URI manifest = ResultParser.parseManifest(runContext, workingDirectory.resolve("target/manifest.json").toFile());
-        scriptOutput.getOutputFiles().put("manifest.json", manifest);
+        File runResults = workingDirectory.resolve("target/run_results.json").toFile();
+
+        if (runResults.exists()) {
+            URI results = ResultParser.parseRunResult(runContext, runResults);
+            scriptOutput.getOutputFiles().put("run_results.json", results);
+        }
+
+        File manifestFile = workingDirectory.resolve("target/manifest.json").toFile();
+
+        if (manifestFile.exists()) {
+            URI manifest = ResultParser.parseManifest(runContext, manifestFile);
+            scriptOutput.getOutputFiles().put("manifest.json", manifest);
+        }
     }
 }

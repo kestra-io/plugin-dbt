@@ -110,7 +110,7 @@ public class DbtCLI extends AbstractExecScript {
     @PluginProperty
     @Builder.Default
     private DockerOptions docker = DockerOptions.builder()
-            .image("ghcr.io/dbt-labs/dbt-core")
+            .image("ghcr.io/kestra-io/dbt")
             .entryPoint(List.of())
             .build();
 
