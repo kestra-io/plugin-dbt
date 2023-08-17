@@ -5,10 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kestra.core.models.executions.metrics.Counter;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
-import io.kestra.core.tasks.scripts.AbstractLogThread;
-import org.slf4j.Logger;
 
-import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -67,7 +64,7 @@ class LogService {
                 thread,
                 type,
                 msg != null ? msg + " " : "",
-                additional.size() > 0 ? additional.toString() : ""
+                !additional.isEmpty() ? additional.toString() : ""
             };
 
             if (jsonLog.containsKey("data")) {

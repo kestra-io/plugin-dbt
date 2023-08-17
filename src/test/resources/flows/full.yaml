@@ -6,12 +6,8 @@ inputs:
 
 tasks:
 - id: worker
-  type: io.kestra.core.tasks.flows.Worker
+  type: io.kestra.core.tasks.flows.WorkingDirectory
   tasks:
-    - id: clone
-      type: io.kestra.core.tasks.scripts.Bash
-      commands:
-        - 'cp -R {{ inputs.path }}* {{workingDir}}'
     - id: setup
       type: io.kestra.plugin.dbt.cli.Setup
       warningOnStdErr: false
@@ -37,6 +33,7 @@ tasks:
     - id: run
       type: io.kestra.plugin.dbt.cli.Build
       thread: 16
+      projectDir: "{{ inputs.path }}"
       # runner: DOCKER
       # dockerOptions:
       #   image: python:3.9

@@ -33,36 +33,36 @@ import lombok.experimental.SuperBuilder;
                       type: io.kestra.plugin.git.Clone
                       url: https://github.com/kestra-io/dbt-demo
                       branch: main
-                      - id: dbt-compile
-                        type: io.kestra.plugin.dbt.cli.Compile
-                        runner: DOCKER
-                        dbtPath: /usr/local/bin/dbt
-                        dockerOptions:
-                          image: ghcr.io/kestra-io/dbt-bigquery:latest
-                        inputFiles:
-                          .profile/profiles.yml: |
-                            jaffle_shop:
-                              outputs:
-                                dev:
-                                  type: bigquery
-                                  dataset: dwh
-                                  fixed_retries: 1
-                                  keyfile: sa.json
-                                  location: EU
-                                  method: service-account
-                                  priority: interactive
-                                  project: my-project
-                                  threads: 8
-                                  timeout_seconds: 300
-                              target: dev
-                          sa.json: "{{ secret('GCP_CREDS') }}"
+                    - id: dbt-compile
+                      type: io.kestra.plugin.dbt.cli.Compile
+                       runner: DOCKER
+                      dbtPath: /usr/local/bin/dbt
+                      docker:
+                        image: ghcr.io/kestra-io/dbt-bigquery:latest
+                      profiles: |
+                        jaffle_shop:
+                          outputs:
+                            dev:
+                              type: bigquery
+                              dataset: dwh
+                              fixed_retries: 1
+                              keyfile: sa.json
+                              location: EU
+                              method: service-account
+                              priority: interactive
+                              project: my-project
+                              threads: 8
+                              timeout_seconds: 300
+                          target: dev
+                      inputFiles:
+                        sa.json: "{{ secret('GCP_CREDS') }}"
                 """
         )
     }
 )
 public class Compile extends AbstractRun {
     @Override
-    protected String command() {
+    protected String dbtCommand() {
         return "compile";
     }
 }
