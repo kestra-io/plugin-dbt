@@ -1,0 +1,64 @@
+name: Container Image Packages
+
+on:
+  push:
+    paths:
+      - dockerfiles/*
+    branches:
+      - master
+
+jobs:
+  changes:
+    name: Dockerfile changes
+    runs-on: ubuntu-latest
+    outputs:
+      dockerfiles: ${{ steps.filter.outputs.dockerfiles_files }}
+      dockerfiles_changed: ${{ steps.filter.outputs.dockerfiles }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          list-files: json
+          filters: |
+            dockerfiles:
+              - added|modified: 'dockerfiles/*.Dockerfile'
+      - name: Generate Markdown Summary
+        run: | 
+          echo New/modified Dockerfiles: ${{ steps.filter.outputs.dockerfiles_files }} >> $GITHUB_STEP_SUMMARY
+
+  ghcr:
+    needs: [changes]
+    if: ${{ needs.changes.outputs.dockerfiles_changed == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix: 
+        image: ${{ fromJson(needs.changes.outputs.dockerfiles) }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@v3
+
+      - name: GHCR Login
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - id: image-tag  # example output: "ghcr.io/kestra-io/pydata:latest"
+        run: |
+          export IMAGE=$(basename ${{ matrix.image }} .Dockerfile)
+          echo "image_url=ghcr.io/kestra-io/$IMAGE:latest" >> $GITHUB_OUTPUT
+          echo "file=${{ matrix.image }}" >> $GITHUB_OUTPUT
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.image-tag.outputs.image_url }}
+          file: ${{ steps.image-tag.outputs.file }}
