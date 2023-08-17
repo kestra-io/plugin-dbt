@@ -196,10 +196,6 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             "--log-format json"
         ));
 
-        if (this.projectDir != null) {
-            commands.add("--project-dir " + runContext.render(this.projectDir));
-        }
-
         if (this.debug) {
             commands.add("--debug");
         }
@@ -214,18 +210,24 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
 
         commands.addAll(dbtCommands(runContext, workingDirectory));
 
+        if (this.projectDir != null) {
+            commands.add("--project-dir " + runContext.render(this.projectDir));
+        }
+
         return String.join(" ", commands);
     }
 
     protected void parseResults(RunContext runContext, Path workingDirectory, ScriptOutput scriptOutput) throws IllegalVariableEvaluationException, IOException {
-        File runResults = workingDirectory.resolve("target/run_results.json").toFile();
+        String baseDir = this.projectDir != null ? runContext.render(this.projectDir) : "";
+
+        File runResults = workingDirectory.resolve(baseDir + "target/run_results.json").toFile();
 
         if (runResults.exists()) {
             URI results = ResultParser.parseRunResult(runContext, runResults);
             scriptOutput.getOutputFiles().put("run_results.json", results);
         }
 
-        File manifestFile = workingDirectory.resolve("target/manifest.json").toFile();
+        File manifestFile = workingDirectory.resolve(baseDir + "target/manifest.json").toFile();
 
         if (manifestFile.exists()) {
             URI manifest = ResultParser.parseManifest(runContext, manifestFile);
