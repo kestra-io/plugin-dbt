@@ -9,7 +9,7 @@ import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
-import io.kestra.core.tasks.scripts.BashService;
+import io.kestra.core.tasks.PluginUtilsService;
 import io.kestra.plugin.scripts.exec.AbstractExecScript;
 import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.RunnerType;
@@ -194,7 +194,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
             StandardCharsets.UTF_8
         );
 
-        BashService.createInputFiles(
+        PluginUtilsService.createInputFiles(
             runContext,
             workingDirectory,
             this.finalInputFiles(runContext),
@@ -241,6 +241,6 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     }
 
     private Map<String, String> finalInputFiles(RunContext runContext) throws IOException, IllegalVariableEvaluationException {
-        return this.inputFiles != null ? new HashMap<>(BashService.transformInputFiles(runContext, this.inputFiles)) : new HashMap<>();
+        return this.inputFiles != null ? new HashMap<>(PluginUtilsService.transformInputFiles(runContext, this.inputFiles)) : new HashMap<>();
     }
 }

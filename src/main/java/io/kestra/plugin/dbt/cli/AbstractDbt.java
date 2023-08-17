@@ -5,7 +5,7 @@ import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.runners.RunContext;
-import io.kestra.core.tasks.scripts.BashService;
+import io.kestra.core.tasks.PluginUtilsService;
 import io.kestra.plugin.dbt.ResultParser;
 import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.RunnerType;
@@ -163,7 +163,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             );
         }
 
-        BashService.createInputFiles(
+        PluginUtilsService.createInputFiles(
             runContext,
             workingDirectory,
             this.finalInputFiles(runContext),
@@ -187,7 +187,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     }
 
     private Map<String, String> finalInputFiles(RunContext runContext) throws IOException, IllegalVariableEvaluationException {
-        return this.inputFiles != null ? new HashMap<>(BashService.transformInputFiles(runContext, this.inputFiles)) : new HashMap<>();
+        return this.inputFiles != null ? new HashMap<>(PluginUtilsService.transformInputFiles(runContext, this.inputFiles)) : new HashMap<>();
     }
 
     private String createDbtCommand(RunContext runContext, Path workingDirectory) throws IllegalVariableEvaluationException {
