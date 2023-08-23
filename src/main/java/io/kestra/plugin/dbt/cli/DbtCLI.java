@@ -105,6 +105,13 @@ public class DbtCLI extends AbstractExecScript {
     private String profiles;
 
     @Schema(
+        title = "The dbt project directory, if it's not the working directory",
+        description = "To use it, also use this directory in the `--project-dir` flag on the dbt CLI commands."
+    )
+    @PluginProperty(dynamic = true)
+    private String projectDir;
+
+    @Schema(
         title = "Docker options for the `DOCKER` runner"
     )
     @PluginProperty
@@ -124,13 +131,15 @@ public class DbtCLI extends AbstractExecScript {
                 }
             });
 
+        Path workingDirectory = projectDir == null ? commands.getWorkingDirectory() : commands.getWorkingDirectory().resolve(projectDir);
+
         if (profiles != null && !profiles.isEmpty()) {
-            if (Files.exists(Path.of("profiles.yml"))) {
+            if (Files.exists(workingDirectory.resolve("profiles.yml"))) {
                 throw new IllegalArgumentException("Cannot use the profiles property if there is already a 'profiles.yml' file");
             }
 
             FileUtils.writeStringToFile(
-                new File(commands.getWorkingDirectory().toString(), "profiles.yml"),
+                new File(workingDirectory.toString(), "profiles.yml"),
                 runContext.render(profiles),
                 StandardCharsets.UTF_8
             );
@@ -147,13 +156,13 @@ public class DbtCLI extends AbstractExecScript {
             .withCommands(commandsArgs)
             .run();
 
-        if (commands.getWorkingDirectory().resolve("target/run_results.json").toFile().exists()) {
-            URI results = ResultParser.parseRunResult(runContext, commands.getWorkingDirectory().resolve("target/run_results.json").toFile());
+        if (workingDirectory.resolve("target/run_results.json").toFile().exists()) {
+            URI results = ResultParser.parseRunResult(runContext, workingDirectory.resolve("target/run_results.json").toFile());
             run.getOutputFiles().put("run_results.json", results);
         }
 
-        if (commands.getWorkingDirectory().resolve("target/manifest.json").toFile().exists()) {
-            URI manifest = ResultParser.parseManifest(runContext, commands.getWorkingDirectory().resolve("target/manifest.json").toFile());
+        if (workingDirectory.resolve("target/manifest.json").toFile().exists()) {
+            URI manifest = ResultParser.parseManifest(runContext, workingDirectory.resolve("target/manifest.json").toFile());
             run.getOutputFiles().put("manifest.json", manifest);
         }
 
