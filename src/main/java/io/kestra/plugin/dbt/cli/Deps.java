@@ -29,7 +29,7 @@ import java.nio.file.Path;
             title = "Invoke dbt `deps` command",
             code = """
                 namespace: io.kestra.tests
-                id: dbt-build
+                id: dbt-deps
                 tasks:
                   - id: working-directory
                     type: io.kestra.core.tasks.flows.WorkingDirectory
@@ -39,28 +39,20 @@ import java.nio.file.Path;
                       url: https://github.com/kestra-io/dbt-demo
                       branch: main
                     - id: dbt-deps
-                      type: io.kestra.plugin.dbt.cli.Deps
+                      type: io.kestra.plugin.dbt.cli.Debs
                       runner: DOCKER
                       dbtPath: /usr/local/bin/dbt
-                       docker:
-                        image: ghcr.io/kestra-io/dbt-bigquery:latest
+                      docker:
+                        image: ghcr.io/kestra-io/dbt-duckdb
                       profiles: |
                         jaffle_shop:
                           outputs:
                             dev:
-                              type: bigquery
-                              dataset: dwh
-                              fixed_retries: 1
-                              keyfile: sa.json
-                              location: EU
-                              method: service-account
-                              priority: interactive
-                              project: my-project
-                              threads: 8
-                              timeout_seconds: 300
+                              type: duckdb
+                              path: ':memory:'
+                              extensions:
+                                - parquet
                           target: dev
-                      inputFiles:
-                        sa.json: "{{ secret('GCP_CREDS') }}"
                 """
         )
     }

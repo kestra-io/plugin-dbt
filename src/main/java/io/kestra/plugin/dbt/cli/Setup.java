@@ -68,26 +68,18 @@ import javax.validation.constraints.NotNull;
                     - id: dbt-setup
                       type: io.kestra.plugin.dbt.cli.Setup
                       requirements:
-                        - dbt-bigquery
+                        - dbt-duckdb
                       profiles:
                         jaffle_shop:
                           outputs:
                             dev:
-                              type: bigquery
-                              dataset: dwh
-                              fixed_retries: 1
-                              keyfile: sa.json
-                              location: EU
-                              method: service-account
-                              priority: interactive
-                              project: my-project
-                              threads: 8
-                              timeout_seconds: 300
+                              type: duckdb
+                              path: ':memory:'
+                              extensions:
+                                - parquet
                           target: dev
                     - id: dbt-build
                       type: io.kestra.plugin.dbt.cli.Build
-                      inputFiles:
-                        sa.json: "{{ secret('GCP_CREDS') }}"
                 """
         )
     }
