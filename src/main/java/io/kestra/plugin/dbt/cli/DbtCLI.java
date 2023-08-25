@@ -48,7 +48,7 @@ import javax.validation.constraints.NotNull;
             code = """
                 id: dbtCli
                 namespace: dev
-                 
+                
                 tasks:
                   - id: dbt
                     type: io.kestra.core.tasks.flows.WorkingDirectory
@@ -57,30 +57,11 @@ import javax.validation.constraints.NotNull;
                       type: io.kestra.plugin.git.Clone
                       url: https://github.com/kestra-io/dbt-demo
                       branch: main
-                    - id: localFiles
-                      type: io.kestra.core.tasks.storages.LocalFiles
-                      inputs:
-                        sa.json: "{{ secret('GCP_CREDS') }}"
                     - id: dbt-build
                       type: io.kestra.plugin.dbt.cli.DbtCLI
                       runner: DOCKER
                       docker:
-                        image: ghcr.io/kestra-io/dbt-bigquery
-                      profiles: |
-                        jaffle_shop:
-                          outputs:
-                            dev:
-                              type: bigquery
-                              dataset: dwh
-                              fixed_retries: 1
-                              keyfile: sa.json
-                              location: EU
-                              method: service-account
-                              priority: interactive
-                              project: yourBigQueryProject
-                              threads: 8
-                              timeout_seconds: 300
-                          target: dev
+                        image: ghcr.io/kestra-io/dbt-duckdb
                       commands:
                         - dbt build"""
         )

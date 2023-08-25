@@ -38,24 +38,16 @@ import lombok.experimental.SuperBuilder;
                       runner: DOCKER
                       dbtPath: /usr/local/bin/dbt
                       docker:
-                        image: ghcr.io/kestra-io/dbt-bigquery:latest
+                        image: ghcr.io/kestra-io/dbt-duckdb
                       profiles: |
                         jaffle_shop:
                           outputs:
                             dev:
-                              type: bigquery
-                              dataset: dwh
-                              fixed_retries: 1
-                              keyfile: sa.json
-                              location: EU
-                              method: service-account
-                              priority: interactive
-                              project: my-project
-                              threads: 8
-                              timeout_seconds: 300
+                              type: duckdb
+                              path: ':memory:'
+                              extensions:
+                                - parquet
                           target: dev
-                      inputFiles:
-                        sa.json: "{{ secret('GCP_CREDS') }}"
                 """
         )
     }

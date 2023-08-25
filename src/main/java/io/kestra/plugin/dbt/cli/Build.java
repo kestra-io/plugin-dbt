@@ -23,39 +23,31 @@ import lombok.experimental.SuperBuilder;
             full = true,
             title = "Invoke dbt `build` command",
             code = """
-                namespace: io.kestra.tests
-                id: dbt-build
-                tasks:
-                  - id: working-directory
-                    type: io.kestra.core.tasks.flows.WorkingDirectory
-                    tasks:
-                    - id: cloneRepository
-                      type: io.kestra.plugin.git.Clone
-                      url: https://github.com/kestra-io/dbt-demo
-                      branch: main
-                    - id: dbt-build
-                      type: io.kestra.plugin.dbt.cli.Build
-                      runner: DOCKER
-                      dbtPath: /usr/local/bin/dbt
-                      docker:
-                        image: ghcr.io/kestra-io/dbt-bigquery:latest
-                      profiles: |
-                        jaffle_shop:
-                          outputs:
-                            dev:
-                              type: bigquery
-                              dataset: dwh
-                              fixed_retries: 1
-                              keyfile: sa.json
-                              location: EU
-                              method: service-account
-                              priority: interactive
-                              project: my-project
-                              threads: 8
-                              timeout_seconds: 300
-                          target: dev
-                      inputFiles:
-                        sa.json: "{{ secret('GCP_CREDS') }}"
+                   namespace: io.kestra.tests
+                   id: dbt-build
+                   tasks:
+                     - id: working-directory
+                       type: io.kestra.core.tasks.flows.WorkingDirectory
+                       tasks:
+                       - id: cloneRepository
+                         type: io.kestra.plugin.git.Clone
+                         url: https://github.com/kestra-io/dbt-demo
+                         branch: main
+                       - id: dbt-build
+                         type: io.kestra.plugin.dbt.cli.Build
+                         runner: DOCKER
+                         dbtPath: /usr/local/bin/dbt
+                         docker:
+                           image: ghcr.io/kestra-io/dbt-duckdb
+                         profiles: |
+                           jaffle_shop:
+                             outputs:
+                               dev:
+                                 type: duckdb
+                                 path: ':memory:'
+                                 extensions:
+                                   - parquet
+                             target: dev
                 """
         )
     }
