@@ -27,6 +27,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import javax.validation.constraints.NotEmpty;
@@ -88,6 +89,7 @@ import javax.validation.constraints.NotNull;
 )
 public class DbtCLI extends AbstractExecScript {
     private static final ObjectMapper MAPPER = JacksonMapper.ofYaml();
+    private static final String DEFAULT_IMAGE = "ghcr.io/kestra-io/dbt";
 
     @Schema(
         title = "The list of dbt CLI commands to run"
@@ -112,14 +114,25 @@ public class DbtCLI extends AbstractExecScript {
     private String projectDir;
 
     @Schema(
-        title = "Docker options for the `DOCKER` runner"
+        title = "Docker options for the `DOCKER` runner",
+        defaultValue = "{image=" + DEFAULT_IMAGE + ", pullPolicy=ALWAYS}"
     )
     @PluginProperty
     @Builder.Default
-    private DockerOptions docker = DockerOptions.builder()
-            .image("ghcr.io/kestra-io/dbt")
-            .entryPoint(List.of())
-            .build();
+    private DockerOptions docker = DockerOptions.builder().build();
+
+    @Override
+    protected DockerOptions injectDefaults(DockerOptions original) {
+        var builder = original.toBuilder();
+        if (original.getImage() == null) {
+            builder.image(DEFAULT_IMAGE);
+        }
+        if (original.getEntryPoint() == null) {
+            builder.entryPoint(Collections.emptyList());
+        }
+
+        return builder.build();
+    }
 
     @Override
     public ScriptOutput run(RunContext runContext) throws Exception {
