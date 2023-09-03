@@ -160,7 +160,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
     @Builder.Default
     @Getter(AccessLevel.NONE)
-    private transient List<Integer> loggedSteps = new ArrayList<>();
+    private transient Map<Integer, Integer> loggedSteps = new HashMap<>();
 
     @Override
     public TriggerRun.Output run(RunContext runContext) throws Exception {
@@ -303,11 +303,16 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
         // log steps
         for (Step step : runResponse.getData().getRunSteps()) {
-            if (step.getFinishedAt() != null && !loggedSteps.contains(step.getId()) && !step.getLogs().equals("")) {
-                loggedSteps.add(step.getId());
+            if (!step.getLogs().isEmpty()){
+                if (!loggedSteps.containsKey(step.getId())){
+                    loggedSteps.put(step.getId(), 0);
+                }
 
-                for (String s : step.getLogs().split("\n")) {
-                    logger.info("[Step {}]: {}", step.getName(), s);
+                if (step.getLogs().length() > loggedSteps.get(step.getId())) {
+                    for (String s : step.getLogs().substring(loggedSteps.get(step.getId()) -1).split("\n")) {
+                        logger.info("[Step {}]: {}", step.getName(), s);
+                    }
+                    loggedSteps.put(step.getId(), step.getLogs().length());
                 }
             }
         }
