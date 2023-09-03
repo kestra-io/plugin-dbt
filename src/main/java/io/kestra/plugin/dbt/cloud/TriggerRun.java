@@ -141,6 +141,13 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     Boolean wait = true;
 
     @Schema(
+            title = "Specify frequency for job state check API calls"
+    )
+    @PluginProperty(dynamic = false)
+    @Builder.Default
+    Duration pollFrequency = Duration.ofSeconds(5);
+
+    @Schema(
         title = "The max total wait duration"
     )
     @PluginProperty(dynamic = false)
@@ -260,7 +267,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
                 return null;
             }),
-            Duration.ofSeconds(1),
+            this.pollFrequency,
             this.maxDuration
         );
 
