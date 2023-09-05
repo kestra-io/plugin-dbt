@@ -33,6 +33,7 @@ import java.util.*;
 import javax.validation.constraints.NotNull;
 
 import static io.kestra.core.utils.Rethrow.throwSupplier;
+import static java.lang.Math.max;
 
 @SuperBuilder
 @ToString
@@ -309,7 +310,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
                 }
 
                 if (step.getLogs().length() > loggedSteps.get(step.getId())) {
-                    for (String s : step.getLogs().substring(loggedSteps.get(step.getId()) -1).split("\n")) {
+                    for (String s : step.getLogs().substring(max(loggedSteps.get(step.getId()) -1, 0)).split("\n")) {
                         logger.info("[Step {}]: {}", step.getName(), s);
                     }
                     loggedSteps.put(step.getId(), step.getLogs().length());
