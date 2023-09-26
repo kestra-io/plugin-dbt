@@ -102,6 +102,14 @@ public class DbtCLI extends AbstractExecScript {
     @Builder.Default
     private DockerOptions docker = DockerOptions.builder().build();
 
+    @Builder.Default
+    @Schema(
+        title = "Parse run result",
+        description = "Parsing run result to display duration of each task inside dbt"
+    )
+    @PluginProperty
+    protected Boolean parseRunResults = true;
+
     @Override
     protected DockerOptions injectDefaults(DockerOptions original) {
         var builder = original.toBuilder();
@@ -150,7 +158,7 @@ public class DbtCLI extends AbstractExecScript {
             .withCommands(commandsArgs)
             .run();
 
-        if (workingDirectory.resolve("target/run_results.json").toFile().exists()) {
+        if (this.parseRunResults && workingDirectory.resolve("target/run_results.json").toFile().exists()) {
             URI results = ResultParser.parseRunResult(runContext, workingDirectory.resolve("target/run_results.json").toFile());
             run.getOutputFiles().put("run_results.json", results);
         }

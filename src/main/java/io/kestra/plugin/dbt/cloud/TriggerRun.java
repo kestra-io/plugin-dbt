@@ -156,6 +156,14 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     Duration maxDuration = Duration.ofMinutes(60);
 
     @Builder.Default
+    @Schema(
+        title = "Parse run result",
+        description = "Parsing run result to display duration of each task inside dbt"
+    )
+    @PluginProperty
+    protected Boolean parseRunResults = true;
+
+    @Builder.Default
     @Getter(AccessLevel.NONE)
     private transient List<JobStatusHumanizedEnum> loggedStatus = new ArrayList<>();
 
@@ -283,7 +291,10 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
         Path runResultsArtifact = downloadArtifacts(runContext, runId, "run_results.json");
         Path manifestArtifact = downloadArtifacts(runContext, runId, "manifest.json");
-        ResultParser.parseRunResult(runContext, runResultsArtifact.toFile());
+
+        if (this.parseRunResults) {
+            ResultParser.parseRunResult(runContext, runResultsArtifact.toFile());
+        }
 
         return Output.builder()
             .runId(runId)

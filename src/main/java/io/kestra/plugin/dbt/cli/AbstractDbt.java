@@ -135,6 +135,14 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     )
     protected Map<String, String> env;
 
+    @Builder.Default
+    @Schema(
+        title = "Parse run result",
+        description = "Parsing run result to display duration of each task inside dbt"
+    )
+    @PluginProperty
+    protected Boolean parseRunResults = true;
+
     protected abstract java.util.List<String> dbtCommands(RunContext runContext, Path workingDirectory) throws IllegalVariableEvaluationException;
 
     @Override
@@ -222,7 +230,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
 
         File runResults = workingDirectory.resolve(baseDir + "target/run_results.json").toFile();
 
-        if (runResults.exists()) {
+        if (this.parseRunResults && runResults.exists()) {
             URI results = ResultParser.parseRunResult(runContext, runResults);
             scriptOutput.getOutputFiles().put("run_results.json", results);
         }
