@@ -45,6 +45,8 @@ import static java.lang.Math.max;
         examples = {
                 @Example(
                         code = {
+                                "accountId: \"<your-account>\"",
+                                "token: \"<your token>\"",
                                 "runId: \"<your run id>\"",
                         }
                 )
@@ -58,7 +60,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     );
 
     @Schema(
-            title = "The runId to sha to check out before running this job"
+            title = "The run id to check status for"
     )
     @PluginProperty(dynamic = true)
     Integer runId;
