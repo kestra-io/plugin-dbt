@@ -245,140 +245,20 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
                 .build();
         }
 
-        // wait for end
-        RunResponse finalRunResponse = Await.until(
-            throwSupplier(() -> {
-                Optional<RunResponse> fetchRunResponse = fetchRunResponse(
-                    runContext,
-                    runId,
-                    false
-                );
+        CheckStatus checkStatusJob = CheckStatus.builder()
+                                        .runId(runId)
+                                        .pollFrequency(getPollFrequency())
+                                        .maxDuration(getMaxDuration())
+                                        .parseRunResults(getParseRunResults())
+                                        .build();
 
-                if (fetchRunResponse.isPresent()) {
-                    logSteps(logger, fetchRunResponse.get());
-
-                    // we rely on truncated logs to be sure
-                    boolean allLogs = fetchRunResponse.get()
-                        .getData()
-                        .getRunSteps()
-                        .stream()
-                        .filter(step -> step.getTruncatedDebugLogs() != null)
-                        .count() ==
-                        fetchRunResponse.get()
-                            .getData()
-                            .getRunSteps().size();
-
-                    // ended
-                    if (ENDED_STATUS.contains(fetchRunResponse.get().getData().getStatusHumanized()) && allLogs) {
-                        return fetchRunResponse.get();
-                    }
-                }
-
-                return null;
-            }),
-            this.pollFrequency,
-            this.maxDuration
-        );
-
-        // final response
-        logSteps(logger, finalRunResponse);
-
-        if (!finalRunResponse.getData().getStatusHumanized().equals(JobStatusHumanizedEnum.SUCCESS)) {
-            throw new Exception("Failed run with status '" + finalRunResponse.getData().getStatusHumanized() +
-                "' after " +  finalRunResponse.getData().getDurationHumanized() + ": " + finalRunResponse
-            );
-        }
-
-        Path runResultsArtifact = downloadArtifacts(runContext, runId, "run_results.json");
-        Path manifestArtifact = downloadArtifacts(runContext, runId, "manifest.json");
-
-        if (this.parseRunResults) {
-            ResultParser.parseRunResult(runContext, runResultsArtifact.toFile());
-        }
+        CheckStatus.Output runOutput = checkStatusJob.run(runContext);
 
         return Output.builder()
             .runId(runId)
-            .runResults(runResultsArtifact.toFile().exists() ? runContext.putTempFile(runResultsArtifact.toFile()) : null)
-            .manifest(manifestArtifact.toFile().exists() ? runContext.putTempFile(manifestArtifact.toFile()) : null)
+            .runResults(runOutput.getRunResults())
+            .manifest(runOutput.getManifest())
             .build();
-    }
-
-    private void logSteps(Logger logger, RunResponse runResponse) {
-        // status changed
-        if (!loggedStatus.contains(runResponse.getData().getStatusHumanized())) {
-            logger.debug("Status changed to '{}' after {}",
-                runResponse.getData().getStatusHumanized(),
-                runResponse.getData().getDurationHumanized()
-            );
-            loggedStatus.add(runResponse.getData().getStatusHumanized());
-        }
-
-        // log steps
-        for (Step step : runResponse.getData().getRunSteps()) {
-            if (!step.getLogs().isEmpty()){
-                if (!loggedSteps.containsKey(step.getId())){
-                    loggedSteps.put(step.getId(), 0);
-                }
-
-                if (step.getLogs().length() > loggedSteps.get(step.getId())) {
-                    for (String s : step.getLogs().substring(max(loggedSteps.get(step.getId()) -1, 0)).split("\n")) {
-                        logger.info("[Step {}]: {}", step.getName(), s);
-                    }
-                    loggedSteps.put(step.getId(), step.getLogs().length());
-                }
-            }
-        }
-    }
-
-    private Optional<RunResponse> fetchRunResponse(RunContext runContext, Integer id, Boolean debug) throws IllegalVariableEvaluationException {
-        return this
-            .request(
-                runContext,
-                HttpRequest
-                    .create(
-                        HttpMethod.GET,
-                        UriTemplate
-                            .of("/api/v2/accounts/{accountId}/runs/{runId}/" +
-                                    "?include_related=" + URLEncoder.encode(
-                                    "[\"trigger\",\"job\"," + (debug ? "\"debug_logs\"" : "") + ",\"run_steps\", \"environment\"]",
-                                    StandardCharsets.UTF_8
-                                )
-                            )
-                            .expand(Map.of(
-                                "accountId", runContext.render(this.accountId),
-                                "runId", id
-                            ))
-                    ),
-                Argument.of(RunResponse.class)
-            )
-            .getBody();
-    }
-
-    private Path downloadArtifacts(RunContext runContext, Integer runId, String path) throws IllegalVariableEvaluationException, IOException {
-        String artifact = this
-            .request(
-                runContext,
-                HttpRequest
-                    .create(
-                        HttpMethod.GET,
-                        UriTemplate
-                            .of("/api/v2/accounts/{accountId}/runs/{runId}/artifacts/{path}")
-                            .expand(Map.of(
-                                "accountId", runContext.render(this.accountId),
-                                "runId", runId,
-                                "path", path
-                            ))
-                    ),
-                Argument.of(String.class)
-            )
-            .getBody()
-            .orElseThrow();
-
-        Path tempFile = runContext.tempFile(".json");
-
-        Files.writeString(tempFile, artifact, StandardOpenOption.TRUNCATE_EXISTING);
-
-        return tempFile;
     }
 
     @Builder
