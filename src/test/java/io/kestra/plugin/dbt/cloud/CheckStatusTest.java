@@ -31,7 +31,7 @@ class CheckStatusTest {
     private String jobId;
 
     @Test
-    // @Disabled("Trial account can't trigger run through api")
+    @Disabled("Trial account can't trigger run through api")
     void run() throws Exception {
 
         RunContext runContext = runContextFactory.of(ImmutableMap.of());
