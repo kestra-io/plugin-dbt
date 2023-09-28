@@ -74,7 +74,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     Duration pollFrequency = Duration.ofSeconds(5);
 
     @Schema(
-            title = "The max total wait duration"
+            title = "The maximum duration the task should poll for the job completion"
     )
     @PluginProperty(dynamic = false)
     @Builder.Default
