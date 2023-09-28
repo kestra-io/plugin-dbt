@@ -83,7 +83,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     @Builder.Default
     @Schema(
             title = "Parse run result",
-            description = "Parsing run result to display duration of each task inside dbt"
+            description = "Whether to parse the run result to display the duration of each dbt node in the Gantt view"
     )
     @PluginProperty
     protected Boolean parseRunResults = true;
