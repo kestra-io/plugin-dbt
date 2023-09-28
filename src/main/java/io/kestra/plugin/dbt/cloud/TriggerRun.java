@@ -6,11 +6,7 @@ import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
-import io.kestra.core.utils.Await;
-import io.kestra.plugin.dbt.ResultParser;
-import io.kestra.plugin.dbt.cloud.models.JobStatusHumanizedEnum;
 import io.kestra.plugin.dbt.cloud.models.RunResponse;
-import io.kestra.plugin.dbt.cloud.models.Step;
 import io.micronaut.core.type.Argument;
 import io.micronaut.http.HttpMethod;
 import io.micronaut.http.HttpRequest;
@@ -21,19 +17,10 @@ import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.slf4j.Logger;
 
-import java.io.IOException;
 import java.net.URI;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.*;
 import javax.validation.constraints.NotNull;
-
-import static io.kestra.core.utils.Rethrow.throwSupplier;
-import static java.lang.Math.max;
 
 @SuperBuilder
 @ToString
@@ -157,14 +144,6 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     )
     @PluginProperty
     protected Boolean parseRunResults = true;
-
-    @Builder.Default
-    @Getter(AccessLevel.NONE)
-    private transient List<JobStatusHumanizedEnum> loggedStatus = new ArrayList<>();
-
-    @Builder.Default
-    @Getter(AccessLevel.NONE)
-    private transient Map<Integer, Integer> loggedSteps = new HashMap<>();
 
     @Override
     public TriggerRun.Output run(RunContext runContext) throws Exception {
