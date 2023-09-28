@@ -60,7 +60,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     );
 
     @Schema(
-            title = "The run id to check status for"
+            title = "The job run id to check the status for"
     )
     @PluginProperty(dynamic = true)
     Integer runId;
