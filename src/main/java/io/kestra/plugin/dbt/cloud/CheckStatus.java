@@ -239,7 +239,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
         @Schema(
-                title = "URI of a run results"
+                title = "URI of the run result"
         )
         private URI runResults;
 
