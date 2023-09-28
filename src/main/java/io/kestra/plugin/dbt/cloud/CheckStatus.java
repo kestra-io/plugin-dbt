@@ -67,7 +67,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
 
     @Schema(
-            title = "Specify frequency at which the job status will be checked"
+            title = "Specify how often the task should poll for the job status"
     )
     @PluginProperty(dynamic = false)
     @Builder.Default
