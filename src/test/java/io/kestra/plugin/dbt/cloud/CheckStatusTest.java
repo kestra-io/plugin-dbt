@@ -52,6 +52,7 @@ class CheckStatusTest {
                 .token(this.token)
                 .accountId(this.accountId)
                 .maxDuration(Duration.ofMinutes(60))
+                .parseRunResults(false)
                 .build();
 
         CheckStatus.Output checkStatusOutput = checkStatus.run(runContext);
