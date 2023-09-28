@@ -58,11 +58,6 @@ import static java.lang.Math.max;
     }
 )
 public class TriggerRun extends AbstractDbtCloud implements RunnableTask<TriggerRun.Output> {
-    private static final List<JobStatusHumanizedEnum> ENDED_STATUS = List.of(
-        JobStatusHumanizedEnum.ERROR,
-        JobStatusHumanizedEnum.CANCELLED,
-        JobStatusHumanizedEnum.SUCCESS
-    );
 
     @Schema(
         title = "Numeric ID of the job"
@@ -247,6 +242,8 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
         CheckStatus checkStatusJob = CheckStatus.builder()
                                         .runId(runId)
+                                        .token(getToken())
+                                        .accountId(getAccountId())
                                         .pollFrequency(getPollFrequency())
                                         .maxDuration(getMaxDuration())
                                         .parseRunResults(getParseRunResults())
