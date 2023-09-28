@@ -39,7 +39,7 @@ import static java.lang.Math.max;
 @Getter
 @NoArgsConstructor
 @Schema(
-        title = "Check job status of a running job"
+        title = "Check the status of a dbt Cloud job"
 )
 @Plugin(
         examples = {
