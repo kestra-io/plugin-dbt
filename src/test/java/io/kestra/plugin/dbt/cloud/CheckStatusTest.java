@@ -49,6 +49,8 @@ class CheckStatusTest {
 
         CheckStatus checkStatus = CheckStatus.builder()
                 .runId(runOutput.getRunId())
+                .token(this.token)
+                .accountId(this.accountId)
                 .maxDuration(Duration.ofMinutes(60))
                 .build();
 
