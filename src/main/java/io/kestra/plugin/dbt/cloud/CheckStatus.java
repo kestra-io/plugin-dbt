@@ -101,7 +101,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         Logger logger = runContext.logger();
 
         // Check rendered runId provided is an Integer
-        Integer runIdRendered = Integer.parseInt(this.runId);
+        Integer runIdRendered = Integer.parseInt(runContext.render(this.runId));
 
         // wait for end
         RunResponse finalRunResponse = Await.until(
