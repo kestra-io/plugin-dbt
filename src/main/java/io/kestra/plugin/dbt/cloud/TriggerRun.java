@@ -220,7 +220,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         }
 
         CheckStatus checkStatusJob = CheckStatus.builder()
-                                        .runId(runId)
+                                        .runId(runId.toString())
                                         .token(getToken())
                                         .accountId(getAccountId())
                                         .pollFrequency(getPollFrequency())

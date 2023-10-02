@@ -48,7 +48,7 @@ class CheckStatusTest {
         TriggerRun.Output runOutput = task.run(runContext);
 
         CheckStatus checkStatus = CheckStatus.builder()
-                .runId(runOutput.getRunId())
+                .runId(runOutput.getRunId().toString())
                 .token(this.token)
                 .accountId(this.accountId)
                 .maxDuration(Duration.ofMinutes(60))
