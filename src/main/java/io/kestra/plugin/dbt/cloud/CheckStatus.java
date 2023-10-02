@@ -63,7 +63,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             title = "The job run id to check the status for"
     )
     @PluginProperty(dynamic = true)
-    Integer runId;
+    String runId;
 
 
     @Schema(
@@ -100,12 +100,15 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     public CheckStatus.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
 
+        // Check rendered runId provided is an Integer
+        Integer runIdRendered = Integer.parseInt(runContext.render(this.runId));
+
         // wait for end
         RunResponse finalRunResponse = Await.until(
                 throwSupplier(() -> {
                     Optional<RunResponse> fetchRunResponse = fetchRunResponse(
                             runContext,
-                            runId,
+                            runIdRendered,
                             false
                     );
 
@@ -144,8 +147,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             );
         }
 
-        Path runResultsArtifact = downloadArtifacts(runContext, runId, "run_results.json");
-        Path manifestArtifact = downloadArtifacts(runContext, runId, "manifest.json");
+        Path runResultsArtifact = downloadArtifacts(runContext, runIdRendered, "run_results.json");
+        Path manifestArtifact = downloadArtifacts(runContext, runIdRendered, "manifest.json");
 
         if (this.parseRunResults) {
             ResultParser.parseRunResult(runContext, runResultsArtifact.toFile());
