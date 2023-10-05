@@ -44,7 +44,7 @@ public abstract class AbstractDbtCloud extends Task {
     @NotNull
     String token;
 
-    private static final Duration HTTP_READ_TIMEOUT = Duration.ofSeconds(3);
+    private static final Duration HTTP_READ_TIMEOUT = Duration.ofSeconds(60);
     private static final NettyHttpClientFactory FACTORY = new NettyHttpClientFactory();
 
     protected HttpClient client(RunContext runContext) throws IllegalVariableEvaluationException, MalformedURLException, URISyntaxException {
