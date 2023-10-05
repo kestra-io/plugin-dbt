@@ -15,15 +15,13 @@ import io.micronaut.http.client.netty.DefaultHttpClient;
 import io.micronaut.http.client.netty.NettyHttpClientFactory;
 import io.micronaut.http.codec.MediaTypeCodecRegistry;
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.ToString;
+import lombok.*;
 import lombok.experimental.SuperBuilder;
 
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.time.Duration;
 import javax.validation.constraints.NotNull;
 
 @SuperBuilder
@@ -46,12 +44,17 @@ public abstract class AbstractDbtCloud extends Task {
     @NotNull
     String token;
 
+    private static final Duration HTTP_READ_TIMEOUT = Duration.ofSeconds(3);
     private static final NettyHttpClientFactory FACTORY = new NettyHttpClientFactory();
 
     protected HttpClient client(RunContext runContext) throws IllegalVariableEvaluationException, MalformedURLException, URISyntaxException {
         MediaTypeCodecRegistry mediaTypeCodecRegistry = runContext.getApplicationContext().getBean(MediaTypeCodecRegistry.class);
 
-        DefaultHttpClient client = (DefaultHttpClient) FACTORY.createClient(URI.create("https://cloud.getdbt.com").toURL(), new DefaultHttpClientConfiguration());
+        var httpConfig = new DefaultHttpClientConfiguration();
+        httpConfig.setMaxContentLength(Integer.MAX_VALUE);
+        httpConfig.setReadTimeout(HTTP_READ_TIMEOUT);
+
+        DefaultHttpClient client = (DefaultHttpClient) FACTORY.createClient(URI.create("https://cloud.getdbt.com").toURL(), httpConfig);
         client.setMediaTypeCodecRegistry(mediaTypeCodecRegistry);
 
         return client;
