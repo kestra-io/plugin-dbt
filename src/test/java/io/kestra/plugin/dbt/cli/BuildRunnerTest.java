@@ -41,7 +41,7 @@ class BuildRunnerTest {
     @Test
     void flow() throws TimeoutException, URISyntaxException {
         Path project = Path.of(Objects.requireNonNull(BuildRunnerTest.class.getClassLoader().getResource("project")).toURI());
-        Execution execution = runnerUtils.runOne("io.kestra.dbt", "full", null, (flow, execution1) -> Map.of("path", project.toAbsolutePath().toUri().getPath()), Duration.ofMinutes(1));
+        Execution execution = runnerUtils.runOne(null,"io.kestra.dbt", "full", null, (flow, execution1) -> Map.of("path", project.toAbsolutePath().toUri().getPath()), Duration.ofMinutes(1));
 
         assertThat(execution.getState().getCurrent(), is(State.Type.SUCCESS));
         assertThat(execution.getTaskRunList().size(), greaterThan(10));
