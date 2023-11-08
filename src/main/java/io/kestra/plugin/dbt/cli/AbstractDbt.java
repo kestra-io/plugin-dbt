@@ -2,6 +2,8 @@ package io.kestra.plugin.dbt.cli;
 
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.PluginProperty;
+import io.kestra.core.models.tasks.NamespaceFiles;
+import io.kestra.core.models.tasks.NamespaceFilesInterface;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.runners.RunContext;
@@ -37,7 +39,7 @@ import javax.validation.constraints.NotNull;
 @EqualsAndHashCode
 @Getter
 @NoArgsConstructor
-public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOutput> {
+public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOutput>, NamespaceFilesInterface {
     @Builder.Default
     @Schema(
         title = "Stop execution at the first failure."
@@ -143,12 +145,15 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     @PluginProperty
     protected Boolean parseRunResults = true;
 
+    private NamespaceFiles namespaceFiles;
+
     protected abstract java.util.List<String> dbtCommands(RunContext runContext, Path workingDirectory) throws IllegalVariableEvaluationException;
 
     @Override
     public ScriptOutput run(RunContext runContext) throws Exception {
         CommandsWrapper commandsWrapper = new CommandsWrapper(runContext)
             .withEnv(this.getEnv())
+            .withNamespaceFiles(namespaceFiles)
             .withRunnerType(this.getRunner())
             .withDockerOptions(this.getDocker())
             .withLogConsumer(new AbstractLogConsumer() {
