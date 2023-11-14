@@ -76,17 +76,6 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     String dbtPath = "./bin/dbt";
 
     @Schema(
-        title = "Input files are extra files that will be available in the dbt working directory.",
-        description = "You can define the files as map or a JSON string. " +
-            "Each file can be defined inlined or can reference a file from Kestra's internal storage."
-    )
-    @PluginProperty(
-        additionalProperties = String.class,
-        dynamic = true
-    )
-    private Object inputFiles;
-
-    @Schema(
         title = "The `profiles.yml` file content",
         description = "If a `profile.yml` file already exist in the current working directory, setting this property will generate an error."
     )
@@ -179,13 +168,6 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             );
         }
 
-        PluginUtilsService.createInputFiles(
-            runContext,
-            workingDirectory,
-            this.finalInputFiles(runContext),
-            Collections.emptyMap()
-        );
-
         List<String> commandsArgs = ScriptService.scriptCommands(
             List.of("/bin/sh", "-c"),
             null,
@@ -200,10 +182,6 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
         parseResults(runContext, workingDirectory, run);
 
         return run;
-    }
-
-    private Map<String, String> finalInputFiles(RunContext runContext) throws IOException, IllegalVariableEvaluationException {
-        return this.inputFiles != null ? new HashMap<>(PluginUtilsService.transformInputFiles(runContext, this.inputFiles)) : new HashMap<>();
     }
 
     private String createDbtCommand(RunContext runContext, Path workingDirectory) throws IllegalVariableEvaluationException {
