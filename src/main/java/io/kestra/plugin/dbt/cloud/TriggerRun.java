@@ -1,6 +1,5 @@
 package io.kestra.plugin.dbt.cloud;
 
-import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
@@ -20,7 +19,7 @@ import org.slf4j.Logger;
 import java.net.URI;
 import java.time.Duration;
 import java.util.*;
-import javax.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotNull;
 
 @SuperBuilder
 @ToString

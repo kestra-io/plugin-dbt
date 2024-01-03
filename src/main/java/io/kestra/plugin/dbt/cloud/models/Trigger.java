@@ -8,7 +8,7 @@ import lombok.extern.jackson.Jacksonized;
 
 import java.time.ZonedDateTime;
 import java.util.List;
-import javax.validation.Valid;
+import jakarta.validation.Valid;
 
 @Value
 @Jacksonized
