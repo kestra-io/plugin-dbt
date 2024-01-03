@@ -6,7 +6,7 @@ import lombok.experimental.SuperBuilder;
 import lombok.extern.jackson.Jacksonized;
 
 import java.util.List;
-import javax.validation.Valid;
+import jakarta.validation.Valid;
 
 @Value
 @Jacksonized
