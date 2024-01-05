@@ -128,7 +128,7 @@ public class DbtCLI extends AbstractExecScript {
         CommandsWrapper commands = this.commands(runContext)
             .withLogConsumer(new AbstractLogConsumer() {
                 @Override
-                public void accept(String line, Boolean isStdErr) throws Exception {
+                public void accept(String line, Boolean isStdErr) {
                     LogService.parse(runContext, line);
                 }
             });
