@@ -147,7 +147,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             .withDockerOptions(this.getDocker())
             .withLogConsumer(new AbstractLogConsumer() {
                 @Override
-                public void accept(String line, Boolean isStdErr) throws Exception {
+                public void accept(String line, Boolean isStdErr) {
                     LogService.parse(runContext, line);
                 }
             });
