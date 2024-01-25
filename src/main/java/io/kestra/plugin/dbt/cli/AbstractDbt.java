@@ -175,7 +175,10 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
         );
 
         ScriptOutput run = commandsWrapper
-            .addEnv(Map.of("PYTHONUNBUFFERED", "true"))
+            .addEnv(Map.of(
+                "PYTHONUNBUFFERED", "true",
+                "PIP_ROOT_USER_ACTION", "ignore"
+            ))
             .withCommands(commandsArgs)
             .run();
 
