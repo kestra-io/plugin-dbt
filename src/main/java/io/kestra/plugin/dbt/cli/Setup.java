@@ -200,7 +200,10 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
         );
 
         return commandsWrapper
-            .addEnv(Map.of("PYTHONUNBUFFERED", "true"))
+            .addEnv(Map.of(
+                "PYTHONUNBUFFERED", "true",
+                "PIP_ROOT_USER_ACTION", "ignore"
+            ))
             .withCommands(commandsArgs)
             .run();
     }

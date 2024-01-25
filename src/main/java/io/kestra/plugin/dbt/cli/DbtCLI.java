@@ -154,7 +154,10 @@ public class DbtCLI extends AbstractExecScript {
         );
 
         ScriptOutput run = this.commands(runContext)
-            .addEnv(Map.of("PYTHONUNBUFFERED", "true"))
+            .addEnv(Map.of(
+                "PYTHONUNBUFFERED", "true",
+                "PIP_ROOT_USER_ACTION", "ignore"
+            ))
             .withCommands(commandsArgs)
             .run();
 
