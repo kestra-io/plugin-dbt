@@ -86,7 +86,6 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     )
     @PluginProperty
     @NotNull
-    @NotEmpty
     protected RunnerType runner = RunnerType.PROCESS;
 
     @Schema(
