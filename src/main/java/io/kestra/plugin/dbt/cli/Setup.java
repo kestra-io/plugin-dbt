@@ -93,7 +93,6 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     )
     @PluginProperty(dynamic = true)
     @NotNull
-    @NotEmpty
     Object profiles;
 
     @Builder.Default
@@ -143,7 +142,6 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     )
     @PluginProperty
     @NotNull
-    @NotEmpty
     protected RunnerType runner = RunnerType.PROCESS;
 
     @Schema(
