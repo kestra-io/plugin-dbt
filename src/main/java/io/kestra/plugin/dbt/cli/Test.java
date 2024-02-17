@@ -15,13 +15,13 @@ import lombok.experimental.SuperBuilder;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Invoke dbt `test` command"
+    title = "Invoke dbt `test` command."
 )
 @Plugin(
     examples = {
         @Example(
             full = true,
-            title = "Invoke dbt `test` command",
+            title = "Invoke dbt `test` command.",
             code = """
                 namespace: io.kestra.tests
                 id: dbt-test

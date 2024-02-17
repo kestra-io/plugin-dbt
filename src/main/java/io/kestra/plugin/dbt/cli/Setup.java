@@ -44,7 +44,7 @@ import jakarta.validation.constraints.NotNull;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Setup dbt in a Python virtualenv",
+    title = "Setup dbt in a Python virtualenv.",
     description = """
         Use it to install dbt requirements locally in a Python virtualenv if you don't want to use dbt via Docker.
         In this case, you need to use a `WorkingDirectory` task and this `Setup` task to setup dbt prior to using any of the dbt tasks."""
@@ -53,7 +53,7 @@ import jakarta.validation.constraints.NotNull;
     examples = {
         @Example(
             full = true,
-            title = "Setup dbt by installing pip dependencies in a Python virtualenv and initializing the profile directory",
+            title = "Setup dbt by installing pip dependencies in a Python virtualenv and initializing the profile directory.",
             code = """
                 namespace: io.kestra.tests
                 id: dbt-setup
@@ -97,8 +97,8 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
 
     @Builder.Default
     @Schema(
-        title = "The python interpreter to use",
-        description = "Set the python interpreter path to use"
+        title = "The python interpreter to use.",
+        description = "Set the python interpreter path to use."
     )
     @PluginProperty(dynamic = true)
     @NotNull
@@ -106,7 +106,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     private final String pythonPath = "python";
 
     @Schema(
-        title = "List of python dependencies to add to the python execution process",
+        title = "List of python dependencies to add to the python execution process.",
         description = "Python dependencies list to setup in the virtualenv, in the same format than requirements.txt. It must at least provides dbt."
     )
     @PluginProperty(dynamic = true)
@@ -115,7 +115,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
 
     @Builder.Default
     @Schema(
-        title = "Exit if any non true return value",
+        title = "Exit if any non true return value.",
         description = "This tells bash that it should exit the script if any statement returns a non-true return value. \n" +
             "The benefit of using -e is that it prevents errors snowballing into serious issues when they could " +
             "have been caught earlier."
@@ -138,14 +138,14 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     // set RunnerType to PROCESS to keep backward compatibility as the old script engine has PROCESS by default and the new DOCKER
     @Builder.Default
     @Schema(
-        title = "Runner to use"
+        title = "Runner to use."
     )
     @PluginProperty
     @NotNull
     protected RunnerType runner = RunnerType.PROCESS;
 
     @Schema(
-        title = "Docker options for the `DOCKER` runner"
+        title = "Docker options for the `DOCKER` runner."
     )
     @PluginProperty
     @Builder.Default
@@ -153,7 +153,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
         .image("python")
         .build();
 
-    @Schema(title = "Deprecated, use the `docker` property instead", deprecated = true)
+    @Schema(title = "Deprecated, use the `docker` property instead.", deprecated = true)
     @PluginProperty
     @Deprecated
     public DockerOptions getDockerOptions() {

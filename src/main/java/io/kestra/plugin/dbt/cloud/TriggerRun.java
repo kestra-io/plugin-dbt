@@ -27,7 +27,7 @@ import jakarta.validation.constraints.NotNull;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Trigger job to run",
+    title = "Trigger job to run.",
     description = "Use this task to kick off a run for a job. When this endpoint returns a successful response, a " +
         "new run will be enqueued for the account. If you activate the `wait` option, it will wait for the job to be ended " +
         "and will display all the log and dynamic tasks."
@@ -46,28 +46,28 @@ import jakarta.validation.constraints.NotNull;
 public class TriggerRun extends AbstractDbtCloud implements RunnableTask<TriggerRun.Output> {
 
     @Schema(
-        title = "Numeric ID of the job"
+        title = "Numeric ID of the job."
     )
     @PluginProperty(dynamic = true)
     @NotNull
     String jobId;
 
     @Schema(
-        title = "A text description of the reason for running this job"
+        title = "A text description of the reason for running this job."
     )
     @PluginProperty(dynamic = true)
     @Builder.Default
     @NotNull
-    String cause = "Triggered by Kestra";
+    String cause = "Triggered by Kestra.";
 
     @Schema(
-        title = "The git sha to check out before running this job"
+        title = "The git SHA to check out before running this job."
     )
     @PluginProperty(dynamic = true)
     String gitSha;
 
     @Schema(
-        title = "The git branch to check out before running this job"
+        title = "The git branch to check out before running this job."
     )
     @PluginProperty(dynamic = true)
     String gitBranch;
@@ -116,21 +116,21 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
     @Schema(
         title = "Wait for the end of the run.",
-        description = "Allowing to capture job status & logs"
+        description = "Allowing to capture job status & logs."
     )
     @PluginProperty(dynamic = false)
     @Builder.Default
     Boolean wait = true;
 
     @Schema(
-            title = "Specify frequency for job state check API calls"
+            title = "Specify frequency for job state check API calls."
     )
     @PluginProperty(dynamic = false)
     @Builder.Default
     Duration pollFrequency = Duration.ofSeconds(5);
 
     @Schema(
-        title = "The max total wait duration"
+        title = "The maximum total wait duration."
     )
     @PluginProperty(dynamic = false)
     @Builder.Default
@@ -138,8 +138,8 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
     @Builder.Default
     @Schema(
-        title = "Parse run result",
-        description = "Parsing run result to display duration of each task inside dbt"
+        title = "Parse run result.",
+        description = "Parsing run result to display duration of each task inside dbt."
     )
     @PluginProperty
     protected Boolean parseRunResults = true;
@@ -240,17 +240,17 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
         @Schema(
-            title = "The run id."
+            title = "The run ID."
         )
         private Integer runId;
 
         @Schema(
-            title = "URI of a run results"
+            title = "URI of a run result."
         )
         private URI runResults;
 
         @Schema(
-            title = "URI of a manifest"
+            title = "URI of a manifest."
         )
         private URI manifest;
     }

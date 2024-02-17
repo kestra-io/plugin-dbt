@@ -20,7 +20,7 @@ import java.nio.file.Path;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Invoke dbt `deps` command"
+    title = "Invoke dbt `deps` command."
 )
 @Plugin(
     examples = {
@@ -39,7 +39,7 @@ import java.nio.file.Path;
                       url: https://github.com/kestra-io/dbt-demo
                       branch: main
                     - id: dbt-deps
-                      type: io.kestra.plugin.dbt.cli.Debs
+                      type: io.kestra.plugin.dbt.cli.Deps
                       runner: DOCKER
                       dbtPath: /usr/local/bin/dbt
                       docker:

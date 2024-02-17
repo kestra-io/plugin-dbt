@@ -39,7 +39,7 @@ import static java.lang.Math.max;
 @Getter
 @NoArgsConstructor
 @Schema(
-        title = "Check the status of a dbt Cloud job"
+        title = "Check the status of a dbt Cloud job."
 )
 @Plugin(
         examples = {
@@ -60,21 +60,21 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     );
 
     @Schema(
-            title = "The job run id to check the status for"
+            title = "The job run ID to check the status for."
     )
     @PluginProperty(dynamic = true)
     String runId;
 
 
     @Schema(
-            title = "Specify how often the task should poll for the job status"
+            title = "Specify how often the task should poll for the job status."
     )
     @PluginProperty(dynamic = false)
     @Builder.Default
     Duration pollFrequency = Duration.ofSeconds(5);
 
     @Schema(
-            title = "The maximum duration the task should poll for the job completion"
+            title = "The maximum duration the task should poll for the job completion."
     )
     @PluginProperty(dynamic = false)
     @Builder.Default
@@ -82,8 +82,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
     @Builder.Default
     @Schema(
-            title = "Parse run result",
-            description = "Whether to parse the run result to display the duration of each dbt node in the Gantt view"
+            title = "Parse run result.",
+            description = "Whether to parse the run result to display the duration of each dbt node in the Gantt view."
     )
     @PluginProperty
     protected Boolean parseRunResults = true;
