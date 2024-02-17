@@ -44,10 +44,10 @@ import jakarta.validation.constraints.NotNull;
 @Plugin(
     examples = {
         @Example(
-            title = "Launch a `dbt build` command on the Jaffle Shop example",
+            title = "Launch a `dbt build` command on a sample dbt project hosted on GitHub",
             full = true,
             code = """
-                id: dbtCli
+                id: dbt_build
                 namespace: dev
                 
                 tasks:
@@ -56,7 +56,7 @@ import jakarta.validation.constraints.NotNull;
                     tasks:
                     - id: cloneRepository
                       type: io.kestra.plugin.git.Clone
-                      url: https://github.com/kestra-io/dbt-demo
+                      url: https://github.com/kestra-io/dbt-example
                       branch: main
                     - id: dbt-build
                       type: io.kestra.plugin.dbt.cli.DbtCLI
@@ -64,8 +64,60 @@ import jakarta.validation.constraints.NotNull;
                       docker:
                         image: ghcr.io/kestra-io/dbt-duckdb
                       commands:
-                        - dbt build"""
-        )
+                        - dbt build
+                      profiles: |
+                        my_dbt_project:
+                          outputs:
+                            dev:
+                            type: duckdb
+                            path: ":memory:"
+                          target: dev"""
+        ),
+        @Example(
+            title = "Install a custom dbt version and run `dbt deps` and `dbt build` commands",
+            full = true,
+            code = """
+            id: dbt_custom_dependencies
+            namespace: dev
+
+            inputs:
+              - id: dbt_version
+                type: STRING
+                defaults: "dbt-duckdb==1.6.0"
+
+            tasks:
+              - id: git
+                type: io.kestra.core.tasks.flows.WorkingDirectory
+                tasks:
+                  - id: clone_repository
+                    type: io.kestra.plugin.git.Clone
+                    url: https://github.com/kestra-io/dbt-example
+                    branch: main
+
+                  - id: dbt
+                    type: io.kestra.plugin.dbt.cli.DbtCLI
+                    runner: DOCKER
+                    docker:
+                      image: python:3.11-slim
+                    beforeCommands:
+                      - pip install uv
+                      - uv venv --quiet
+                      - . .venv/bin/activate --quiet
+                      - uv pip install --quiet {{ inputs.dbt_version }}
+                    commands:
+                      - dbt deps
+                      - dbt build
+                    profiles: |
+                      my_dbt_project:
+                        outputs:
+                          dev:
+                          type: duckdb
+                          path: ":memory:"
+                          fixed_retries: 1
+                          threads: 16
+                          timeout_seconds: 300
+                        target: dev"""
+        )        
     }
 )
 public class DbtCLI extends AbstractExecScript {
