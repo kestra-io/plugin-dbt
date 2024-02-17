@@ -31,7 +31,7 @@ import jakarta.validation.constraints.NotNull;
 @NoArgsConstructor
 public abstract class AbstractDbtCloud extends Task {
     @Schema(
-        title = "Numeric ID of the account"
+        title = "Numeric ID of the account."
     )
     @PluginProperty(dynamic = true)
     @NotNull

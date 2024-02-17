@@ -44,7 +44,7 @@ import jakarta.validation.constraints.NotNull;
 @Plugin(
     examples = {
         @Example(
-            title = "Launch a `dbt build` command on a sample dbt project hosted on GitHub",
+            title = "Launch a `dbt build` command on a sample dbt project hosted on GitHub.",
             full = true,
             code = """
                 id: dbt_build
@@ -74,7 +74,7 @@ import jakarta.validation.constraints.NotNull;
                           target: dev"""
         ),
         @Example(
-            title = "Install a custom dbt version and run `dbt deps` and `dbt build` commands",
+            title = "Install a custom dbt version and run `dbt deps` and `dbt build` commands.",
             full = true,
             code = """
             id: dbt_custom_dependencies
@@ -125,7 +125,7 @@ public class DbtCLI extends AbstractExecScript {
     private static final String DEFAULT_IMAGE = "ghcr.io/kestra-io/dbt";
 
     @Schema(
-        title = "The list of dbt CLI commands to run"
+        title = "The list of dbt CLI commands to run."
     )
     @PluginProperty(dynamic = true)
     @NotNull
@@ -133,21 +133,21 @@ public class DbtCLI extends AbstractExecScript {
     private List<String> commands;
 
     @Schema(
-        title = "The `profiles.yml` file content",
-        description = "If a `profile.yml` file already exist in the current working directory, setting this property will generate an error."
+        title = "The `profiles.yml` file content.",
+        description = "If a `profile.yml` file already exists in the current working directory, setting this property will generate an error."
     )
     @PluginProperty(dynamic = true)
     private String profiles;
 
     @Schema(
-        title = "The dbt project directory, if it's not the working directory",
+        title = "The dbt project directory, if it's not the working directory.",
         description = "To use it, also use this directory in the `--project-dir` flag on the dbt CLI commands."
     )
     @PluginProperty(dynamic = true)
     private String projectDir;
 
     @Schema(
-        title = "Docker options for the `DOCKER` runner",
+        title = "Docker options for the `DOCKER` runner.",
         defaultValue = "{image=" + DEFAULT_IMAGE + ", pullPolicy=ALWAYS}"
     )
     @PluginProperty
@@ -156,8 +156,8 @@ public class DbtCLI extends AbstractExecScript {
 
     @Builder.Default
     @Schema(
-        title = "Parse run result",
-        description = "Parsing run result to display duration of each task inside dbt"
+        title = "Parse run result.",
+        description = "Parsing run result to display duration of each task inside dbt."
     )
     @PluginProperty
     protected Boolean parseRunResults = true;

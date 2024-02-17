@@ -19,13 +19,13 @@ import java.nio.file.Path;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Invoke dbt `list` command"
+    title = "Invoke dbt `list` command."
 )
 @Plugin(
     examples = {
         @Example(
             full = true,
-            title = "Invoke dbt `list` command",
+            title = "Invoke dbt `list` command.",
             code = """
                 namespace: io.kestra.tests
                 id: dbt-list
