@@ -111,11 +111,11 @@ import jakarta.validation.constraints.NotNull;
                       my_dbt_project:
                         outputs:
                           dev:
-                          type: duckdb
-                          path: ":memory:"
-                          fixed_retries: 1
-                          threads: 16
-                          timeout_seconds: 300
+                            type: duckdb
+                            path: ":memory:"
+                            fixed_retries: 1
+                            threads: 16
+                            timeout_seconds: 300
                         target: dev"""
         )        
     }

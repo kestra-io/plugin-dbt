@@ -23,30 +23,28 @@ import lombok.experimental.SuperBuilder;
             full = true,
             title = "Invoke dbt `test` command.",
             code = """
-                namespace: io.kestra.tests
-                id: dbt-test
+                id: dbt_test
+                namespace: dev
                 tasks:
-                  - id: working-directory
+                  - id: wdir
                     type: io.kestra.core.tasks.flows.WorkingDirectory
                     tasks:
-                    - id: cloneRepository
+                    - id: clone_repository
                       type: io.kestra.plugin.git.Clone
-                      url: https://github.com/kestra-io/dbt-demo
+                      url: https://github.com/kestra-io/dbt-example
                       branch: main
-                    - id: dbt-test
+                    - id: dbt_test
                       type: io.kestra.plugin.dbt.cli.Test
                       runner: DOCKER
                       dbtPath: /usr/local/bin/dbt
                       docker:
                         image: ghcr.io/kestra-io/dbt-duckdb
                       profiles: |
-                        jaffle_shop:
+                        my_dbt_project:
                           outputs:
                             dev:
                               type: duckdb
                               path: ':memory:'
-                              extensions:
-                                - parquet
                           target: dev
                 """
         )
