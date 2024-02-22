@@ -31,6 +31,14 @@ import jakarta.validation.constraints.NotNull;
 @NoArgsConstructor
 public abstract class AbstractDbtCloud extends Task {
     @Schema(
+        title = "Base url to select the tenant."
+    )
+    @PluginProperty(dynamic = true)
+    @NotNull
+    @Builder.Default
+    String baseUrl = "https://cloud.getdbt.com";
+
+    @Schema(
         title = "Numeric ID of the account."
     )
     @PluginProperty(dynamic = true)
@@ -54,7 +62,7 @@ public abstract class AbstractDbtCloud extends Task {
         httpConfig.setMaxContentLength(Integer.MAX_VALUE);
         httpConfig.setReadTimeout(HTTP_READ_TIMEOUT);
 
-        DefaultHttpClient client = (DefaultHttpClient) FACTORY.createClient(URI.create("https://cloud.getdbt.com").toURL(), httpConfig);
+        DefaultHttpClient client = (DefaultHttpClient) FACTORY.createClient(URI.create(runContext.render(baseUrl)).toURL(), httpConfig);
         client.setMediaTypeCodecRegistry(mediaTypeCodecRegistry);
 
         return client;
