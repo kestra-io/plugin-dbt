@@ -206,7 +206,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                                                         "runId", id
                                                 ))
                                 ),
-                        Argument.of(RunResponse.class)
+                        Argument.of(RunResponse.class),
+                    maxDuration
                 )
                 .getBody();
     }

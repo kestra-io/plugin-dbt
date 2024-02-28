@@ -23,6 +23,8 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Duration;
 import jakarta.validation.constraints.NotNull;
+import org.reactivestreams.Publisher;
+import reactor.core.publisher.Mono;
 
 @SuperBuilder
 @ToString
@@ -68,14 +70,23 @@ public abstract class AbstractDbtCloud extends Task {
         return client;
     }
 
-    protected <REQ, RES> HttpResponse<RES> request(RunContext runContext, MutableHttpRequest<REQ> request, Argument<RES> argument) throws HttpClientResponseException {
+    protected <REQ, RES> HttpResponse<RES> request(RunContext runContext,
+                                                   MutableHttpRequest<REQ> request,
+                                                   Argument<RES> argument) throws HttpClientResponseException {
+        return request(runContext, request, argument, null);
+    }
+    protected <REQ, RES> HttpResponse<RES> request(RunContext runContext,
+                                                   MutableHttpRequest<REQ> request,
+                                                   Argument<RES> argument,
+                                                   Duration timeout) throws HttpClientResponseException {
         try {
             request = request
                 .bearerAuth(runContext.render(this.token))
                 .contentType(MediaType.APPLICATION_JSON);
 
             try (HttpClient client = this.client(runContext)) {
-                return client.toBlocking().exchange(request, argument);
+                Mono<HttpResponse<RES>> mono = Mono.from(client.exchange(request, argument));
+                return timeout != null ? mono.block(timeout) : mono.block();
             }
         } catch (HttpClientResponseException e) {
             throw new HttpClientResponseException(
