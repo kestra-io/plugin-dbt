@@ -47,6 +47,7 @@ dependencies {
     compileOnly "io.micronaut.validation:micronaut-validation"
     compileOnly "io.micronaut:micronaut-http-client"
     compileOnly "io.micronaut.reactor:micronaut-reactor"
+    compileOnly "io.micronaut:micronaut-jackson-databind"
 
     // kestra
     compileOnly group: "io.kestra", name: "core", version: kestraVersion
@@ -82,6 +83,7 @@ dependencies {
 
     testImplementation platform("io.micronaut.platform:micronaut-platform:$micronautVersion")
     testImplementation "io.micronaut.test:micronaut-test-junit5"
+    testImplementation "io.micronaut:micronaut-jackson-databind"
 
     // test deps needed only for to have a runner
     testImplementation group: "io.kestra", name: "core", version: kestraVersion
