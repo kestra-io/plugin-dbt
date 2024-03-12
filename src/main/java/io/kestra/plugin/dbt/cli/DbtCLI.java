@@ -74,7 +74,7 @@ import jakarta.validation.constraints.NotNull;
                           target: dev"""
         ),
         @Example(
-            title = "Install a custom dbt version and run `dbt deps` and `dbt build` commands.",
+            title = "Install a custom dbt version and run `dbt deps` and `dbt build` commands. Note how you can also configure the memory limit for the Docker runner. This is useful when you see Zombie processes.",
             full = true,
             code = """
             id: dbt_custom_dependencies
@@ -99,6 +99,8 @@ import jakarta.validation.constraints.NotNull;
                     runner: DOCKER
                     docker:
                       image: python:3.11-slim
+                      memory:
+                        memory: 2GB                      
                     beforeCommands:
                       - pip install uv
                       - uv venv --quiet
