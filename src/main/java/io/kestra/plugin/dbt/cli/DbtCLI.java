@@ -100,7 +100,7 @@ import jakarta.validation.constraints.NotNull;
                     docker:
                       image: python:3.11-slim
                       memory:
-                        memory: 2GB                      
+                        memory: 1GB                      
                     beforeCommands:
                       - pip install uv
                       - uv venv --quiet
