@@ -100,7 +100,7 @@ import jakarta.validation.constraints.NotNull;
                     docker:
                       image: python:3.11-slim
                       memory:
-                        memory: 1GB                      
+                        memory: 1GB          
                     beforeCommands:
                       - pip install uv
                       - uv venv --quiet
@@ -136,7 +136,7 @@ public class DbtCLI extends AbstractExecScript {
 
     @Schema(
         title = "The `profiles.yml` file content.",
-        description = "If a `profile.yml` file already exists in the current working directory, setting this property will generate an error."
+        description = "If a `profile.yml` file already exists in the current working directory, it will be overridden."
     )
     @PluginProperty(dynamic = true)
     private String profiles;
@@ -190,8 +190,8 @@ public class DbtCLI extends AbstractExecScript {
         Path workingDirectory = projectDir == null ? commands.getWorkingDirectory() : commands.getWorkingDirectory().resolve(projectDir);
 
         if (profiles != null && !profiles.isEmpty()) {
-            if (Files.exists(workingDirectory.resolve("profiles.yml"))) {
-                throw new IllegalArgumentException("Cannot use the profiles property if there is already a 'profiles.yml' file");
+            if (Files.exists(Path.of(".profiles/profiles.yml"))) {
+                runContext.logger().warn("A 'profiles.yml' file already exist in the task working directory, it will be overridden.");
             }
 
             FileUtils.writeStringToFile(

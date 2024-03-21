@@ -25,7 +25,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 
 @SuperBuilder
@@ -74,7 +73,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
 
     @Schema(
         title = "The `profiles.yml` file content",
-        description = "If a `profile.yml` file already exist in the current working directory, setting this property will generate an error."
+        description = "If a `profile.yml` file already exist in the current working directory, it will be overridden."
     )
     @PluginProperty(dynamic = true)
     private String profiles;
@@ -154,7 +153,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
 
         if (profiles != null && !profiles.isEmpty()) {
             if (Files.exists(Path.of(".profiles/profiles.yml"))) {
-                throw new IllegalArgumentException("Cannot use the profiles property if there is already a 'profiles.yml' file");
+                runContext.logger().warn("A 'profiles.yml' file already exist in the task working directory, it will be overridden.");
             }
 
             FileUtils.writeStringToFile(
