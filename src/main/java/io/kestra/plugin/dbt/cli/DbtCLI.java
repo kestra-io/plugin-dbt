@@ -164,6 +164,9 @@ public class DbtCLI extends AbstractExecScript {
     @PluginProperty
     protected Boolean parseRunResults = true;
 
+    @Builder.Default
+    protected String containerImage = DEFAULT_IMAGE;
+
     @Override
     protected DockerOptions injectDefaults(DockerOptions original) {
         var builder = original.toBuilder();
@@ -203,7 +206,7 @@ public class DbtCLI extends AbstractExecScript {
 
         List<String> commandsArgs = ScriptService.scriptCommands(
             this.interpreter,
-            this.beforeCommands,
+            this.getBeforeCommandsWithOptions(),
             this.commands
         );
 
