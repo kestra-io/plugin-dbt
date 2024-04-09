@@ -87,6 +87,8 @@ import jakarta.validation.constraints.NotNull;
 public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutput> {
     static final private ObjectMapper MAPPER = JacksonMapper.ofYaml();
 
+    private static final String DEFAULT_IMAGE = "python";
+
     @Schema(
         title = "The `profiles.yml` file content. Can be an object (a map) or a string.",
         anyOf = { Map.class, String.class }
@@ -118,10 +120,11 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
         title = "Exit if any non true return value.",
         description = "This tells bash that it should exit the script if any statement returns a non-true return value. \n" +
             "The benefit of using -e is that it prevents errors snowballing into serious issues when they could " +
-            "have been caught earlier."
+            "have been caught earlier. This option is deprecated. Use `failFast` instead."
     )
     @PluginProperty
     @NotNull
+    @Deprecated(since = "0.16.0", forRemoval = true)
     protected Boolean exitOnFailed = true;
 
     @Schema(
@@ -150,8 +153,11 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     @PluginProperty
     @Builder.Default
     protected DockerOptions docker = DockerOptions.builder()
-        .image("python")
+        .image(DEFAULT_IMAGE)
         .build();
+
+    @Builder.Default
+    protected String containerImage = DEFAULT_IMAGE;
 
     @Schema(title = "Deprecated, use the `docker` property instead.", deprecated = true)
     @PluginProperty
@@ -193,7 +199,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
 
         List<String> commandsArgs = ScriptService.scriptCommands(
             this.interpreter,
-            this.beforeCommands,
+            this.getBeforeCommandsWithOptions(),
             commands
         );
 
@@ -209,9 +215,6 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     private List<String> virtualEnvCommand(RunContext runContext, Path workingDirectory, List<String> requirements) throws IllegalVariableEvaluationException {
         List<String> renderer = new ArrayList<>();
 
-        if (this.exitOnFailed) {
-            renderer.add("set -o errexit");
-        }
         renderer.add(this.pythonPath + " -m venv --system-site-packages " + workingDirectory + " > /dev/null");
 
         if (requirements != null) {
