@@ -1,5 +1,6 @@
 package io.kestra.plugin.dbt.cli;
 
+import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
@@ -159,15 +160,14 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     @Builder.Default
     protected String containerImage = DEFAULT_IMAGE;
 
-    @Schema(title = "Deprecated, use the `docker` property instead.", deprecated = true)
+    @Schema(title = "Deprecated, use the `docker` property instead", deprecated = true)
     @PluginProperty
     @Deprecated
-    public DockerOptions getDockerOptions() {
-        return docker;
-    }
+    private DockerOptions dockerOptions;
 
-    @Deprecated
+    @JsonSetter
     public void setDockerOptions(DockerOptions dockerOptions) {
+        this.dockerOptions = dockerOptions;
         this.docker = dockerOptions;
     }
 
