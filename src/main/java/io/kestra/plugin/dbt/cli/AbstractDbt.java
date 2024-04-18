@@ -1,5 +1,6 @@
 package io.kestra.plugin.dbt.cli;
 
+import com.fasterxml.jackson.annotation.JsonSetter;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.tasks.*;
@@ -100,12 +101,11 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     @Schema(title = "Deprecated, use the `docker` property instead", deprecated = true)
     @PluginProperty
     @Deprecated
-    public DockerOptions getDockerOptions() {
-        return docker;
-    }
+    private DockerOptions dockerOptions;
 
-    @Deprecated
+    @JsonSetter
     public void setDockerOptions(DockerOptions dockerOptions) {
+        this.dockerOptions = dockerOptions;
         this.docker = dockerOptions;
     }
 
