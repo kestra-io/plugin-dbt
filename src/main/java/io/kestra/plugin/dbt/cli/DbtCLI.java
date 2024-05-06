@@ -49,29 +49,30 @@ import jakarta.validation.constraints.NotNull;
             code = """
                 id: dbt_build
                 namespace: dev
-                
+
                 tasks:
                   - id: dbt
                     type: io.kestra.core.tasks.flows.WorkingDirectory
                     tasks:
-                    - id: cloneRepository
-                      type: io.kestra.plugin.git.Clone
-                      url: https://github.com/kestra-io/dbt-example
-                      branch: main
-                    - id: dbt-build
-                      type: io.kestra.plugin.dbt.cli.DbtCLI
-                      runner: DOCKER
-                      docker:
-                        image: ghcr.io/kestra-io/dbt-duckdb
-                      commands:
-                        - dbt build
-                      profiles: |
-                        my_dbt_project:
-                          outputs:
-                            dev:
-                            type: duckdb
-                            path: ":memory:"
-                          target: dev"""
+                      - id: cloneRepository
+                        type: io.kestra.plugin.git.Clone
+                        url: https://github.com/kestra-io/dbt-example
+                        branch: main
+
+                      - id: dbt-build
+                        type: io.kestra.plugin.dbt.cli.DbtCLI
+                        containerImage: ghcr.io/kestra-io/dbt-duckdb:latest
+                        taskRunner:
+                          type: io.kestra.plugin.scripts.runner.docker.DockerTaskRunner
+                        commands:
+                          - dbt build
+                        profiles: |
+                          my_dbt_project:
+                            outputs:
+                              dev:
+                                type: duckdb
+                                path: ":memory:"
+                            target: dev"""
         ),
         @Example(
             title = "Install a custom dbt version and run `dbt deps` and `dbt build` commands. Note how you can also configure the memory limit for the Docker runner. This is useful when you see Zombie processes.",
