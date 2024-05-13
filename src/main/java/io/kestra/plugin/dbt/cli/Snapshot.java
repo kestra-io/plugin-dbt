@@ -35,10 +35,10 @@ import lombok.experimental.SuperBuilder;
                       branch: main
                     - id: dbt-snapshot
                       type: io.kestra.plugin.dbt.cli.Snapshot
-                      runner: DOCKER
+                      taskRunner:
+                        type: io.kestra.plugin.scripts.runner.docker.DockerTaskRunner
                       dbtPath: /usr/local/bin/dbt
-                      docker:
-                        image: ghcr.io/kestra-io/dbt-duckdb
+                      containerImage: ghcr.io/kestra-io/dbt-duckdb
                       profiles: |
                         jaffle_shop:
                           outputs:

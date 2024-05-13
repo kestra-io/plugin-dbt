@@ -37,12 +37,13 @@ import java.nio.file.Path;
                       type: io.kestra.plugin.git.Clone
                       url: https://github.com/kestra-io/dbt-demo
                       branch: main
+
                     - id: dbt-freshness
                       type: io.kestra.plugin.dbt.cli.Freshness
-                      runner: DOCKER
+                      taskRunner:
+                        type: io.kestra.plugin.scripts.runner.docker.DockerTaskRunner
                       dbtPath: /usr/local/bin/dbt
-                      docker:
-                        image: ghcr.io/kestra-io/dbt-duckdb
+                      containerImage: ghcr.io/kestra-io/dbt-duckdb
                       profiles: |
                         jaffle_shop:
                           outputs:

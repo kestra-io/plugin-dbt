@@ -97,11 +97,11 @@ import jakarta.validation.constraints.NotNull;
 
                   - id: dbt
                     type: io.kestra.plugin.dbt.cli.DbtCLI
-                    runner: DOCKER
-                    docker:
-                      image: python:3.11-slim
+                    taskRunner:
+                      type: io.kestra.plugin.scripts.runner.docker.DockerTaskRunner
                       memory:
                         memory: 1GB          
+                    containerImage: python:3.11-slim
                     beforeCommands:
                       - pip install uv
                       - uv venv --quiet
