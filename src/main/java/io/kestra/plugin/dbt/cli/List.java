@@ -39,10 +39,10 @@ import java.nio.file.Path;
                       branch: main
                     - id: dbt-list
                       type: io.kestra.plugin.dbt.cli.List
-                      runner: DOCKER
+                      taskRunner:
+                        type: io.kestra.plugin.scripts.runner.docker.DockerTaskRunner
                       dbtPath: /usr/local/bin/dbt
-                      docker:
-                        image: ghcr.io/kestra-io/dbt-duckdb
+                      containerImage: ghcr.io/kestra-io/dbt-duckdb
                       profiles: |
                         jaffle_shop:
                           outputs:
