@@ -6,7 +6,7 @@ inputs:
 
 tasks:
 - id: worker
-  type: io.kestra.core.tasks.flows.WorkingDirectory
+  type: io.kestra.plugin.core.flow.WorkingDirectory
   tasks:
     - id: setup
       type: io.kestra.plugin.dbt.cli.Setup

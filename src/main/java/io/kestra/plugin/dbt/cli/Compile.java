@@ -27,7 +27,7 @@ import lombok.experimental.SuperBuilder;
                 id: dbt-compile
                 tasks:
                   - id: working-directory
-                    type: io.kestra.core.tasks.flows.WorkingDirectory
+                    type: io.kestra.plugin.core.flow.WorkingDirectory
                     tasks:
                     - id: cloneRepository
                       type: io.kestra.plugin.git.Clone
