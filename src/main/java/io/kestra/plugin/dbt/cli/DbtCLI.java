@@ -52,7 +52,7 @@ import jakarta.validation.constraints.NotNull;
 
                 tasks:
                   - id: dbt
-                    type: io.kestra.core.tasks.flows.WorkingDirectory
+                    type: io.kestra.plugin.core.flow.WorkingDirectory
                     tasks:
                       - id: cloneRepository
                         type: io.kestra.plugin.git.Clone
@@ -88,7 +88,7 @@ import jakarta.validation.constraints.NotNull;
 
             tasks:
               - id: git
-                type: io.kestra.core.tasks.flows.WorkingDirectory
+                type: io.kestra.plugin.core.flow.WorkingDirectory
                 tasks:
                   - id: clone_repository
                     type: io.kestra.plugin.git.Clone
