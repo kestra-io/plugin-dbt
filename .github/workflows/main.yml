@@ -11,7 +11,13 @@ on:
     branches:
       - master
 
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      skip-test:
+        description: 'Skip test'
+        required: false
+        type: string
+        default: "false"
 
 jobs:
   check:
@@ -43,13 +49,16 @@ jobs:
         uses: gradle/wrapper-validation-action@v3
 
       # Google Cloud
-      - id: auth
+      - name: Auth to Google Cloud
+        id: auth
+        if: ${{ github.event.inputs.skip-test == 'false' || github.event.inputs.skip-test == '' }}
         uses: 'google-github-actions/auth@v2'
         with:
           credentials_json: '${{ secrets.GOOGLE_SERVICE_ACCOUNT }}'
 
       # Gradle check
       - name: Build with Gradle
+        if: ${{ github.event.inputs.skip-test == 'false' || github.event.inputs.skip-test == '' }}
         env:
           DBT_APPLICATION: ${{ secrets.DBT_APPLICATION }}
         run: |
