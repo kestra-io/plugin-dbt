@@ -102,10 +102,10 @@ public abstract class ResultParser {
                     )
                     .build();
             }))
-            .collect(Collectors.toList());
+            .toList();
 
         runContext.dynamicWorkerResult(workerTaskResults);
 
-        return runContext.putTempFile(file);
+        return runContext.storage().putFile(file);
     }
 }
