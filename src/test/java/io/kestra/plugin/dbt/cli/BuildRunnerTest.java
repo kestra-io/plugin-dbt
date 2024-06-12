@@ -1,13 +1,13 @@
 package io.kestra.plugin.dbt.cli;
 
 import io.kestra.core.models.flows.State;
-import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
+import io.kestra.core.junit.annotations.KestraTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import io.kestra.core.models.executions.Execution;
 import io.kestra.core.repositories.LocalFlowRepositoryLoader;
 import io.kestra.core.runners.RunnerUtils;
-import io.kestra.runner.memory.MemoryRunner;
+import io.kestra.core.runners.StandAloneRunner;
 
 import jakarta.inject.Inject;
 import java.io.IOException;
@@ -21,10 +21,10 @@ import java.util.concurrent.TimeoutException;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
-@MicronautTest
+@KestraTest
 class BuildRunnerTest {
     @Inject
-    protected MemoryRunner runner;
+    protected StandAloneRunner runner;
 
     @Inject
     protected RunnerUtils runnerUtils;
