@@ -155,8 +155,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         }
 
         return Output.builder()
-                .runResults(runResultsArtifact.toFile().exists() ? runContext.putTempFile(runResultsArtifact.toFile()) : null)
-                .manifest(manifestArtifact.toFile().exists() ? runContext.putTempFile(manifestArtifact.toFile()) : null)
+                .runResults(runResultsArtifact.toFile().exists() ? runContext.storage().putFile(runResultsArtifact.toFile()) : null)
+                .manifest(manifestArtifact.toFile().exists() ? runContext.storage().putFile(manifestArtifact.toFile()) : null)
                 .build();
     }
 

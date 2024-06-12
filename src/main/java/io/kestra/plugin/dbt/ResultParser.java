@@ -18,7 +18,6 @@ import java.io.IOException;
 import java.net.URI;
 import java.time.Instant;
 import java.util.Objects;
-import java.util.stream.Collectors;
 
 import static io.kestra.core.utils.Rethrow.throwFunction;
 
@@ -27,7 +26,7 @@ public abstract class ResultParser {
         .setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
     public static URI parseManifest(RunContext runContext, File file) throws IOException {
-        return runContext.putTempFile(file);
+        return runContext.storage().putFile(file);
     }
 
     public static URI parseRunResult(RunContext runContext, File file) throws IOException, IllegalVariableEvaluationException {
