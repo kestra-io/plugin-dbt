@@ -63,7 +63,7 @@ class DbtCLITest {
                     """
             )
             .docker(DockerOptions.builder()
-                .image("ghcr.io/dbt-labs/dbt-bigquery")
+                .image("ghcr.io/kestra-io/dbt-bigquery:latest")
                 .entryPoint(List.of())
                 .build()
             )
