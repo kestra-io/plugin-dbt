@@ -42,7 +42,7 @@ import java.nio.file.Path;
                     - id: dbt-deps
                       type: io.kestra.plugin.dbt.cli.Deps
                       taskRunner: 
-                        type: io.kestra.plugin.scripts.runner.docker.DockerTaskRunner
+                        type: io.kestra.plugin.scripts.runner.docker.Docker
                       dbtPath: /usr/local/bin/dbt
                       containerImage: ghcr.io/kestra-io/dbt-duckdb
                       profiles: |

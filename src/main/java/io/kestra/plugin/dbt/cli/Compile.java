@@ -37,7 +37,7 @@ import lombok.experimental.SuperBuilder;
                     - id: dbt-compile
                       type: io.kestra.plugin.dbt.cli.Compile
                       taskRunner:
-                        type: io.kestra.plugin.scripts.runner.docker.DockerTaskRunner
+                        type: io.kestra.plugin.scripts.runner.docker.Docker
                       dbtPath: /usr/local/bin/dbt
                       containerImage: ghcr.io/kestra-io/dbt-duckdb
                       profiles: |

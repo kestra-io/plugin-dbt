@@ -63,7 +63,7 @@ import jakarta.validation.constraints.NotNull;
                         type: io.kestra.plugin.dbt.cli.DbtCLI
                         containerImage: ghcr.io/kestra-io/dbt-duckdb:latest
                         taskRunner:
-                          type: io.kestra.plugin.scripts.runner.docker.DockerTaskRunner
+                          type: io.kestra.plugin.scripts.runner.docker.Docker
                         commands:
                           - dbt build
                         profiles: |
@@ -98,7 +98,7 @@ import jakarta.validation.constraints.NotNull;
                   - id: dbt
                     type: io.kestra.plugin.dbt.cli.DbtCLI
                     taskRunner:
-                      type: io.kestra.plugin.scripts.runner.docker.DockerTaskRunner
+                      type: io.kestra.plugin.scripts.runner.docker.Docker
                       memory:
                         memory: 1GB          
                     containerImage: python:3.11-slim
