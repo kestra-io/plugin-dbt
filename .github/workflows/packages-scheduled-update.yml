@@ -49,6 +49,7 @@ jobs:
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
+        continue-on-error: true  # avoid blocking other images
         with:
           context: .
           push: true
