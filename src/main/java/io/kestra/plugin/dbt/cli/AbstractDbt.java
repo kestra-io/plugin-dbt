@@ -6,13 +6,16 @@ import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.tasks.*;
 import io.kestra.core.models.tasks.runners.AbstractLogConsumer;
 import io.kestra.core.models.tasks.runners.ScriptService;
+import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
+import io.kestra.plugin.core.runner.Process;
 import io.kestra.plugin.dbt.ResultParser;
 import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.RunnerType;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.plugin.scripts.exec.scripts.runners.CommandsWrapper;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.Valid;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.apache.commons.io.FileUtils;
@@ -26,7 +29,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import jakarta.validation.constraints.NotNull;
 
 @SuperBuilder
 @ToString
@@ -34,6 +36,8 @@ import jakarta.validation.constraints.NotNull;
 @Getter
 @NoArgsConstructor
 public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOutput>, NamespaceFilesInterface, InputFilesInterface, OutputFilesInterface {
+    private static final String DEFAULT_IMAGE = "ghcr.io/kestra-io/dbt";
+
     @Builder.Default
     @Schema(
         title = "Stop execution at the first failure."
@@ -79,24 +83,35 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     @PluginProperty(dynamic = true)
     private String profiles;
 
-    // set RunnerType to PROCESS to keep backward compatibility as the old script engine has PROCESS by default and the new DOCKER
-    @Builder.Default
+    // set taskRunner to PROCESS to keep backward compatibility as the old script engine has PROCESS by default and the new DOCKER
     @Schema(
-        title = "Runner to use"
+        title = "The task runner to use.",
+        description = "Task runners are provided by plugins, each have their own properties."
     )
     @PluginProperty
-    @NotNull
-    protected RunnerType runner = RunnerType.PROCESS;
+    @Builder.Default
+    @Valid
+    protected TaskRunner taskRunner = Process.INSTANCE;
+
+    @Schema(title = "The task runner container image, only used if the task runner is container-based.")
+    @PluginProperty(dynamic = true)
+    @Builder.Default
+    protected String containerImage = DEFAULT_IMAGE;
 
     @Schema(
-        title = "Docker options for the `DOCKER` runner"
+        title = "The runner type.",
+        description = "Deprecated, use 'taskRunner' instead."
+    )
+    @Deprecated
+    @PluginProperty
+    protected RunnerType runner;
+
+    @Schema(
+        title = "Deprecated, use 'taskRunner' instead"
     )
     @PluginProperty
-    @Builder.Default
-    private DockerOptions docker = DockerOptions.builder()
-        .image("ghcr.io/kestra-io/dbt")
-        .entryPoint(List.of())
-        .build();
+    @Deprecated
+    private DockerOptions docker;
 
     @Schema(title = "Deprecated, use the `docker` property instead", deprecated = true)
     @PluginProperty
@@ -143,6 +158,8 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             .withOutputFiles(outputFiles)
             .withRunnerType(this.getRunner())
             .withDockerOptions(this.getDocker())
+            .withContainerImage(this.containerImage)
+            .withTaskRunner(this.taskRunner)
             .withLogConsumer(new AbstractLogConsumer() {
                 @Override
                 public void accept(String line, Boolean isStdErr) {
