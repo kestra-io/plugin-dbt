@@ -232,7 +232,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                 .getBody()
                 .orElseThrow();
 
-        Path tempFile = runContext.tempFile(".json");
+        Path tempFile = runContext.workingDir().createTempFile(".json");
 
         Files.writeString(tempFile, artifact, StandardOpenOption.TRUNCATE_EXISTING);
 

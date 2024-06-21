@@ -65,7 +65,7 @@ class BuildTest {
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, setup, Map.of());
 
-        copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), runContext.tempDir(true));
+        copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), runContext.workingDir().path(true));
 
         setup.run(runContext);
 

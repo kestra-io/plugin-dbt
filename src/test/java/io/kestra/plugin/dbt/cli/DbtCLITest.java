@@ -72,7 +72,7 @@ class DbtCLITest {
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
 
-        Path workingDir = runContext.tempDir(true);
+        Path workingDir = runContext.workingDir().workingDir().path(true);
         copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), workingDir);
         createSaFile(workingDir);
 
