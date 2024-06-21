@@ -23,8 +23,8 @@ import lombok.experimental.SuperBuilder;
             full = true,
             title = "Invoke dbt `build` command.",
             code = """
-                   namespace: io.kestra.tests
                    id: dbt-build
+                   namespace: company.team
                    tasks:
                      - id: working-directory
                        type: io.kestra.plugin.core.flow.WorkingDirectory

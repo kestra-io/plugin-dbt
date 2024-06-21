@@ -24,28 +24,28 @@ import lombok.experimental.SuperBuilder;
             title = "Invoke dbt `test` command.",
             code = """
                 id: dbt_test
-                namespace: dev
+                namespace: company.team
                 tasks:
                   - id: wdir
                     type: io.kestra.plugin.core.flow.WorkingDirectory
                     tasks:
-                    - id: clone_repository
-                      type: io.kestra.plugin.git.Clone
-                      url: https://github.com/kestra-io/dbt-example
-                      branch: main
-                    - id: dbt_test
-                      type: io.kestra.plugin.dbt.cli.Test
-                      taskRunner:
-                        type: io.kestra.plugin.scripts.runner.docker.Docker
-                      dbtPath: /usr/local/bin/dbt
-                      containerImage: ghcr.io/kestra-io/dbt-duckdb
-                      profiles: |
-                        my_dbt_project:
-                          outputs:
-                            dev:
-                              type: duckdb
-                              path: ':memory:'
-                          target: dev
+                      - id: clone_repository
+                        type: io.kestra.plugin.git.Clone
+                        url: https://github.com/kestra-io/dbt-example
+                        branch: main
+                      - id: dbt_test
+                        type: io.kestra.plugin.dbt.cli.Test
+                        taskRunner:
+                          type: io.kestra.plugin.scripts.runner.docker.Docker
+                        dbtPath: /usr/local/bin/dbt
+                        containerImage: ghcr.io/kestra-io/dbt-duckdb
+                        profiles: |
+                          my_dbt_project:
+                            outputs:
+                              dev:
+                                type: duckdb
+                                path: ':memory:'
+                            target: dev
                 """
         )
     }

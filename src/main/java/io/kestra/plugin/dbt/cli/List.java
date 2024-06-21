@@ -27,31 +27,31 @@ import java.nio.file.Path;
             full = true,
             title = "Invoke dbt `list` command.",
             code = """
-                namespace: io.kestra.tests
                 id: dbt-list
+                namespace: company.team
                 tasks:
                   - id: working-directory
                     type: io.kestra.plugin.core.flow.WorkingDirectory
                     tasks:
-                    - id: cloneRepository
-                      type: io.kestra.plugin.git.Clone
-                      url: https://github.com/kestra-io/dbt-demo
-                      branch: main
-                    - id: dbt-list
-                      type: io.kestra.plugin.dbt.cli.List
-                      taskRunner:
-                        type: io.kestra.plugin.scripts.runner.docker.Docker
-                      dbtPath: /usr/local/bin/dbt
-                      containerImage: ghcr.io/kestra-io/dbt-duckdb
-                      profiles: |
-                        jaffle_shop:
-                          outputs:
-                            dev:
-                              type: duckdb
-                              path: ':memory:'
-                              extensions:
-                                - parquet
-                          target: dev
+                      - id: cloneRepository
+                        type: io.kestra.plugin.git.Clone
+                        url: https://github.com/kestra-io/dbt-demo
+                        branch: main
+                      - id: dbt-list
+                        type: io.kestra.plugin.dbt.cli.List
+                        taskRunner:
+                          type: io.kestra.plugin.scripts.runner.docker.Docker
+                        dbtPath: /usr/local/bin/dbt
+                        containerImage: ghcr.io/kestra-io/dbt-duckdb
+                        profiles: |
+                          jaffle_shop:
+                            outputs:
+                              dev:
+                                type: duckdb
+                                path: ':memory:'
+                                extensions:
+                                  - parquet
+                            target: dev
                 """
         )
     }
