@@ -48,7 +48,7 @@ import jakarta.validation.constraints.NotNull;
             full = true,
             code = """
                 id: dbt_build
-                namespace: dev
+                namespace: company.team
 
                 tasks:
                   - id: dbt
@@ -79,7 +79,7 @@ import jakarta.validation.constraints.NotNull;
             full = true,
             code = """
             id: dbt_custom_dependencies
-            namespace: dev
+            namespace: company.team
 
             inputs:
               - id: dbt_version

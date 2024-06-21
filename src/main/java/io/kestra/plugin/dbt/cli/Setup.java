@@ -56,31 +56,31 @@ import jakarta.validation.constraints.NotNull;
             full = true,
             title = "Setup dbt by installing pip dependencies in a Python virtualenv and initializing the profile directory.",
             code = """
-                namespace: io.kestra.tests
                 id: dbt-setup
+                namespace: company.team
                 tasks:
                   - id: working-directory
                     type: io.kestra.plugin.core.flow.WorkingDirectory
                     tasks:
-                    - id: cloneRepository
-                      type: io.kestra.plugin.git.Clone
-                      url: https://github.com/kestra-io/dbt-demo
-                      branch: main
-                    - id: dbt-setup
-                      type: io.kestra.plugin.dbt.cli.Setup
-                      requirements:
-                        - dbt-duckdb
-                      profiles:
-                        jaffle_shop:
-                          outputs:
-                            dev:
-                              type: duckdb
-                              path: ':memory:'
-                              extensions:
-                                - parquet
-                          target: dev
-                    - id: dbt-build
-                      type: io.kestra.plugin.dbt.cli.Build
+                      - id: cloneRepository
+                        type: io.kestra.plugin.git.Clone
+                        url: https://github.com/kestra-io/dbt-demo
+                        branch: main
+                      - id: dbt-setup
+                        type: io.kestra.plugin.dbt.cli.Setup
+                        requirements:
+                          - dbt-duckdb
+                        profiles:
+                          jaffle_shop:
+                            outputs:
+                              dev:
+                                type: duckdb
+                                path: ':memory:'
+                                extensions:
+                                  - parquet
+                            target: dev
+                      - id: dbt-build
+                        type: io.kestra.plugin.dbt.cli.Build
                 """
         )
     }
