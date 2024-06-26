@@ -27,13 +27,7 @@ tasks:
           target: dev
       requirements:
         - dbt-bigquery
-      # runner: DOCKER
-      # dockerOptions:
-      #   image: python:3.9
     - id: run
       type: io.kestra.plugin.dbt.cli.Build
       thread: 16
       projectDir: "{{ inputs.path }}"
-      # runner: DOCKER
-      # dockerOptions:
-      #   image: python:3.9
