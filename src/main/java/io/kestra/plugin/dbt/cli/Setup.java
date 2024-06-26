@@ -13,11 +13,11 @@ import io.kestra.core.models.tasks.runners.ScriptService;
 import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
-import io.kestra.plugin.core.runner.Process;
 import io.kestra.plugin.scripts.exec.AbstractExecScript;
 import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.plugin.scripts.exec.scripts.runners.CommandsWrapper;
+import io.kestra.plugin.scripts.runner.docker.Docker;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import lombok.Builder;
@@ -141,7 +141,6 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     )
     private Object inputFiles;
 
-    // set taskRunner to PROCESS to keep backward compatibility as the old script engine has PROCESS by default and the new DOCKER
     @Schema(
         title = "The task runner to use.",
         description = "Task runners are provided by plugins, each have their own properties."
@@ -149,7 +148,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     @PluginProperty
     @Builder.Default
     @Valid
-    protected TaskRunner taskRunner = Process.INSTANCE;
+    protected TaskRunner taskRunner = Docker.INSTANCE;
 
     @Builder.Default
     protected String containerImage = DEFAULT_IMAGE;

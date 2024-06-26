@@ -37,9 +37,6 @@ import static org.hamcrest.Matchers.containsString;
 @KestraTest
 class SerializationTest {
     @Inject
-    private RunContextFactory runContextFactory;
-
-    @Inject
     private ApplicationContext applicationContext;
 
     @Inject
