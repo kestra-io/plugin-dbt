@@ -8,12 +8,12 @@ import io.kestra.core.models.tasks.runners.AbstractLogConsumer;
 import io.kestra.core.models.tasks.runners.ScriptService;
 import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
-import io.kestra.plugin.core.runner.Process;
 import io.kestra.plugin.dbt.ResultParser;
 import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.RunnerType;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.plugin.scripts.exec.scripts.runners.CommandsWrapper;
+import io.kestra.plugin.scripts.runner.docker.Docker;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import lombok.*;
@@ -27,6 +27,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -83,15 +84,19 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     @PluginProperty(dynamic = true)
     private String profiles;
 
-    // set taskRunner to PROCESS to keep backward compatibility as the old script engine has PROCESS by default and the new DOCKER
     @Schema(
         title = "The task runner to use.",
-        description = "Task runners are provided by plugins, each have their own properties."
+        description = """
+            Task runners are provided by plugins, each have their own properties.
+            If you change from the default one, be careful to also configure the entrypoint to an empty list if needed."""
     )
     @PluginProperty
     @Builder.Default
     @Valid
-    protected TaskRunner taskRunner = Process.INSTANCE;
+    protected TaskRunner taskRunner = Docker.builder()
+        .type(Docker.class.getName())
+        .entryPoint(Collections.emptyList())
+        .build();
 
     @Schema(title = "The task runner container image, only used if the task runner is container-based.")
     @PluginProperty(dynamic = true)
