@@ -1,9 +1,11 @@
 package io.kestra.plugin.dbt.cli;
 
+import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
+import io.kestra.plugin.core.runner.Process;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
@@ -44,6 +46,7 @@ class BuildTest {
         Setup setup = Setup.builder()
             .id(IdUtils.create())
             .type(Setup.class.getName())
+            .taskRunner(Process.INSTANCE)
             .profiles(Map.of(
                 "unit-kestra", Map.of(
                     "outputs", Map.of(
@@ -70,6 +73,7 @@ class BuildTest {
         setup.run(runContext);
 
         Build task = Build.builder()
+            .taskRunner(Process.INSTANCE)
             .thread(8)
             .build();
 
