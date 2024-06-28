@@ -191,7 +191,7 @@ public class DbtCLI extends AbstractExecScript {
                 }
             });
 
-        Path workingDirectory = projectDir == null ? commands.getWorkingDirectory() : commands.getWorkingDirectory().resolve(projectDir);
+        Path projectWorkingDirectory = projectDir == null ? commands.getWorkingDirectory() : commands.getWorkingDirectory().resolve(projectDir);
 
         if (profiles != null && !profiles.isEmpty()) {
             if (Files.exists(Path.of(".profiles/profiles.yml"))) {
@@ -199,7 +199,7 @@ public class DbtCLI extends AbstractExecScript {
             }
 
             FileUtils.writeStringToFile(
-                new File(workingDirectory.toString(), "profiles.yml"),
+                new File(commands.getWorkingDirectory().toString(), "profiles.yml"),
                 runContext.render(profiles),
                 StandardCharsets.UTF_8
             );
@@ -219,13 +219,13 @@ public class DbtCLI extends AbstractExecScript {
             .withCommands(commandsArgs)
             .run();
 
-        if (this.parseRunResults && workingDirectory.resolve("target/run_results.json").toFile().exists()) {
-            URI results = ResultParser.parseRunResult(runContext, workingDirectory.resolve("target/run_results.json").toFile());
+        if (this.parseRunResults && projectWorkingDirectory.resolve("target/run_results.json").toFile().exists()) {
+            URI results = ResultParser.parseRunResult(runContext, projectWorkingDirectory.resolve("target/run_results.json").toFile());
             run.getOutputFiles().put("run_results.json", results);
         }
 
-        if (workingDirectory.resolve("target/manifest.json").toFile().exists()) {
-            URI manifest = ResultParser.parseManifest(runContext, workingDirectory.resolve("target/manifest.json").toFile());
+        if (projectWorkingDirectory.resolve("target/manifest.json").toFile().exists()) {
+            URI manifest = ResultParser.parseManifest(runContext, projectWorkingDirectory.resolve("target/manifest.json").toFile());
             run.getOutputFiles().put("manifest.json", manifest);
         }
 
