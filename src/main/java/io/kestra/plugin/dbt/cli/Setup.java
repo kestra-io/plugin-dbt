@@ -10,14 +10,16 @@ import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.runners.PluginUtilsService;
 import io.kestra.core.models.tasks.runners.ScriptService;
+import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
+import io.kestra.plugin.core.runner.Process;
 import io.kestra.plugin.scripts.exec.AbstractExecScript;
 import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
-import io.kestra.plugin.scripts.exec.scripts.models.RunnerType;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.plugin.scripts.exec.scripts.runners.CommandsWrapper;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.Valid;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -139,23 +141,15 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     )
     private Object inputFiles;
 
-    // set RunnerType to PROCESS to keep backward compatibility as the old script engine has PROCESS by default and the new DOCKER
-    @Builder.Default
+    // set taskRunner to PROCESS to keep backward compatibility as the old script engine has PROCESS by default and the new DOCKER
     @Schema(
-        title = "Runner to use."
-    )
-    @PluginProperty
-    @NotNull
-    protected RunnerType runner = RunnerType.PROCESS;
-
-    @Schema(
-        title = "Docker options for the `DOCKER` runner."
+        title = "The task runner to use.",
+        description = "Task runners are provided by plugins, each have their own properties."
     )
     @PluginProperty
     @Builder.Default
-    protected DockerOptions docker = DockerOptions.builder()
-        .image(DEFAULT_IMAGE)
-        .build();
+    @Valid
+    protected TaskRunner taskRunner = Process.INSTANCE;
 
     @Builder.Default
     protected String containerImage = DEFAULT_IMAGE;

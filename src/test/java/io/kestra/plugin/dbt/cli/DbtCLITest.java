@@ -4,13 +4,11 @@ import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
-import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -62,11 +60,7 @@ class DbtCLITest {
                       target: dev
                     """
             )
-            .docker(DockerOptions.builder()
-                .image("ghcr.io/kestra-io/dbt-bigquery:latest")
-                .entryPoint(List.of())
-                .build()
-            )
+            .containerImage("ghcr.io/kestra-io/dbt-bigquery:latest")
             .commands(List.of("dbt build"))
             .build();
 

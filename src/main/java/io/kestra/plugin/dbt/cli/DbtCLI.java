@@ -6,6 +6,7 @@ import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.tasks.runners.AbstractLogConsumer;
 import io.kestra.core.models.tasks.runners.ScriptService;
+import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.plugin.dbt.ResultParser;
@@ -13,7 +14,9 @@ import io.kestra.plugin.scripts.exec.AbstractExecScript;
 import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.plugin.scripts.exec.scripts.runners.CommandsWrapper;
+import io.kestra.plugin.scripts.runner.docker.Docker;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.Valid;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -149,14 +152,6 @@ public class DbtCLI extends AbstractExecScript {
     @PluginProperty(dynamic = true)
     private String projectDir;
 
-    @Schema(
-        title = "Docker options for the `DOCKER` runner.",
-        defaultValue = "{image=" + DEFAULT_IMAGE + ", pullPolicy=ALWAYS}"
-    )
-    @PluginProperty
-    @Builder.Default
-    private DockerOptions docker = DockerOptions.builder().build();
-
     @Builder.Default
     @Schema(
         title = "Parse run result.",
@@ -165,11 +160,29 @@ public class DbtCLI extends AbstractExecScript {
     @PluginProperty
     protected Boolean parseRunResults = true;
 
+    @Schema(
+        title = "The task runner to use.",
+        description = """
+            Task runners are provided by plugins, each have their own properties.
+            If you change from the default one, be careful to also configure the entrypoint to an empty list if needed."""
+    )
+    @PluginProperty
+    @Builder.Default
+    @Valid
+    protected TaskRunner taskRunner = Docker.builder()
+        .type(Docker.class.getName())
+        .entryPoint(Collections.emptyList())
+        .build();
+
     @Builder.Default
     protected String containerImage = DEFAULT_IMAGE;
 
     @Override
     protected DockerOptions injectDefaults(DockerOptions original) {
+        if (original == null) {
+            return null;
+        }
+
         var builder = original.toBuilder();
         if (original.getImage() == null) {
             builder.image(DEFAULT_IMAGE);
