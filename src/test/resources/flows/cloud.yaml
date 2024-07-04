@@ -1,0 +1,15 @@
+id: cloud
+namespace: io.kestra.tests
+
+inputs:
+  - id: url
+    type: STRING
+
+tasks:
+  - id: run
+    type: io.kestra.plugin.dbt.cloud.TriggerRun
+    baseUrl: "{{ inputs.url }}"
+    wait: false
+    accountId: fakeAccountId
+    token: "fakeToken"
+    jobId: "fakeJobId"

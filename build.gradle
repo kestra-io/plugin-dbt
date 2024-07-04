@@ -43,6 +43,7 @@ dependencies {
     annotationProcessor "org.projectlombok:lombok"
     compileOnly "org.projectlombok:lombok"
 
+    // Micronaut
     compileOnly "io.micronaut:micronaut-http-client"
     compileOnly "io.micronaut.reactor:micronaut-reactor"
     compileOnly "io.micronaut:micronaut-jackson-databind"
