@@ -152,10 +152,12 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
 
     private List<String> outputFiles;
 
-    protected abstract java.util.List<String> dbtCommands(RunContext runContext, Path workingDirectory) throws IllegalVariableEvaluationException;
+    protected abstract java.util.List<String> dbtCommands(RunContext runContext) throws IllegalVariableEvaluationException;
 
     @Override
     public ScriptOutput run(RunContext runContext) throws Exception {
+        String baseDir = this.projectDir != null ? runContext.render(this.projectDir) : "";
+
         CommandsWrapper commandsWrapper = new CommandsWrapper(runContext)
             .withEnv(this.getEnv())
             .withNamespaceFiles(namespaceFiles)
@@ -170,7 +172,8 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
                 public void accept(String line, Boolean isStdErr) {
                     LogService.parse(runContext, line);
                 }
-            });
+            })
+            .withEnableOutputDirectory(true); //force output files on task runners
         Path workingDirectory = commandsWrapper.getWorkingDirectory();
 
         if (profiles != null && !profiles.isEmpty()) {
@@ -188,7 +191,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
         List<String> commandsArgs = ScriptService.scriptCommands(
             List.of("/bin/sh", "-c"),
             null,
-            List.of(createDbtCommand(runContext, workingDirectory))
+            List.of(createDbtCommand(runContext))
         );
 
         ScriptOutput run = commandsWrapper
@@ -204,7 +207,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
         return run;
     }
 
-    private String createDbtCommand(RunContext runContext, Path workingDirectory) throws IllegalVariableEvaluationException {
+    private String createDbtCommand(RunContext runContext) throws IllegalVariableEvaluationException {
         List<String> commands = new ArrayList<>(List.of(
             runContext.render(dbtPath),
             "--log-format json"
@@ -222,7 +225,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             commands.add("--warn-error");
         }
 
-        commands.addAll(dbtCommands(runContext, workingDirectory));
+        commands.addAll(dbtCommands(runContext));
 
         if (this.projectDir != null) {
             commands.add("--project-dir " + runContext.render(this.projectDir));

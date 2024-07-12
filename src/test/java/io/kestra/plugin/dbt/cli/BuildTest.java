@@ -85,8 +85,8 @@ class BuildTest {
         ScriptOutput runOutput = task.run(runContext);
 
         assertThat(runOutput.getExitCode(), is(0));
-        //FIXME, also assert on dynamic tasks generation
-//        assertTrue(runOutput.getOutputFiles().containsKey("run_results.json"));
-//        assertTrue(runOutput.getOutputFiles().containsKey("manifest.json"));
+        assertTrue(runOutput.getOutputFiles().containsKey("run_results.json"));
+        assertTrue(runOutput.getOutputFiles().containsKey("manifest.json"));
+        assertThat(runContext.dynamicWorkerResults(), hasSize(10));
     }
 }
