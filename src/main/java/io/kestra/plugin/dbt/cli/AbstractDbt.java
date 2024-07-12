@@ -156,8 +156,6 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
 
     @Override
     public ScriptOutput run(RunContext runContext) throws Exception {
-        String baseDir = this.projectDir != null ? runContext.render(this.projectDir) : "";
-
         CommandsWrapper commandsWrapper = new CommandsWrapper(runContext)
             .withEnv(this.getEnv())
             .withNamespaceFiles(namespaceFiles)
@@ -228,7 +226,9 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
         commands.addAll(dbtCommands(runContext));
 
         if (this.projectDir != null) {
-            commands.add("--project-dir " + runContext.render(this.projectDir));
+            commands.add("--project-dir {{" + ScriptService.VAR_WORKING_DIR + "}}" + runContext.render(this.projectDir));
+        } else {
+            commands.add("--project-dir {{" + ScriptService.VAR_WORKING_DIR + "}}");
         }
 
         return String.join(" ", commands);
