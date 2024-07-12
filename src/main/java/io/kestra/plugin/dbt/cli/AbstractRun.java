@@ -2,6 +2,7 @@ package io.kestra.plugin.dbt.cli;
 
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.PluginProperty;
+import io.kestra.core.models.tasks.runners.ScriptService;
 import io.kestra.core.runners.RunContext;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.*;
@@ -57,10 +58,10 @@ public abstract class AbstractRun extends AbstractDbt {
     abstract protected String dbtCommand();
 
     @Override
-    protected java.util.List<String> dbtCommands(RunContext runContext, Path workingDirectory) throws IllegalVariableEvaluationException {
+    protected java.util.List<String> dbtCommands(RunContext runContext) throws IllegalVariableEvaluationException {
         java.util.List<String> commands = new ArrayList<>(java.util.List.of(
             this.dbtCommand(),
-            "--profiles-dir " + workingDirectory.resolve(".profile").toAbsolutePath()));
+            "--profiles-dir {{" + ScriptService.VAR_WORKING_DIR + "}}/.profile"));
 
         if (this.thread != null) {
             commands.add("--threads " + this.thread);
