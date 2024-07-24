@@ -197,6 +197,7 @@ public class DbtCLI extends AbstractExecScript {
     @Override
     public ScriptOutput run(RunContext runContext) throws Exception {
         CommandsWrapper commands = this.commands(runContext)
+            .withEnableOutputDirectory(true) // force the output dir, so we can get the run_results.json and manifest.json files on each task runners
             .withLogConsumer(new AbstractLogConsumer() {
                 @Override
                 public void accept(String line, Boolean isStdErr) {
@@ -224,7 +225,7 @@ public class DbtCLI extends AbstractExecScript {
             this.commands
         );
 
-        ScriptOutput run = this.commands(runContext)
+        ScriptOutput run = commands
             .addEnv(Map.of(
                 "PYTHONUNBUFFERED", "true",
                 "PIP_ROOT_USER_ACTION", "ignore"
