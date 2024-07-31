@@ -208,12 +208,13 @@ public class DbtCLI extends AbstractExecScript {
         Path projectWorkingDirectory = projectDir == null ? commands.getWorkingDirectory() : commands.getWorkingDirectory().resolve(projectDir);
 
         if (profiles != null && !profiles.isEmpty()) {
-            if (Files.exists(Path.of(".profiles/profiles.yml"))) {
-                runContext.logger().warn("A 'profiles.yml' file already exist in the task working directory, it will be overridden.");
+            var profileFile = new File(commands.getWorkingDirectory().toString(), "profiles.yml");
+            if (profileFile.exists()) {
+                runContext.logger().info("A 'profiles.yml' file already exist in the task working directory, it will be overridden.");
             }
 
             FileUtils.writeStringToFile(
-                new File(commands.getWorkingDirectory().toString(), "profiles.yml"),
+                profileFile,
                 runContext.render(profiles),
                 StandardCharsets.UTF_8
             );
