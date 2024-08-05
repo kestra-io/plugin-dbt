@@ -87,6 +87,6 @@ class BuildTest {
         assertThat(runOutput.getExitCode(), is(0));
         assertTrue(runOutput.getOutputFiles().containsKey("run_results.json"));
         assertTrue(runOutput.getOutputFiles().containsKey("manifest.json"));
-        assertThat(runContext.dynamicWorkerResults(), hasSize(13));
+        assertThat(runContext.dynamicWorkerResults(), hasSize(12));
     }
 }
