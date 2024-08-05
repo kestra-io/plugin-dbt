@@ -45,7 +45,7 @@ class BuildTest {
         Setup setup = Setup.builder()
             .id(IdUtils.create())
             .type(Setup.class.getName())
-            .taskRunner(Process.INSTANCE)
+            .taskRunner(Process.instance())
             .profiles(Map.of(
                 "unit-kestra", Map.of(
                     "outputs", Map.of(
@@ -78,7 +78,7 @@ class BuildTest {
         env.put("GOOGLE_APPLICATION_CREDENTIALS", runContext.workingDir().resolve(Path.of("sa.json")).toString());
         Build task = Build.builder()
             .thread(8)
-            .taskRunner(Process.INSTANCE)
+            .taskRunner(Process.instance())
             .env(env)
             .build();
 

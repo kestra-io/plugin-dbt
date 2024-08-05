@@ -148,7 +148,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     @PluginProperty
     @Builder.Default
     @Valid
-    protected TaskRunner taskRunner = Docker.INSTANCE;
+    protected TaskRunner taskRunner = Docker.instance();
 
     @Builder.Default
     protected String containerImage = DEFAULT_IMAGE;
