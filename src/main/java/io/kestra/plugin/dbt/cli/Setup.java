@@ -165,6 +165,16 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     }
 
     @Override
+    protected DockerOptions injectDefaults(DockerOptions original) {
+        var builder = original.toBuilder();
+        if (original.getImage() == null) {
+            builder.image(this.getContainerImage());
+        }
+
+        return builder.build();
+    }
+
+    @Override
     public ScriptOutput run(RunContext runContext) throws Exception {
         CommandsWrapper commandsWrapper = this.commands(runContext);
         Path workingDirectory = commandsWrapper.getWorkingDirectory();
