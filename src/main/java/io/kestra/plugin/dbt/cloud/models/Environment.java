@@ -10,19 +10,19 @@ import lombok.extern.jackson.Jacksonized;
 @SuperBuilder
 public class Environment   {
   @JsonProperty("id")
-  Integer id;
+  Long id;
 
   @JsonProperty("account_id")
-  Integer accountId;
+  Long accountId;
 
   @JsonProperty("deploy_key_id")
-  Integer deployKeyId;
+  Long deployKeyId;
 
   @JsonProperty("created_by_id")
-  Integer createdById;
+  Long createdById;
 
   @JsonProperty("repository_id")
-  Integer repositoryId;
+  Long repositoryId;
 
   @JsonProperty("name")
   String name;

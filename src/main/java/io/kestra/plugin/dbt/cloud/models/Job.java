@@ -14,16 +14,16 @@ import jakarta.validation.Valid;
 @SuperBuilder
 public class Job {
     @JsonProperty("id")
-    Integer id;
+    Long id;
 
     @JsonProperty("account_id")
-    Integer accountId;
+    Long accountId;
 
     @JsonProperty("project_id")
-    Integer projectId;
+    Long projectId;
 
     @JsonProperty("environment_id")
-    Integer environmentId;
+    Long environmentId;
 
     @JsonProperty("name")
     String name;
