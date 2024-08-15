@@ -14,22 +14,22 @@ import java.util.List;
 @SuperBuilder
 public class Run {
     @JsonProperty("id")
-    Integer id;
+    Long id;
 
     @JsonProperty("trigger_id")
-    Integer triggerId;
+    Long triggerId;
 
     @JsonProperty("account_id")
-    Integer accountId;
+    Long accountId;
 
     @JsonProperty("project_id")
-    Integer projectId;
+    Long projectId;
 
     @JsonProperty("job_id")
-    Integer jobId;
+    Long jobId;
 
     @JsonProperty("job_definition_id")
-    Integer jobDefinitionId;
+    Long jobDefinitionId;
 
     @JsonProperty("status")
     JobStatus status;

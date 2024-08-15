@@ -94,7 +94,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
     @Builder.Default
     @Getter(AccessLevel.NONE)
-    private transient Map<Integer, Integer> loggedSteps = new HashMap<>();
+    private transient Map<Long, Long> loggedSteps = new HashMap<>();
 
     @Override
     public CheckStatus.Output run(RunContext runContext) throws Exception {
@@ -174,14 +174,14 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         for (Step step : runResponse.getData().getRunSteps()) {
             if (!step.getLogs().isEmpty()){
                 if (!loggedSteps.containsKey(step.getId())){
-                    loggedSteps.put(step.getId(), 0);
+                    loggedSteps.put(step.getId(), 0L);
                 }
 
                 if (step.getLogs().length() > loggedSteps.get(step.getId())) {
-                    for (String s : step.getLogs().substring(max(loggedSteps.get(step.getId()) -1, 0)).split("\n")) {
+                    for (String s : step.getLogs().substring((int) max(loggedSteps.get(step.getId()) -1L, 0L)).split("\n")) {
                         logger.info("[Step {}]: {}", step.getName(), s);
                     }
-                    loggedSteps.put(step.getId(), step.getLogs().length());
+                    loggedSteps.put(step.getId(), (long) step.getLogs().length());
                 }
             }
         }
