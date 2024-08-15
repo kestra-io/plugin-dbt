@@ -210,7 +210,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
         RunResponse triggerRunResponse = triggerResponse.getBody().orElseThrow(() -> new IllegalStateException("Missing body on trigger"));
         logger.info("Job status {} with response: {}", triggerResponse.getStatus(), triggerRunResponse);
-        Integer runId = triggerRunResponse.getData().getId();
+        Long runId = triggerRunResponse.getData().getId();
 
         if (!this.wait) {
             return Output.builder()
@@ -242,7 +242,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         @Schema(
             title = "The run ID."
         )
-        private Integer runId;
+        private Long runId;
 
         @Schema(
             title = "URI of a run result."

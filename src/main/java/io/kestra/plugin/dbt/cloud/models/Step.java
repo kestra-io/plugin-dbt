@@ -13,13 +13,13 @@ import java.time.ZonedDateTime;
 @SuperBuilder
 public class Step {
     @JsonProperty("id")
-    Integer id;
+    Long id;
 
     @JsonProperty("run_id")
-    Integer runId;
+    Long runId;
 
     @JsonProperty("account_id")
-    Integer accountId;
+    Long accountId;
 
     @JsonProperty("name")
     String name;

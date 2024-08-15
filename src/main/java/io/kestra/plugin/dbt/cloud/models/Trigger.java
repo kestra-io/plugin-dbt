@@ -15,13 +15,13 @@ import jakarta.validation.Valid;
 @SuperBuilder
 public class Trigger {
     @JsonProperty("id")
-    Integer id;
+    Long id;
 
     @JsonProperty("cause")
     String cause;
 
     @JsonProperty("job_definition_id")
-    Integer jobDefinitionId;
+    Long jobDefinitionId;
 
     @JsonProperty("git_branch")
     String gitBranch;
