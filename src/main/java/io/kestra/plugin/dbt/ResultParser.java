@@ -17,6 +17,8 @@ import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -40,35 +42,46 @@ public abstract class ResultParser {
             .getResults()
             .stream()
             .map(throwFunction(r -> {
+                ArrayList<State.History> histories = new ArrayList<>();
+
+                // List of status are not safe and can be not present on api calls
+                r.getTiming()
+                    .stream()
+                    .mapToLong(timing -> timing.getStartedAt().toEpochMilli())
+                    .min()
+                    .ifPresent(value -> {
+                        histories.add(new State.History(
+                            State.Type.CREATED,
+                            Instant.ofEpochMilli(value)
+                        ));
+                    });
+
+                r.getTiming()
+                    .stream()
+                    .filter(timing -> timing.getName().equals("execute"))
+                    .mapToLong(timing -> timing.getStartedAt().toEpochMilli())
+                    .min()
+                    .ifPresent(value -> {
+                        histories.add(new State.History(
+                            State.Type.RUNNING,
+                            Instant.ofEpochMilli(value)
+                        ));
+                    });
+
+                r.getTiming()
+                    .stream()
+                    .mapToLong(timing -> timing.getStartedAt().toEpochMilli())
+                    .max()
+                    .ifPresent(value -> {
+                        histories.add(new State.History(
+                            r.state(),
+                            Instant.ofEpochMilli(value)
+                        ));
+                    });
+
                 State state = State.of(
                     r.state(),
-                    java.util.List.of(
-                        new State.History(
-                            State.Type.CREATED,
-                            Instant.ofEpochMilli(r.getTiming()
-                                .stream()
-                                .mapToLong(timing -> timing.getStartedAt().toEpochMilli())
-                                .min()
-                                .orElseThrow())
-                        ),
-                        new State.History(
-                            State.Type.RUNNING,
-                            Instant.ofEpochMilli(r.getTiming()
-                                .stream()
-                                .filter(timing -> timing.getName().equals("execute"))
-                                .mapToLong(timing -> timing.getStartedAt().toEpochMilli())
-                                .min()
-                                .orElseThrow())
-                        ),
-                        new State.History(
-                            r.state(),
-                            Instant.ofEpochMilli(r.getTiming()
-                                .stream()
-                                .mapToLong(timing -> timing.getCompletedAt().toEpochMilli())
-                                .max()
-                                .orElseThrow())
-                        )
-                    )
+                    histories
                 );
 
                 r.getAdapterResponse()
@@ -94,7 +107,7 @@ public abstract class ResultParser {
                         .executionId(runContext.render("{{ execution.id }}"))
                         .parentTaskRunId(runContext.render("{{ taskrun.id }}"))
                         .state(state)
-                        .attempts(java.util.List.of(TaskRunAttempt.builder()
+                        .attempts(List.of(TaskRunAttempt.builder()
                             .state(state)
                             .build()
                         ))
