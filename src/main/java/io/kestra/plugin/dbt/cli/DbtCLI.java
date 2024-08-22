@@ -125,7 +125,7 @@ import jakarta.validation.constraints.NotNull;
                         target: dev"""
         ),
         @Example(
-            title = "Clone a [Git repository](https://github.com/kestra-io/dbt-example) and build dbt models. Note that as the dbt project files are in a separate directory you need to both set the `projectDir` task property and use `--project-dir` in each dbt cli commands.",
+            title = "Clone a [Git repository](https://github.com/kestra-io/dbt-example) and build dbt models. Note that, as the dbt project files are in a separate directory, you need to both set the `projectDir` task property and use `--project-dir` in each dbt cli command.",
             full = true,
             code = """
                 id: dwh_and_analytics
