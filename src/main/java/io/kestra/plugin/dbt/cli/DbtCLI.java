@@ -123,7 +123,56 @@ import jakarta.validation.constraints.NotNull;
                             threads: 16
                             timeout_seconds: 300
                         target: dev"""
-        )        
+        ),
+        @Example(
+            title = "Clone a [Git repository](https://github.com/kestra-io/dbt-example) and build dbt models. Note that, as the dbt project files are in a separate directory, you need to both set the `projectDir` task property and use `--project-dir` in each dbt cli command.",
+            full = true,
+            code = """
+                id: dwh_and_analytics
+                namespace: company.team
+                description: |
+                  ## Data Platform
+                  Clone a [Git repository](https://github.com/kestra-io/dbt-example) and build dbt models
+                
+                tasks:
+                  - id: dbt
+                    type: io.kestra.plugin.core.flow.WorkingDirectory
+                    tasks:
+                    - id: clone_repository
+                      type: io.kestra.plugin.git.Clone
+                      url: https://github.com/kestra-io/dbt-example
+                      branch: master
+                
+                    - id: dbt_build
+                      type: io.kestra.plugin.dbt.cli.DbtCLI
+                      taskRunner:
+                        type: io.kestra.plugin.scripts.runner.docker.Docker
+                      containerImage: ghcr.io/kestra-io/dbt-duckdb:latest
+                      commands:
+                        - dbt deps --project-dir dbt --target prod
+                        - dbt build --project-dir dbt --target prod
+                      projectDir: dbt
+                      profiles: |
+                        my_dbt_project:
+                          outputs:
+                            dev:
+                              type: duckdb
+                              path: dbt.duckdb
+                              extensions:
+                                - parquet
+                              fixed_retries: 1
+                              threads: 16
+                              timeout_seconds: 300
+                            prod:
+                              type: duckdb
+                              path: dbt2.duckdb
+                              extensions:\s
+                                - parquet
+                              fixed_retries: 1
+                              threads: 16
+                              timeout_seconds: 300
+                          target: dev"""
+        )
     }
 )
 public class DbtCLI extends AbstractExecScript {
@@ -225,6 +274,11 @@ public class DbtCLI extends AbstractExecScript {
             this.getBeforeCommandsWithOptions(),
             this.commands
         );
+
+        // check that if a command uses --project-dir, the projectDir must be used
+        if (commandsArgs.stream().anyMatch(cmd -> cmd.contains("--project-dir"))) {
+            runContext.logger().warn("One of the dbt cli command uses '--project-dir', this will not work unless you also set the 'projectDir' task property.");
+        }
 
         ScriptOutput run = commands
             .addEnv(Map.of(
