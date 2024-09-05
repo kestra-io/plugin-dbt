@@ -58,17 +58,19 @@ import jakarta.validation.constraints.NotNull;
             full = true,
             title = "Setup dbt by installing pip dependencies in a Python virtualenv and initializing the profile directory.",
             code = """
-                id: dbt-setup
+                id: dbt_setup
                 namespace: company.team
+
                 tasks:
-                  - id: working-directory
+                  - id: working_directory
                     type: io.kestra.plugin.core.flow.WorkingDirectory
                     tasks:
-                      - id: cloneRepository
+                      - id: clone_repository
                         type: io.kestra.plugin.git.Clone
                         url: https://github.com/kestra-io/dbt-demo
                         branch: main
-                      - id: dbt-setup
+                    
+                      - id: dbt_setup
                         type: io.kestra.plugin.dbt.cli.Setup
                         requirements:
                           - dbt-duckdb
@@ -81,7 +83,8 @@ import jakarta.validation.constraints.NotNull;
                                 extensions:
                                   - parquet
                             target: dev
-                      - id: dbt-build
+                    
+                      - id: dbt_build
                         type: io.kestra.plugin.dbt.cli.Build
                 """
         )

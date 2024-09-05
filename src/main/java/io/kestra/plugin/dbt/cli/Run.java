@@ -23,18 +23,19 @@ import lombok.experimental.SuperBuilder;
             full = true,
             title = "Invoke dbt `run` command.",
             code = """
-                id: dbt-run
+                id: dbt_run
                 namespace: company.team
+
                 tasks:
-                  - id: working-directory
+                  - id: working_directory
                     type: io.kestra.plugin.core.flow.WorkingDirectory
                     tasks:
-                      - id: cloneRepository
+                      - id: clone_repository
                         type: io.kestra.plugin.git.Clone
                         url: https://github.com/kestra-io/dbt-demo
                         branch: main
 
-                      - id: dbt-run
+                      - id: dbt_run
                         type: io.kestra.plugin.dbt.cli.Run
                         taskRunner:
                           type: io.kestra.plugin.scripts.runner.docker.Docker

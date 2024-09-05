@@ -25,6 +25,7 @@ import lombok.experimental.SuperBuilder;
             code = """
                 id: dbt_test
                 namespace: company.team
+
                 tasks:
                   - id: wdir
                     type: io.kestra.plugin.core.flow.WorkingDirectory
@@ -33,6 +34,7 @@ import lombok.experimental.SuperBuilder;
                         type: io.kestra.plugin.git.Clone
                         url: https://github.com/kestra-io/dbt-example
                         branch: main
+                      
                       - id: dbt_test
                         type: io.kestra.plugin.dbt.cli.Test
                         taskRunner:

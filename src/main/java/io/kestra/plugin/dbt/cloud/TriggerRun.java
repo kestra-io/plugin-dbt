@@ -35,11 +35,18 @@ import jakarta.validation.constraints.NotNull;
 @Plugin(
     examples = {
         @Example(
-            code = {
-                "accountId: \"<your-account>\"",
-                "token: \"<your token>\"",
-                "jobId: \"<your job id>\"",
-            }
+            full = true,
+            code = """
+                id: dbt_trigger_job_run
+                namespace: company.team
+
+                tasks:
+                  - id: trigger_run
+                    type: io.kestra.plugin.dbt.cloud.TriggerRun
+                    accountId: "dbt_account"
+                    token: "dbt_token"
+                    jobId: "job_id"
+                """
         )
     }
 )

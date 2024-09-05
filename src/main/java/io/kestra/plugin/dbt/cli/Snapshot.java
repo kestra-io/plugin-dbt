@@ -23,17 +23,19 @@ import lombok.experimental.SuperBuilder;
             full = true,
             title = "Invoke dbt `snapshot` command.",
             code = """
-                id: dbt-snapshot
+                id: dbt_snapshot
                 namespace: company.team
+
                 tasks:
-                  - id: working-directory
+                  - id: working_directory
                     type: io.kestra.plugin.core.flow.WorkingDirectory
                     tasks:
-                      - id: cloneRepository
+                      - id: clone_repository
                         type: io.kestra.plugin.git.Clone
                         url: https://github.com/kestra-io/dbt-demo
                         branch: main
-                      - id: dbt-snapshot
+                      
+                      - id: dbt_snapshot
                         type: io.kestra.plugin.dbt.cli.Snapshot
                         taskRunner:
                           type: io.kestra.plugin.scripts.runner.docker.Docker

@@ -39,18 +39,25 @@ import static java.lang.Math.max;
 @Getter
 @NoArgsConstructor
 @Schema(
-        title = "Check the status of a dbt Cloud job."
+    title = "Check the status of a dbt Cloud job."
 )
 @Plugin(
-        examples = {
-                @Example(
-                        code = {
-                                "accountId: \"<your-account>\"",
-                                "token: \"<your token>\"",
-                                "runId: \"<your run id>\"",
-                        }
-                )
-        }
+    examples = {
+        @Example(
+            full = true,
+            code = """
+                id: dbt_check_status
+                namespace: company.team
+
+                tasks:
+                  - id: check_status
+                    type: io.kestra.plugin.dbt.cloud.CheckStatus
+                    accountId: "dbt_account"
+                    token: "dbt_token"
+                    runId: "run_id"
+                """
+        )
+    }
 )
 public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckStatus.Output> {
     private static final List<JobStatusHumanizedEnum> ENDED_STATUS = List.of(

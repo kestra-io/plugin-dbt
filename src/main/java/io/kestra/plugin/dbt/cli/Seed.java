@@ -23,18 +23,19 @@ import lombok.experimental.SuperBuilder;
             full = true,
             title = "Invoke dbt `seed` command.",
             code = """
-                id: dbt-seed
+                id: dbt_seed
                 namespace: company.team
+
                 tasks:
-                  - id: working-directory
+                  - id: working_directory
                     type: io.kestra.plugin.core.flow.WorkingDirectory
                     tasks:
-                      - id: cloneRepository
+                      - id: clone_repository
                         type: io.kestra.plugin.git.Clone
                         url: https://github.com/kestra-io/dbt-demo
                         branch: main
   
-                      - id: dbt-seed
+                      - id: dbt_seed
                         type: io.kestra.plugin.dbt.cli.Seed
                         taskRunner:
                           type: io.kestra.plugin.scripts.runner.docker.Docker

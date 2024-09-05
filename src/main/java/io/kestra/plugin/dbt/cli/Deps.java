@@ -28,18 +28,19 @@ import java.nio.file.Path;
             full = true,
             title = "Invoke dbt `deps` command",
             code = """
-                id: dbt-deps
+                id: dbt_deps
                 namespace: company.team
+
                 tasks:
-                  - id: working-directory
+                  - id: working_directory
                     type: io.kestra.plugin.core.flow.WorkingDirectory
                     tasks:
-                      - id: cloneRepository
+                      - id: clone_repository
                         type: io.kestra.plugin.git.Clone
                         url: https://github.com/kestra-io/dbt-demo
                         branch: main
   
-                      - id: dbt-deps
+                      - id: dbt_deps
                         type: io.kestra.plugin.dbt.cli.Deps
                         taskRunner: 
                           type: io.kestra.plugin.scripts.runner.docker.Docker
