@@ -23,32 +23,33 @@ import lombok.experimental.SuperBuilder;
             full = true,
             title = "Invoke dbt `build` command.",
             code = """
-                   id: dbt-build
-                   namespace: company.team
-                   tasks:
-                     - id: working-directory
-                       type: io.kestra.plugin.core.flow.WorkingDirectory
-                       tasks:
-                       - id: cloneRepository
-                         type: io.kestra.plugin.git.Clone
-                         url: https://github.com/kestra-io/dbt-demo
-                         branch: main
+                id: dbt_build
+                namespace: company.team
 
-                       - id: dbt-build
-                         type: io.kestra.plugin.dbt.cli.Build
-                         taskRunner: 
-                           type: io.kestra.plugin.scripts.runner.docker.Docker
-                         dbtPath: /usr/local/bin/dbt
-                         containerImage: ghcr.io/kestra-io/dbt-duckdb
-                         profiles: |
-                           jaffle_shop:
-                             outputs:
-                               dev:
-                                 type: duckdb
-                                 path: ':memory:'
-                                 extensions:
-                                   - parquet
-                             target: dev
+                tasks:
+                  - id: working_directory
+                    type: io.kestra.plugin.core.flow.WorkingDirectory
+                    tasks:
+                      - id: clone_repository
+                        type: io.kestra.plugin.git.Clone
+                        url: https://github.com/kestra-io/dbt-demo
+                        branch: main
+  
+                      - id: dbt_build
+                        type: io.kestra.plugin.dbt.cli.Build
+                        taskRunner: 
+                          type: io.kestra.plugin.scripts.runner.docker.Docker
+                        dbtPath: /usr/local/bin/dbt
+                        containerImage: ghcr.io/kestra-io/dbt-duckdb
+                        profiles: |
+                          jaffle_shop:
+                            outputs:
+                              dev:
+                                type: duckdb
+                                path: ':memory:'
+                                extensions:
+                                  - parquet
+                            target: dev
                 """
         )
     }
