@@ -101,7 +101,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         Logger logger = runContext.logger();
 
         // Check rendered runId provided is an Integer
-        Integer runIdRendered = Integer.parseInt(runContext.render(this.runId));
+        Long runIdRendered = Long.parseLong(runContext.render(this.runId));
 
         // wait for end
         RunResponse finalRunResponse = Await.until(
@@ -187,7 +187,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         }
     }
 
-    private Optional<RunResponse> fetchRunResponse(RunContext runContext, Integer id, Boolean debug) throws IllegalVariableEvaluationException {
+    private Optional<RunResponse> fetchRunResponse(RunContext runContext, Long id, Boolean debug) throws IllegalVariableEvaluationException {
         return this
                 .request(
                         runContext,
@@ -212,7 +212,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                 .getBody();
     }
 
-    private Path downloadArtifacts(RunContext runContext, Integer runId, String path) throws IllegalVariableEvaluationException, IOException {
+    private Path downloadArtifacts(RunContext runContext, Long runId, String path) throws IllegalVariableEvaluationException, IOException {
         String artifact = this
                 .request(
                         runContext,
