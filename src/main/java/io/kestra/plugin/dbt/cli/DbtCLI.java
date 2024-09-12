@@ -125,14 +125,11 @@ import jakarta.validation.constraints.NotNull;
                         target: dev"""
         ),
         @Example(
-            title = "Clone a [Git repository](https://github.com/kestra-io/dbt-example) and build dbt models. Note that, as the dbt project files are in a separate directory, you need to both set the `projectDir` task property and use `--project-dir` in each dbt cli command.",
+            title = "Clone a [Git repository](https://github.com/kestra-io/dbt-example) and build dbt models. Note that, as the dbt project files are in a separate directory, you need to set the `projectDir` task property and use `--project-dir` in each dbt CLI command.",
             full = true,
             code = """
                 id: dwh_and_analytics
                 namespace: company.team
-                description: |
-                  ## Data Platform
-                  Clone a [Git repository](https://github.com/kestra-io/dbt-example) and build dbt models
                 
                 tasks:
                   - id: dbt
@@ -275,9 +272,9 @@ public class DbtCLI extends AbstractExecScript {
             this.commands
         );
 
-        // check that if a command uses --project-dir, the projectDir must be used
-        if (commandsArgs.stream().anyMatch(cmd -> cmd.contains("--project-dir"))) {
-            runContext.logger().warn("One of the dbt cli command uses '--project-dir', this will not work unless you also set the 'projectDir' task property.");
+        // check that if a command uses --project-dir, the projectDir must be set
+        if (commandsArgs.stream().anyMatch(cmd -> cmd.contains("--project-dir")) && this.projectDir == null) {
+            runContext.logger().warn("One of the dbt CLI commands uses the `--project-dir` flag, but the `projectDir` task property is not set. Make sure to set the `projectDir` property.");
         }
 
         ScriptOutput run = commands
