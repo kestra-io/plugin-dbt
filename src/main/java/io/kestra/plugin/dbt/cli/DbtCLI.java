@@ -275,9 +275,9 @@ public class DbtCLI extends AbstractExecScript {
             this.commands
         );
 
-        // check that if a command uses --project-dir, the projectDir must be used
-        if (commandsArgs.stream().anyMatch(cmd -> cmd.contains("--project-dir"))) {
-            runContext.logger().warn("One of the dbt cli command uses '--project-dir', this will not work unless you also set the 'projectDir' task property.");
+        // check that if a command uses --project-dir, the projectDir must be set
+        if (commandsArgs.stream().anyMatch(cmd -> cmd.contains("--project-dir")) && this.projectDir == null) {
+            runContext.logger().warn("One of the dbt CLI commands uses the `--project-dir` flag, but the `projectDir` task property is not set. Make sure to set the `projectDir` property.");
         }
 
         ScriptOutput run = commands
