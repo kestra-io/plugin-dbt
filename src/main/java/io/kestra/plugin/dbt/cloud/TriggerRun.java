@@ -12,14 +12,20 @@ import io.micronaut.http.HttpRequest;
 import io.micronaut.http.HttpResponse;
 import io.micronaut.http.uri.UriTemplate;
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.*;
+import jakarta.validation.constraints.NotNull;
+import lombok.Builder;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 import org.slf4j.Logger;
 
 import java.net.URI;
 import java.time.Duration;
-import java.util.*;
-import jakarta.validation.constraints.NotNull;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 @SuperBuilder
 @ToString
@@ -219,13 +225,14 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         }
 
         CheckStatus checkStatusJob = CheckStatus.builder()
-                                        .runId(runId.toString())
-                                        .token(getToken())
-                                        .accountId(getAccountId())
-                                        .pollFrequency(getPollFrequency())
-                                        .maxDuration(getMaxDuration())
-                                        .parseRunResults(getParseRunResults())
-                                        .build();
+            .runId(runId.toString())
+            .baseUrl(getBaseUrl())
+            .token(getToken())
+            .accountId(getAccountId())
+            .pollFrequency(getPollFrequency())
+            .maxDuration(getMaxDuration())
+            .parseRunResults(getParseRunResults())
+            .build();
 
         CheckStatus.Output runOutput = checkStatusJob.run(runContext);
 
