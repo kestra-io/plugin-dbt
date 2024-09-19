@@ -69,7 +69,7 @@ public abstract class ResultParser {
 
                 r.getTiming()
                     .stream()
-                    .mapToLong(timing -> timing.getStartedAt().toEpochMilli())
+                    .mapToLong(timing -> timing.getCompletedAt().toEpochMilli())
                     .max()
                     .ifPresent(value -> {
                         histories.add(new State.History(
