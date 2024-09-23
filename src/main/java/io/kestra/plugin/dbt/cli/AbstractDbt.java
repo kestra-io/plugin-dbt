@@ -2,6 +2,8 @@ package io.kestra.plugin.dbt.cli;
 
 import com.fasterxml.jackson.annotation.JsonSetter;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
+import io.kestra.core.models.annotations.Plugin;
+import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.*;
 import io.kestra.core.models.tasks.runners.AbstractLogConsumer;
@@ -85,11 +87,12 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             If you change from the default one, be careful to also configure the entrypoint to an empty list if needed."""
     )
     @Builder.Default
+    @PluginProperty
     @Valid
-    protected Property<TaskRunner> taskRunner = Property.of(Docker.builder()
+    protected TaskRunner taskRunner = Docker.builder()
             .type(Docker.class.getName())
             .entryPoint(Collections.emptyList())
-            .build());
+            .build();
 
     @Schema(title = "The task runner container image, only used if the task runner is container-based.")
     @Builder.Default
@@ -141,14 +144,14 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     @Override
     public ScriptOutput run(RunContext runContext) throws Exception {
         CommandsWrapper commandsWrapper = new CommandsWrapper(runContext)
-            .withEnv(this.getEnv().asMap(runContext, String.class, String.class))
+            .withEnv(this.getEnv() != null ? this.getEnv().asMap(runContext, String.class, String.class) : Collections.emptyMap())
             .withNamespaceFiles(namespaceFiles)
             .withInputFiles(inputFiles)
             .withOutputFiles(outputFiles)
-            .withRunnerType(this.getRunner().as(runContext, RunnerType.class))
-            .withDockerOptions(this.getDocker().as(runContext, DockerOptions.class))
+            .withRunnerType(this.getRunner() != null ? this.getRunner().as(runContext, RunnerType.class) : null)
+            .withDockerOptions(this.getDocker() != null ? this.getDocker().as(runContext, DockerOptions.class) : null)
             .withContainerImage(this.containerImage.as(runContext, String.class))
-            .withTaskRunner(this.taskRunner.as(runContext, TaskRunner.class))
+            .withTaskRunner(this.taskRunner)
             .withLogConsumer(new AbstractLogConsumer() {
                 @Override
                 public void accept(String line, Boolean isStdErr) {
@@ -158,7 +161,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             .withEnableOutputDirectory(true); //force output files on task runners
         Path workingDirectory = commandsWrapper.getWorkingDirectory();
 
-        String profileString = profiles.as(runContext, String.class);
+        String profileString = profiles != null ? profiles.as(runContext, String.class) : null;
         if (profileString != null && !profileString.isEmpty()) {
             if (Files.exists(Path.of(".profiles/profiles.yml"))) {
                 runContext.logger().warn("A 'profiles.yml' file already exist in the task working directory, it will be overridden.");

@@ -181,7 +181,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
         // noinspection ResultOfMethodCallIgnored
         profileDir.mkdirs();
 
-        String profilesContent = profilesContent(runContext, profiles);
+        String profilesContent = profilesContent(runContext, profiles.as(runContext, Object.class));
         FileUtils.writeStringToFile(
             new File(profileDir, "profiles.yml"),
             profilesContent,
