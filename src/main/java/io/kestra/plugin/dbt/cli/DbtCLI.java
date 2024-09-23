@@ -28,7 +28,6 @@ import org.apache.commons.io.FileUtils;
 import java.io.File;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
@@ -269,7 +268,7 @@ public class DbtCLI extends AbstractExecScript {
         List<String> commandsArgs = ScriptService.scriptCommands(
             this.interpreter,
             this.getBeforeCommandsWithOptions(),
-            this.commands
+            this.commands.stream().map(command -> command.concat(" --log-format json")).toList()
         );
 
         // check that if a command uses --project-dir, the projectDir must be set
