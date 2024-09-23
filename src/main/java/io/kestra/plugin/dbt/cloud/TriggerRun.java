@@ -2,7 +2,7 @@ package io.kestra.plugin.dbt.cloud;
 
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
-import io.kestra.core.models.annotations.PluginProperty;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.dbt.cloud.models.RunResponse;
@@ -61,101 +61,86 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     @Schema(
         title = "Numeric ID of the job."
     )
-    @PluginProperty(dynamic = true)
     @NotNull
-    String jobId;
+    Property<String> jobId;
 
     @Schema(
         title = "A text description of the reason for running this job."
     )
-    @PluginProperty(dynamic = true)
     @Builder.Default
     @NotNull
-    String cause = "Triggered by Kestra.";
+    Property<String> cause = Property.of("Triggered by Kestra.");
 
     @Schema(
         title = "The git SHA to check out before running this job."
     )
-    @PluginProperty(dynamic = true)
-    String gitSha;
+    Property<String> gitSha;
 
     @Schema(
         title = "The git branch to check out before running this job."
     )
-    @PluginProperty(dynamic = true)
-    String gitBranch;
+    Property<String> gitBranch;
 
     @Schema(
         title = "Override the destination schema in the configured target for this job."
     )
-    @PluginProperty(dynamic = true)
-    String schemaOverride;
+    Property<String> schemaOverride;
 
     @Schema(
         title = "Override the version of dbt used to run this job."
     )
-    @PluginProperty(dynamic = true)
-    String dbtVersionOverride;
+    Property<String> dbtVersionOverride;
 
     @Schema(
         title = "Override the number of threads used to run this job."
     )
-    @PluginProperty(dynamic = true)
-    String threadsOverride;
+    Property<String> threadsOverride;
 
     @Schema(
         title = "Override the target.name context variable used when running this job."
     )
-    @PluginProperty(dynamic = true)
-    String targetNameOverride;
+    Property<String> targetNameOverride;
 
     @Schema(
         title = "Override whether or not this job generates docs."
     )
-    @PluginProperty(dynamic = false)
-    Boolean generateDocsOverride;
+    Property<Boolean> generateDocsOverride;
 
     @Schema(
         title = "Override the timeout in seconds for this job."
     )
-    @PluginProperty(dynamic = false)
-    Integer timeoutSecondsOverride;
+    Property<Integer> timeoutSecondsOverride;
 
     @Schema(
         title = "Override the list of steps for this job."
     )
-    @PluginProperty(dynamic = true)
-    List<String> stepsOverride;
+    Property<List<String>> stepsOverride;
 
     @Schema(
         title = "Wait for the end of the run.",
         description = "Allowing to capture job status & logs."
     )
-    @PluginProperty(dynamic = false)
     @Builder.Default
-    Boolean wait = true;
+    Property<Boolean> wait = Property.of(Boolean.TRUE);
 
     @Schema(
             title = "Specify frequency for job state check API calls."
     )
-    @PluginProperty(dynamic = false)
     @Builder.Default
-    Duration pollFrequency = Duration.ofSeconds(5);
+    Property<Duration> pollFrequency = Property.of(Duration.ofSeconds(5));
 
     @Schema(
         title = "The maximum total wait duration."
     )
-    @PluginProperty(dynamic = false)
     @Builder.Default
-    Duration maxDuration = Duration.ofMinutes(60);
+    Property<Duration> maxDuration = Property.of(Duration.ofMinutes(60));
 
     @Builder.Default
     @Schema(
         title = "Parse run result.",
         description = "Parsing run result to display duration of each task inside dbt."
     )
-    @PluginProperty
-    protected Boolean parseRunResults = true;
+    protected Property<Boolean> parseRunResults = Property.of(Boolean.TRUE);
 
     @Override
     public TriggerRun.Output run(RunContext runContext) throws Exception {
@@ -163,46 +148,46 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
         // trigger
         Map<String, Object> body = new HashMap<>();
-        body.put("cause", runContext.render(this.cause));
+        body.put("cause", this.cause.as(runContext, String.class));
 
         if (this.gitSha != null) {
-            body.put("git_sha", runContext.render(this.gitSha));
+            body.put("git_sha", this.gitSha.as(runContext, String.class));
         }
 
         if (this.gitBranch != null) {
-            body.put("git_branch", runContext.render(this.gitBranch));
+            body.put("git_branch", this.gitBranch.as(runContext, String.class));
         }
 
         if (this.schemaOverride != null) {
-            body.put("schema_override", runContext.render(this.schemaOverride));
+            body.put("schema_override", this.schemaOverride.as(runContext, String.class));
         }
 
         if (this.dbtVersionOverride != null) {
-            body.put("dbt_version_override", runContext.render(this.dbtVersionOverride));
+            body.put("dbt_version_override", this.dbtVersionOverride.as(runContext, String.class));
         }
 
         if (this.threadsOverride != null) {
-            body.put("threads_override", runContext.render(this.threadsOverride));
+            body.put("threads_override", this.threadsOverride.as(runContext, String.class));
         }
 
         if (this.targetNameOverride != null) {
-            body.put("target_name_override", runContext.render(this.targetNameOverride));
+            body.put("target_name_override", this.targetNameOverride.as(runContext, String.class));
         }
 
         if (this.targetNameOverride != null) {
-            body.put("target_name_override", runContext.render(this.targetNameOverride));
+            body.put("target_name_override", this.targetNameOverride.as(runContext, String.class));
         }
 
         if (this.generateDocsOverride != null) {
-            body.put("generate_docs_override", this.generateDocsOverride);
+            body.put("generate_docs_override", this.generateDocsOverride.as(runContext, Boolean.class));
         }
 
         if (this.timeoutSecondsOverride != null) {
-            body.put("timeout_seconds_override", this.timeoutSecondsOverride);
+            body.put("timeout_seconds_override", this.timeoutSecondsOverride.as(runContext, Integer.class));
         }
 
         if (this.stepsOverride != null) {
-            body.put("steps_override", runContext.render(this.stepsOverride));
+            body.put("steps_override", this.stepsOverride.asList(runContext, String.class));
         }
 
         HttpResponse<RunResponse> triggerResponse = this.request(
@@ -213,8 +198,8 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
                     UriTemplate
                         .of("/api/v2/accounts/{accountId}/jobs/{jobId}/run")
                         .expand(Map.of(
-                            "accountId", runContext.render(this.accountId),
-                            "jobId", runContext.render(this.jobId)
+                            "accountId", this.accountId.as(runContext, String.class),
+                            "jobId", this.jobId.as(runContext, String.class)
                         )) + "/"
                 )
                 .body(body),
@@ -225,14 +210,14 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         logger.info("Job status {} with response: {}", triggerResponse.getStatus(), triggerRunResponse);
         Long runId = triggerRunResponse.getData().getId();
 
-        if (!this.wait) {
+        if (!this.wait.as(runContext, Boolean.class)) {
             return Output.builder()
                 .runId(runId)
                 .build();
         }
 
         CheckStatus checkStatusJob = CheckStatus.builder()
-            .runId(runId.toString())
+            .runId(Property.of(runId.toString()))
             .baseUrl(getBaseUrl())
             .token(getToken())
             .accountId(getAccountId())

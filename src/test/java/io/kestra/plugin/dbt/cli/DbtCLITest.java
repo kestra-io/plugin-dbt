@@ -1,5 +1,6 @@
 package io.kestra.plugin.dbt.cli;
 
+import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
@@ -43,7 +44,7 @@ class DbtCLITest {
         DbtCLI execute = DbtCLI.builder()
             .id(IdUtils.create())
             .type(DbtCLI.class.getName())
-            .profiles("""
+            .profiles(Property.of("""
                     unit-kestra:
                       outputs:
                         dev:
@@ -52,16 +53,16 @@ class DbtCLITest {
                           location: US
                           method: service-account
                           priority: interactive
-                          project: kestra-unit-test
+                          project: kestra-dev
                           threads: 1
                           timeout_seconds: 300
                           type: bigquery
                           keyfile: sa.json
                       target: dev
-                    """
+                    """)
             )
             .containerImage("ghcr.io/kestra-io/dbt-bigquery:latest")
-            .commands(List.of("dbt build"))
+            .commands(Property.of(List.of("dbt build")))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());

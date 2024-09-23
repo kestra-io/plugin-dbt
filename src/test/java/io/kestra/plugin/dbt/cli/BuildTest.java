@@ -1,5 +1,6 @@
 package io.kestra.plugin.dbt.cli;
 
+import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
@@ -46,7 +47,7 @@ class BuildTest {
             .id(IdUtils.create())
             .type(Setup.class.getName())
             .taskRunner(Process.instance())
-            .profiles(Map.of(
+            .profiles(Property.of(Map.of(
                 "unit-kestra", Map.of(
                     "outputs", Map.of(
                             "dev", Map.of("dataset", "kestra_unit_test_us",
@@ -61,8 +62,8 @@ class BuildTest {
                         )
                     ),
                     "target", "dev"
-                )))
-            .requirements(List.of("dbt-bigquery"))
+                ))))
+            .requirements(Property.of(List.of("dbt-bigquery")))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, setup, Map.of());
@@ -77,9 +78,9 @@ class BuildTest {
         Map<String, String> env = new HashMap<>();
         env.put("GOOGLE_APPLICATION_CREDENTIALS", runContext.workingDir().resolve(Path.of("sa.json")).toString());
         Build task = Build.builder()
-            .thread(8)
-            .taskRunner(Process.instance())
-            .env(env)
+            .thread((Property.of(8)))
+            .taskRunner(Property.of(Process.instance()))
+            .env(Property.of(env))
             .build();
 
         ScriptOutput runOutput = task.run(runContext);

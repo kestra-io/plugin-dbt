@@ -1,6 +1,7 @@
 package io.kestra.plugin.dbt.cloud;
 
 import com.google.common.collect.ImmutableMap;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
@@ -39,20 +40,20 @@ class CheckStatusTest {
         TriggerRun task = TriggerRun.builder()
                 .id(IdUtils.create())
                 .type(TriggerRun.class.getName())
-                .accountId(this.accountId)
-                .wait(false)
-                .token(this.token)
-                .jobId(this.jobId)
+                .accountId(Property.of(this.accountId))
+                .wait(Property.of(false))
+                .token(Property.of(this.token))
+                .jobId(Property.of(this.jobId))
                 .build();
 
         TriggerRun.Output runOutput = task.run(runContext);
 
         CheckStatus checkStatus = CheckStatus.builder()
-                .runId(runOutput.getRunId().toString())
-                .token(this.token)
-                .accountId(this.accountId)
-                .maxDuration(Duration.ofMinutes(60))
-                .parseRunResults(false)
+                .runId(Property.of(runOutput.getRunId().toString()))
+                .token(Property.of(this.token))
+                .accountId(Property.of(this.accountId))
+                .maxDuration(Property.of(Duration.ofMinutes(60)))
+                .parseRunResults(Property.of(false))
                 .build();
 
         CheckStatus.Output checkStatusOutput = checkStatus.run(runContext);

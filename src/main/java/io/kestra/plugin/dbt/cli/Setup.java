@@ -7,6 +7,7 @@ import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.runners.PluginUtilsService;
 import io.kestra.core.models.tasks.runners.ScriptService;
@@ -99,27 +100,24 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
         title = "The `profiles.yml` file content. Can be an object (a map) or a string.",
         anyOf = { Map.class, String.class }
     )
-    @PluginProperty(dynamic = true)
     @NotNull
-    Object profiles;
+    Property<Object> profiles;
 
     @Builder.Default
     @Schema(
         title = "The python interpreter to use.",
         description = "Set the python interpreter path to use."
     )
-    @PluginProperty(dynamic = true)
     @NotNull
     @NotEmpty
-    private final String pythonPath = "python";
+    private final Property<String> pythonPath = Property.of(DEFAULT_IMAGE);
 
     @Schema(
         title = "List of python dependencies to add to the python execution process.",
         description = "Python dependencies list to setup in the virtualenv, in the same format than requirements.txt. It must at least provides dbt."
     )
-    @PluginProperty(dynamic = true)
     @NotNull
-    protected List<String> requirements;
+    protected Property<List<String>> requirements;
 
     @Builder.Default
     @Schema(
@@ -128,28 +126,23 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
             "The benefit of using -e is that it prevents errors snowballing into serious issues when they could " +
             "have been caught earlier. This option is deprecated. Use `failFast` instead."
     )
-    @PluginProperty
     @NotNull
     @Deprecated(since = "0.16.0", forRemoval = true)
-    protected Boolean exitOnFailed = true;
+    protected Property<Boolean> exitOnFailed = Property.of(Boolean.TRUE);
 
     @Schema(
         title = "Input files are extra files that will be available in the dbt working directory.",
         description = "You can define the files as map or a JSON string. " +
             "Each file can be defined inlined or can reference a file from Kestra's internal storage."
     )
-    @PluginProperty(
-        additionalProperties = String.class,
-        dynamic = true
-    )
-    private Object inputFiles;
+    private Property<Object> inputFiles;
 
     @Schema(
         title = "The task runner to use.",
         description = "Task runners are provided by plugins, each have their own properties."
     )
-    @PluginProperty
     @Builder.Default
+    @PluginProperty
     @Valid
     protected TaskRunner taskRunner = Docker.instance();
 
@@ -157,13 +150,12 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     protected String containerImage = DEFAULT_IMAGE;
 
     @Schema(title = "Deprecated, use the `docker` property instead", deprecated = true)
-    @PluginProperty
     @Deprecated
-    private DockerOptions dockerOptions;
+    private Property<DockerOptions> dockerOptions;
 
     @JsonSetter
     public void setDockerOptions(DockerOptions dockerOptions) {
-        this.dockerOptions = dockerOptions;
+        this.dockerOptions = Property.of(dockerOptions);
         this.docker = dockerOptions;
     }
 
@@ -182,7 +174,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
         CommandsWrapper commandsWrapper = this.commands(runContext);
         Path workingDirectory = commandsWrapper.getWorkingDirectory();
 
-        List<String> commands = this.virtualEnvCommand(runContext, workingDirectory, this.getRequirements() != null ? runContext.render(this.getRequirements()) : null);
+        List<String> commands = this.virtualEnvCommand(runContext, workingDirectory, this.requirements.asList(runContext, String.class));
 
         // write profile
         File profileDir = workingDirectory.resolve(".profile").toFile();
@@ -221,7 +213,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     private List<String> virtualEnvCommand(RunContext runContext, Path workingDirectory, List<String> requirements) throws IllegalVariableEvaluationException {
         List<String> renderer = new ArrayList<>();
 
-        renderer.add(this.pythonPath + " -m venv --system-site-packages " + workingDirectory + " > /dev/null");
+        renderer.add(this.pythonPath.as(runContext, String.class) + " -m venv --system-site-packages " + workingDirectory + " > /dev/null");
 
         if (requirements != null) {
             renderer.addAll(Arrays.asList(
@@ -243,6 +235,6 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     }
 
     private Map<String, String> finalInputFiles(RunContext runContext) throws IOException, IllegalVariableEvaluationException {
-        return this.inputFiles != null ? new HashMap<>(PluginUtilsService.transformInputFiles(runContext, this.inputFiles)) : new HashMap<>();
+        return this.inputFiles != null ? new HashMap<>(PluginUtilsService.transformInputFiles(runContext, this.inputFiles.as(runContext, Object.class))) : new HashMap<>();
     }
 }
