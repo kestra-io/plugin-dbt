@@ -3,7 +3,7 @@ package io.kestra.plugin.dbt.cloud;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
-import io.kestra.core.models.annotations.PluginProperty;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.utils.Await;
@@ -69,31 +69,27 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     @Schema(
             title = "The job run ID to check the status for."
     )
-    @PluginProperty(dynamic = true)
-    String runId;
+    Property<String> runId;
 
 
     @Schema(
             title = "Specify how often the task should poll for the job status."
     )
-    @PluginProperty(dynamic = false)
     @Builder.Default
-    Duration pollFrequency = Duration.ofSeconds(5);
+    Property<Duration> pollFrequency = Property.of(Duration.ofSeconds(5));
 
     @Schema(
             title = "The maximum duration the task should poll for the job completion."
     )
-    @PluginProperty(dynamic = false)
     @Builder.Default
-    Duration maxDuration = Duration.ofMinutes(60);
+    Property<Duration> maxDuration = Property.of(Duration.ofMinutes(60));
 
     @Builder.Default
     @Schema(
             title = "Parse run result.",
             description = "Whether to parse the run result to display the duration of each dbt node in the Gantt view."
     )
-    @PluginProperty
-    protected Boolean parseRunResults = true;
+    protected Property<Boolean> parseRunResults = Property.of(Boolean.TRUE);
 
     @Builder.Default
     @Getter(AccessLevel.NONE)
@@ -108,7 +104,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         Logger logger = runContext.logger();
 
         // Check rendered runId provided is an Integer
-        Long runIdRendered = Long.parseLong(runContext.render(this.runId));
+        Long runIdRendered = Long.parseLong(this.runId.as(runContext, String.class));
 
         // wait for end
         RunResponse finalRunResponse = Await.until(
@@ -141,8 +137,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
                     return null;
                 }),
-                this.pollFrequency,
-                this.maxDuration
+                this.pollFrequency.as(runContext, Duration.class),
+                this.maxDuration.as(runContext, Duration.class)
         );
 
         // final response
@@ -157,7 +153,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         Path runResultsArtifact = downloadArtifacts(runContext, runIdRendered, "run_results.json");
         Path manifestArtifact = downloadArtifacts(runContext, runIdRendered, "manifest.json");
 
-        if (this.parseRunResults) {
+        if (this.parseRunResults.as(runContext, Boolean.class)) {
             ResultParser.parseRunResult(runContext, runResultsArtifact.toFile());
         }
 
@@ -209,12 +205,12 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                                                         )
                                                 )
                                                 .expand(Map.of(
-                                                        "accountId", runContext.render(this.accountId),
+                                                        "accountId", this.accountId.as(runContext, String.class),
                                                         "runId", id
                                                 ))
                                 ),
                         Argument.of(RunResponse.class),
-                    maxDuration
+                    maxDuration.as(runContext, Duration.class)
                 )
                 .getBody();
     }
@@ -229,7 +225,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                                         UriTemplate
                                                 .of("/api/v2/accounts/{accountId}/runs/{runId}/artifacts/{path}")
                                                 .expand(Map.of(
-                                                        "accountId", runContext.render(this.accountId),
+                                                        "accountId", this.accountId.as(runContext, String.class),
                                                         "runId", runId,
                                                         "path", path
                                                 ))

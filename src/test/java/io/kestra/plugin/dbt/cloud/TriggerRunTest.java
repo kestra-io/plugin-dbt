@@ -1,5 +1,6 @@
 package io.kestra.plugin.dbt.cloud;
 
+import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
@@ -36,9 +37,9 @@ class TriggerRunTest {
         TriggerRun task = TriggerRun.builder()
             .id(IdUtils.create())
             .type(TriggerRun.class.getName())
-            .accountId(this.accountId)
-            .token(this.token)
-            .jobId(this.jobId)
+            .accountId(Property.of(this.accountId))
+            .token(Property.of(this.token))
+            .jobId(Property.of(this.jobId))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());

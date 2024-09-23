@@ -1,15 +1,15 @@
 package io.kestra.plugin.dbt.cli;
 
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
-import io.kestra.core.models.annotations.PluginProperty;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.runners.ScriptService;
 import io.kestra.core.runners.RunContext;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 
-import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.List;
 
 @SuperBuilder
 @ToString
@@ -20,40 +20,34 @@ public abstract class AbstractRun extends AbstractDbt {
     @Schema(
         title = "Specify the number of threads to use while executing models."
     )
-    @PluginProperty
-    Integer thread;
+    Property<Integer> thread;
 
     @Builder.Default
     @Schema(
         title = "Whether dbt will drop incremental models and fully-recalculate the incremental table " +
             "from the model definition."
     )
-    @PluginProperty
-    Boolean fullRefresh = false;
+    Property<Boolean> fullRefresh = Property.of(Boolean.FALSE);
 
     @Schema(
         title = "Which target to load for the given profile"
     )
-    @PluginProperty(dynamic = true)
-    String target;
+    Property<String> target;
 
     @Schema(
         title = "The selector name to use, as defined in selectors.yml"
     )
-    @PluginProperty(dynamic = true)
-    String selector;
+    Property<String> selector;
 
     @Schema(
         title = "List of nodes to include"
     )
-    @PluginProperty(dynamic = true)
-    java.util.List<String> select;
+    Property<List<String>> select;
 
     @Schema(
         title = "List of models to exclude"
     )
-    @PluginProperty(dynamic = true)
-    java.util.List<String> exclude;
+    Property<List<String>> exclude;
 
     abstract protected String dbtCommand();
 
@@ -67,24 +61,24 @@ public abstract class AbstractRun extends AbstractDbt {
             commands.add("--threads " + this.thread);
         }
 
-        if (this.fullRefresh) {
+        if (this.fullRefresh.as(runContext, Boolean.class)) {
             commands.add("--full-refresh");
         }
 
         if (this.target != null) {
-            commands.add("--target " + runContext.render(this.target));
+            commands.add("--target " + this.target.as(runContext, String.class));
         }
 
         if (this.selector != null) {
-            commands.add("--selector " + runContext.render(this.selector));
+            commands.add("--selector " + this.selector.as(runContext, String.class));
         }
 
         if (this.select != null) {
-            commands.add("--select " + String.join(" ", runContext.render(this.select)));
+            commands.add("--select " + String.join(" ", this.select.asList(runContext, String.class)));
         }
 
         if (this.exclude != null) {
-            commands.add("--exclude " + String.join(" ", runContext.render(this.exclude)));
+            commands.add("--exclude " + String.join(" ", this.exclude.asList(runContext, String.class)));
         }
 
         return commands;

@@ -1,7 +1,7 @@
 package io.kestra.plugin.dbt.cloud;
 
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
-import io.kestra.core.models.annotations.PluginProperty;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.runners.DefaultRunContext;
 import io.kestra.core.runners.RunContext;
@@ -35,24 +35,21 @@ public abstract class AbstractDbtCloud extends Task {
     @Schema(
         title = "Base url to select the tenant."
     )
-    @PluginProperty(dynamic = true)
     @NotNull
     @Builder.Default
-    String baseUrl = "https://cloud.getdbt.com";
+    Property<String> baseUrl = Property.of("https://cloud.getdbt.com");
 
     @Schema(
         title = "Numeric ID of the account."
     )
-    @PluginProperty(dynamic = true)
     @NotNull
-    String accountId;
+    Property<String> accountId;
 
     @Schema(
         title = "API key."
     )
-    @PluginProperty(dynamic = true)
     @NotNull
-    String token;
+    Property<String> token;
 
     private static final Duration HTTP_READ_TIMEOUT = Duration.ofSeconds(60);
     private static final NettyHttpClientFactory FACTORY = new NettyHttpClientFactory();
@@ -64,7 +61,7 @@ public abstract class AbstractDbtCloud extends Task {
         httpConfig.setMaxContentLength(Integer.MAX_VALUE);
         httpConfig.setReadTimeout(HTTP_READ_TIMEOUT);
 
-        DefaultHttpClient client = (DefaultHttpClient) FACTORY.createClient(URI.create(runContext.render(baseUrl)).toURL(), httpConfig);
+        DefaultHttpClient client = (DefaultHttpClient) FACTORY.createClient(URI.create(baseUrl.as(runContext, String.class)).toURL(), httpConfig);
         client.setMediaTypeCodecRegistry(mediaTypeCodecRegistry);
 
         return client;
@@ -81,7 +78,7 @@ public abstract class AbstractDbtCloud extends Task {
                                                    Duration timeout) throws HttpClientResponseException {
         try {
             request = request
-                .bearerAuth(runContext.render(this.token))
+                .bearerAuth(this.token.as(runContext, String.class))
                 .contentType(MediaType.APPLICATION_JSON);
 
             try (HttpClient client = this.client(runContext)) {

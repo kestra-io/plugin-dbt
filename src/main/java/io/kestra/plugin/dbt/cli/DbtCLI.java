@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.runners.AbstractLogConsumer;
 import io.kestra.core.models.tasks.runners.ScriptService;
 import io.kestra.core.models.tasks.runners.TaskRunner;
@@ -178,32 +179,28 @@ public class DbtCLI extends AbstractExecScript {
     @Schema(
         title = "The list of dbt CLI commands to run."
     )
-    @PluginProperty(dynamic = true)
     @NotNull
     @NotEmpty
-    private List<String> commands;
+    private Property<List<String>> commands;
 
     @Schema(
         title = "The `profiles.yml` file content.",
         description = "If a `profile.yml` file already exists in the current working directory, it will be overridden."
     )
-    @PluginProperty(dynamic = true)
-    private String profiles;
+    private Property<String> profiles;
 
     @Schema(
         title = "The dbt project directory, if it's not the working directory.",
         description = "To use it, also use this directory in the `--project-dir` flag on the dbt CLI commands."
     )
-    @PluginProperty(dynamic = true)
-    private String projectDir;
+    private Property<String> projectDir;
 
     @Builder.Default
     @Schema(
         title = "Parse run result.",
         description = "Parsing run result to display duration of each task inside dbt."
     )
-    @PluginProperty
-    protected Boolean parseRunResults = true;
+    protected Property<Boolean> parseRunResults = Property.of(Boolean.TRUE);
 
     @Schema(
         title = "The task runner to use.",
@@ -250,9 +247,10 @@ public class DbtCLI extends AbstractExecScript {
                 }
             });
 
-        Path projectWorkingDirectory = projectDir == null ? commands.getWorkingDirectory() : commands.getWorkingDirectory().resolve(projectDir);
+        Path projectWorkingDirectory = projectDir == null ? commands.getWorkingDirectory() : commands.getWorkingDirectory().resolve(projectDir.as(runContext, String.class));
 
-        if (profiles != null && !profiles.isEmpty()) {
+        String profilesString = profiles.as(runContext, String.class);
+        if (profilesString != null && !profilesString.isEmpty()) {
             var profileFile = new File(commands.getWorkingDirectory().toString(), "profiles.yml");
             if (profileFile.exists()) {
                 runContext.logger().info("A 'profiles.yml' file already exist in the task working directory, it will be overridden.");
@@ -260,7 +258,7 @@ public class DbtCLI extends AbstractExecScript {
 
             FileUtils.writeStringToFile(
                 profileFile,
-                runContext.render(profiles),
+                profilesString,
                 StandardCharsets.UTF_8
             );
         }
@@ -268,7 +266,7 @@ public class DbtCLI extends AbstractExecScript {
         List<String> commandsArgs = ScriptService.scriptCommands(
             this.interpreter,
             this.getBeforeCommandsWithOptions(),
-            this.commands.stream().map(command -> command.concat(" --log-format json")).toList()
+            this.commands.asList(runContext, String.class).stream().map(command -> command.concat(" --log-format json")).toList()
         );
 
         // check that if a command uses --project-dir, the projectDir must be set
@@ -284,7 +282,7 @@ public class DbtCLI extends AbstractExecScript {
             .withCommands(commandsArgs)
             .run();
 
-        if (this.parseRunResults && projectWorkingDirectory.resolve("target/run_results.json").toFile().exists()) {
+        if (this.parseRunResults.as(runContext, Boolean.class) && projectWorkingDirectory.resolve("target/run_results.json").toFile().exists()) {
             URI results = ResultParser.parseRunResult(runContext, projectWorkingDirectory.resolve("target/run_results.json").toFile());
             run.getOutputFiles().put("run_results.json", results);
         }
