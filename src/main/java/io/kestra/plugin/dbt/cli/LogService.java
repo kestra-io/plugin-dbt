@@ -73,9 +73,7 @@ class LogService {
                 if (data.containsKey("stats")) {
                     Map<String, Integer> stats  = (Map<String, Integer>) data.get("stats");
 
-                    stats.forEach((s, integer) -> {
-                        runContext.metric(Counter.of(s, integer));
-                    });
+                    stats.forEach((s, integer) -> runContext.metric(Counter.of(s, integer)));
                 }
             }
 
@@ -86,7 +84,7 @@ class LogService {
                 case "info":
                     runContext.logger().info(format, (Object[]) args);
                     break;
-                case "warning":
+                case "warn":
                     runContext.logger().warn(format, (Object[]) args);
                     break;
                 default:
