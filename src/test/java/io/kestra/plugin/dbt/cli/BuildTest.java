@@ -79,7 +79,7 @@ class BuildTest {
         env.put("GOOGLE_APPLICATION_CREDENTIALS", runContext.workingDir().resolve(Path.of("sa.json")).toString());
         Build task = Build.builder()
             .thread((Property.of(8)))
-            .taskRunner(Property.of(Process.instance()))
+            .taskRunner(Process.instance())
             .env(Property.of(env))
             .build();
 

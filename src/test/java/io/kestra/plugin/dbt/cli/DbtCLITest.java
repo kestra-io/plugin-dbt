@@ -53,7 +53,7 @@ class DbtCLITest {
                           location: US
                           method: service-account
                           priority: interactive
-                          project: kestra-dev
+                          project: kestra-unit-test
                           threads: 1
                           timeout_seconds: 300
                           type: bigquery
