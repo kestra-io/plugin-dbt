@@ -181,7 +181,8 @@ public class DbtCLI extends AbstractExecScript {
     )
     @NotNull
     @NotEmpty
-    private Property<List<String>> commands;
+    @PluginProperty(dynamic = true)
+    private List<String> commands;
 
     @Schema(
         title = "The `profiles.yml` file content.",
@@ -266,7 +267,7 @@ public class DbtCLI extends AbstractExecScript {
         List<String> commandsArgs = ScriptService.scriptCommands(
             this.interpreter,
             this.getBeforeCommandsWithOptions(),
-            this.commands.asList(runContext, String.class).stream().map(command -> command.concat(" --log-format json")).toList()
+            runContext.render(this.commands).stream().map(command -> command.concat(" --log-format json")).toList()
         );
 
         // check that if a command uses --project-dir, the projectDir must be set

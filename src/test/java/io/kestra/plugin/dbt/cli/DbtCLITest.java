@@ -62,7 +62,7 @@ class DbtCLITest {
                     """)
             )
             .containerImage("ghcr.io/kestra-io/dbt-bigquery:latest")
-            .commands(Property.of(List.of("dbt build")))
+            .commands(List.of("dbt build"))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());

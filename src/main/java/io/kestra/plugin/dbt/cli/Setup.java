@@ -110,7 +110,8 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     )
     @NotNull
     @NotEmpty
-    private final Property<String> pythonPath = Property.of(DEFAULT_IMAGE);
+    @PluginProperty(dynamic = true)
+    private final String pythonPath = DEFAULT_IMAGE;
 
     @Schema(
         title = "List of python dependencies to add to the python execution process.",
@@ -213,7 +214,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     private List<String> virtualEnvCommand(RunContext runContext, Path workingDirectory, List<String> requirements) throws IllegalVariableEvaluationException {
         List<String> renderer = new ArrayList<>();
 
-        renderer.add(this.pythonPath.as(runContext, String.class) + " -m venv --system-site-packages " + workingDirectory + " > /dev/null");
+        renderer.add(runContext.render(this.pythonPath) + " -m venv --system-site-packages " + workingDirectory + " > /dev/null");
 
         if (requirements != null) {
             renderer.addAll(Arrays.asList(
