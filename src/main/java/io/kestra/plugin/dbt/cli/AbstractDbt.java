@@ -2,7 +2,6 @@ package io.kestra.plugin.dbt.cli;
 
 import com.fasterxml.jackson.annotation.JsonSetter;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
-import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.*;
