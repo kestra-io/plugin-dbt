@@ -250,7 +250,7 @@ public class DbtCLI extends AbstractExecScript {
 
         Path projectWorkingDirectory = projectDir == null ? commands.getWorkingDirectory() : commands.getWorkingDirectory().resolve(projectDir.as(runContext, String.class));
 
-        String profilesString = profiles.as(runContext, String.class);
+        String profilesString = profiles == null ? null : profiles.as(runContext, String.class);
         if (profilesString != null && !profilesString.isEmpty()) {
             var profileFile = new File(commands.getWorkingDirectory().toString(), "profiles.yml");
             if (profileFile.exists()) {

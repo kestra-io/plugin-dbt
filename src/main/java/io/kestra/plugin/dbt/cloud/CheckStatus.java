@@ -16,6 +16,7 @@ import io.micronaut.http.HttpMethod;
 import io.micronaut.http.HttpRequest;
 import io.micronaut.http.uri.UriTemplate;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.slf4j.Logger;
@@ -69,6 +70,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     @Schema(
             title = "The job run ID to check the status for."
     )
+    @NotNull
     Property<String> runId;
 
 
