@@ -28,7 +28,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -90,7 +90,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     @Valid
     protected TaskRunner taskRunner = Docker.builder()
             .type(Docker.class.getName())
-            .entryPoint(Collections.emptyList())
+            .entryPoint(new ArrayList<>())
             .build();
 
     @Schema(title = "The task runner container image, only used if the task runner is container-based.")
@@ -143,7 +143,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     @Override
     public ScriptOutput run(RunContext runContext) throws Exception {
         CommandsWrapper commandsWrapper = new CommandsWrapper(runContext)
-            .withEnv(this.getEnv() != null ? this.getEnv().asMap(runContext, String.class, String.class) : Collections.emptyMap())
+            .withEnv(this.getEnv() != null ? this.getEnv().asMap(runContext, String.class, String.class) : new HashMap<>())
             .withNamespaceFiles(namespaceFiles)
             .withInputFiles(inputFiles)
             .withOutputFiles(outputFiles)

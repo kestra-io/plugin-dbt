@@ -30,7 +30,7 @@ import java.io.File;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import jakarta.validation.constraints.NotEmpty;
@@ -214,7 +214,7 @@ public class DbtCLI extends AbstractExecScript {
     @Valid
     protected TaskRunner taskRunner = Docker.builder()
         .type(Docker.class.getName())
-        .entryPoint(Collections.emptyList())
+        .entryPoint(new ArrayList<>())
         .build();
 
     @Builder.Default
@@ -231,7 +231,7 @@ public class DbtCLI extends AbstractExecScript {
             builder.image(this.getContainerImage());
         }
         if (original.getEntryPoint() == null) {
-            builder.entryPoint(Collections.emptyList());
+            builder.entryPoint(new ArrayList<>());
         }
 
         return builder.build();
