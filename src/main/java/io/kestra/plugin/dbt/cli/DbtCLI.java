@@ -10,6 +10,8 @@ import io.kestra.core.models.tasks.runners.ScriptService;
 import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
+import io.kestra.core.storages.kv.KVStore;
+import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.plugin.dbt.ResultParser;
 import io.kestra.plugin.scripts.exec.AbstractExecScript;
 import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
@@ -18,17 +20,14 @@ import io.kestra.plugin.scripts.exec.scripts.runners.CommandsWrapper;
 import io.kestra.plugin.scripts.runner.docker.Docker;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
-import lombok.Builder;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.ToString;
+import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.apache.commons.io.FileUtils;
 
 import java.io.File;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -220,6 +219,18 @@ public class DbtCLI extends AbstractExecScript {
     @Builder.Default
     protected String containerImage = DEFAULT_IMAGE;
 
+    @Schema(
+        title = "Store manifest.",
+        description = "Use this field to persist your manifest.json in the KV Store."
+    )
+    protected KvStoreManifest storeManifest;
+
+    @Schema(
+        title = "Load manifest.",
+        description = "Use this field to retrieve an existing manifest.json in the KV Store and put it in the inputFiles."
+    )
+    protected KvStoreManifest loadManifest;
+
     @Override
     protected DockerOptions injectDefaults(DockerOptions original) {
         if (original == null) {
@@ -239,6 +250,11 @@ public class DbtCLI extends AbstractExecScript {
 
     @Override
     public ScriptOutput run(RunContext runContext) throws Exception {
+        KVStore kvStore = null;
+        if(this.getStoreManifest() != null) {
+            kvStore = runContext.namespaceKv(this.getStoreManifest().getNamespace().as(runContext, String.class));
+        }
+
         CommandsWrapper commands = this.commands(runContext)
             .withEnableOutputDirectory(true) // force the output dir, so we can get the run_results.json and manifest.json files on each task runners
             .withLogConsumer(new AbstractLogConsumer() {
@@ -288,11 +304,30 @@ public class DbtCLI extends AbstractExecScript {
             run.getOutputFiles().put("run_results.json", results);
         }
 
-        if (projectWorkingDirectory.resolve("target/manifest.json").toFile().exists()) {
-            URI manifest = ResultParser.parseManifest(runContext, projectWorkingDirectory.resolve("target/manifest.json").toFile());
+        File manifestFile = projectWorkingDirectory.resolve("target/manifest.json").toFile();
+        if (manifestFile.exists()) {
+            if(this.storeManifest != null) {
+                final String key = this.getStoreManifest().getKey().as(runContext, String.class);
+                kvStore.put(key, new KVValueAndMetadata(null, JacksonMapper.toObject(Files.readString(manifestFile.toPath()))));
+            }
+
+            URI manifest = ResultParser.parseManifest(runContext, manifestFile);
             run.getOutputFiles().put("manifest.json", manifest);
+
         }
 
         return run;
+    }
+
+    @Builder
+    @Getter
+    public static class KvStoreManifest {
+        @NotNull
+        @Schema(title = "Key", description = "KV store key containing the manifest.json")
+        Property<String> key;
+
+        @NotNull
+        @Schema(title = "Namespace", description = "KV store namespace containing the manifest.json")
+        Property<String> namespace;
     }
 }
