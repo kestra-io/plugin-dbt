@@ -5,14 +5,17 @@ import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.storages.StorageInterface;
 import io.kestra.core.storages.kv.KVStore;
+import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -117,6 +120,40 @@ class DbtCLITest {
         assertThat(kvStore.get(MANIFEST_KEY).isPresent(), is(true));
         Map<String, Object> manifestValue = (Map<String, Object>) kvStore.getValue(MANIFEST_KEY).get().value();
         assertThat(((Map<String, Object>) manifestValue.get("metadata")).get("project_name"), is("unit_kestra"));
+    }
+
+    @Disabled("To run put a manifest.json under src/test/resources/manifest/")
+    @Test
+    void testDbtWithLoadManifest_manifestShouldBeLoadedFromKvStore() throws Exception {
+        DbtCLI loadManifest = DbtCLI.builder()
+            .id(IdUtils.create())
+            .type(DbtCLI.class.getName())
+            .profiles(Property.of(PROFILES))
+            .projectDir(Property.of("unit-kestra"))
+            .containerImage("ghcr.io/kestra-io/dbt-bigquery:latest")
+            .commands(List.of("dbt build --project-dir unit-kestra"))
+            .loadManifest(
+                DbtCLI.KvStoreManifest.builder()
+                    .key(Property.of(MANIFEST_KEY))
+                    .namespace(Property.of(NAMESPACE_ID))
+                    .build()
+            )
+            .build();
+
+        RunContext runContextLoad = TestsUtils.mockRunContext(runContextFactory, loadManifest, Map.of());
+
+        Path workingDir = runContextLoad.workingDir().path(true);
+        copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()),
+            Path.of(runContextLoad.workingDir().path().toString(),"unit-kestra"));
+        createSaFile(workingDir);
+        String manifestValue = Files.readString(Path.of(
+            Objects.requireNonNull(this.getClass().getClassLoader().getResource("manifest/manifest.json")).getPath())
+            , StandardCharsets.UTF_8);
+        runContextLoad.namespaceKv(NAMESPACE_ID).put(MANIFEST_KEY, new KVValueAndMetadata(null, manifestValue));
+
+        ScriptOutput runOutputLoad = loadManifest.run(runContextLoad);
+
+        assertThat(runOutputLoad.getExitCode(), is(0));
     }
 
     private void createSaFile(Path workingDir) throws IOException {

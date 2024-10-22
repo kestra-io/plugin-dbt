@@ -253,9 +253,11 @@ public class DbtCLI extends AbstractExecScript {
 
     @Override
     public ScriptOutput run(RunContext runContext) throws Exception {
-        KVStore kvStore = null;
+        KVStore storeManifestKvStore = null;
+
+        //Check/fail if a KV store exists with given namespace
         if(this.getStoreManifest() != null) {
-            kvStore = runContext.namespaceKv(this.getStoreManifest().getNamespace().as(runContext, String.class));
+            storeManifestKvStore = runContext.namespaceKv(this.getStoreManifest().getNamespace().as(runContext, String.class));
         }
 
         CommandsWrapper commands = this.commands(runContext)
@@ -269,6 +271,21 @@ public class DbtCLI extends AbstractExecScript {
 
         Path projectWorkingDirectory = projectDir == null ? commands.getWorkingDirectory() : commands.getWorkingDirectory().resolve(projectDir.as(runContext, String.class));
 
+        //Load manifest from KV store
+        if(this.getLoadManifest() != null) {
+            KVStore loadManifestKvStore = runContext.namespaceKv(this.getLoadManifest().getNamespace().as(runContext, String.class));
+            var manifestFile = new File(projectWorkingDirectory.toString(), "target/manifest.json");
+            Object manifestValue = loadManifestKvStore.getValue(this.getLoadManifest().getKey().as(runContext, String.class)).get().value();
+
+            FileUtils.writeStringToFile(
+                manifestFile,
+                JacksonMapper.ofJson()
+                    .writeValueAsString(manifestValue),
+                StandardCharsets.UTF_8
+            );
+        }
+
+        //Create profiles.yml
         String profilesString = profiles == null ? null : profiles.as(runContext, String.class);
         if (profilesString != null && !profilesString.isEmpty()) {
             var profileFile = new File(commands.getWorkingDirectory().toString(), "profiles.yml");
@@ -283,6 +300,7 @@ public class DbtCLI extends AbstractExecScript {
             );
         }
 
+        //Create and run commands
         List<String> commandsArgs = ScriptService.scriptCommands(
             this.interpreter,
             this.getBeforeCommandsWithOptions(),
@@ -302,6 +320,7 @@ public class DbtCLI extends AbstractExecScript {
             .withCommands(commandsArgs)
             .run();
 
+        //Parse run results
         if (this.parseRunResults.as(runContext, Boolean.class) && projectWorkingDirectory.resolve("target/run_results.json").toFile().exists()) {
             URI results = ResultParser.parseRunResult(runContext, projectWorkingDirectory.resolve("target/run_results.json").toFile());
             run.getOutputFiles().put("run_results.json", results);
@@ -311,7 +330,7 @@ public class DbtCLI extends AbstractExecScript {
         if (manifestFile.exists()) {
             if(this.storeManifest != null) {
                 final String key = this.getStoreManifest().getKey().as(runContext, String.class);
-                kvStore.put(key, new KVValueAndMetadata(null, JacksonMapper.toObject(Files.readString(manifestFile.toPath()))));
+                storeManifestKvStore.put(key, new KVValueAndMetadata(null, JacksonMapper.toObject(Files.readString(manifestFile.toPath()))));
             }
 
             URI manifest = ResultParser.parseManifest(runContext, manifestFile);

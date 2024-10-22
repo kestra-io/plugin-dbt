@@ -61,7 +61,7 @@ class BuildTest {
                             "type", "bigquery"
                         )
                     ),
-                    "target", "dev"
+                    "manifest", "dev"
                 ))))
             .requirements(Property.of(List.of("dbt-bigquery")))
             .build();
