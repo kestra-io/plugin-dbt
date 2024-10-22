@@ -148,6 +148,9 @@ import jakarta.validation.constraints.NotNull;
                         - dbt deps --project-dir dbt --target prod
                         - dbt build --project-dir dbt --target prod
                       projectDir: dbt
+                      loadManifest:
+                        key: manifest.json
+                        namespace: company.team
                       storeManifest:
                         key: manifest.json
                         namespace: company.team
