@@ -27,6 +27,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @KestraTest
 class BuildTest {
+    private static final String PROFILES = """
+                    unit-kestra:
+                      outputs:
+                        dev:
+                          dataset: kestra_unit_test_us
+                          fixed_retries: 1
+                          location: US
+                          method: service-account
+                          priority: interactive
+                          project: kestra-unit-test
+                          threads: 1
+                          timeout_seconds: 300
+                          type: bigquery
+                          keyfile: sa.json
+                      target: dev
+                    """;
     @Inject
     private RunContextFactory runContextFactory;
 
@@ -47,22 +63,7 @@ class BuildTest {
             .id(IdUtils.create())
             .type(Setup.class.getName())
             .taskRunner(Process.instance())
-            .profiles(Property.of(Map.of(
-                "unit-kestra", Map.of(
-                    "outputs", Map.of(
-                            "dev", Map.of("dataset", "kestra_unit_test_us",
-                            "fixed_retries", "1",
-                            "location", "US",
-                            "method", "oauth",
-                            "priority", "interactive",
-                            "project", "kestra-unit-test",
-                            "threads", "1",
-                            "timeout_seconds", "300",
-                            "type", "bigquery"
-                        )
-                    ),
-                    "target", "dev"
-                ))))
+            .profiles(Property.of(PROFILES))
             .requirements(Property.of(List.of("dbt-bigquery")))
             .build();
 
