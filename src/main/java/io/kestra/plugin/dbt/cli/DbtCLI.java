@@ -1,6 +1,8 @@
 package io.kestra.plugin.dbt.cli;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.kestra.core.exceptions.IllegalVariableEvaluationException;
+import io.kestra.core.exceptions.ResourceExpiredException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
@@ -11,6 +13,7 @@ import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.storages.kv.KVStore;
+import io.kestra.core.storages.kv.KVValue;
 import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.plugin.dbt.ResultParser;
 import io.kestra.plugin.scripts.exec.AbstractExecScript;
@@ -25,6 +28,7 @@ import lombok.experimental.SuperBuilder;
 import org.apache.commons.io.FileUtils;
 
 import java.io.File;
+import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -32,8 +36,11 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import org.apache.commons.lang3.StringUtils;
 
 @SuperBuilder
 @ToString
@@ -148,12 +155,6 @@ import jakarta.validation.constraints.NotNull;
                         - dbt deps --project-dir dbt --target prod
                         - dbt build --project-dir dbt --target prod
                       projectDir: dbt
-                      loadManifest:
-                        key: manifest.json
-                        namespace: company.team
-                      storeManifest:
-                        key: manifest.json
-                        namespace: company.team
                       profiles: |
                         my_dbt_project:
                           outputs:
@@ -174,6 +175,56 @@ import jakarta.validation.constraints.NotNull;
                               threads: 16
                               timeout_seconds: 300
                           target: dev"""
+        ),
+        @Example(
+            title = "Clone a [Git repository](https://github.com/kestra-io/dbt-example) and build dbt models in defer mode. The loadManifest property will fetch an existing manifest.json and use it for the defer build.",
+            full = true,
+            code = """
+                id: dbt_duckdb
+                namespace: company.team
+                tasks:
+                  - id: dbt
+                    type: io.kestra.plugin.core.flow.WorkingDirectory
+                    tasks:
+                      - id: clone_repository
+                        type: io.kestra.plugin.git.Clone
+                        url: https://github.com/kestra-io/dbt-example
+                        branch: main
+                
+                      - id: dbt_build
+                        type: io.kestra.plugin.dbt.cli.DbtCLI
+                        taskRunner:
+                          type: io.kestra.plugin.scripts.runner.docker.Docker
+                          delete: true
+                        containerImage: ghcr.io/kestra-io/dbt-duckdb:latest
+                        loadManifest:
+                          key: manifest.json
+                          namespace: company.team
+                        storeManifest:
+                          key: manifest.json
+                          namespace: company.team
+                        commands:
+                          - dbt build --defer --state ./target --target prod
+                
+                        profiles: |
+                          my_dbt_project:
+                            outputs:
+                              dev:
+                                type: duckdb
+                                path: ":memory:"
+                                fixed_retries: 1
+                                threads: 16
+                                timeout_seconds: 300
+                              prod:
+                                type: duckdb
+                                path: dbt2.duckdb
+                                extensions:
+                                  - parquet
+                                fixed_retries: 1
+                                threads: 16
+                                timeout_seconds: 300
+                            target: dev
+                """
         )
     }
 )
@@ -233,7 +284,10 @@ public class DbtCLI extends AbstractExecScript {
 
     @Schema(
         title = "Load manifest.",
-        description = "Use this field to retrieve an existing manifest.json in the KV Store and put it in the inputFiles."
+        description = """
+            Use this field to retrieve an existing manifest.json in the KV Store and put it in the inputFiles.
+            The manifest.json will be put under ./target/manifest.json or under ./projectDir/target/manifest.json if you specify a projectDir.
+            """
     )
     protected KvStoreManifest loadManifest;
 
@@ -277,15 +331,7 @@ public class DbtCLI extends AbstractExecScript {
         //Load manifest from KV store
         if(this.getLoadManifest() != null) {
             KVStore loadManifestKvStore = runContext.namespaceKv(this.getLoadManifest().getNamespace().as(runContext, String.class));
-            var manifestFile = new File(projectWorkingDirectory.toString(), "target/manifest.json");
-            Object manifestValue = loadManifestKvStore.getValue(this.getLoadManifest().getKey().as(runContext, String.class)).get().value();
-
-            FileUtils.writeStringToFile(
-                manifestFile,
-                JacksonMapper.ofJson()
-                    .writeValueAsString(manifestValue),
-                StandardCharsets.UTF_8
-            );
+            fetchAndStoreManifestIfExists(runContext, loadManifestKvStore, projectWorkingDirectory);
         }
 
         //Create profiles.yml
@@ -331,7 +377,7 @@ public class DbtCLI extends AbstractExecScript {
 
         File manifestFile = projectWorkingDirectory.resolve("target/manifest.json").toFile();
         if (manifestFile.exists()) {
-            if(this.storeManifest != null) {
+            if(this.getStoreManifest() != null) {
                 final String key = this.getStoreManifest().getKey().as(runContext, String.class);
                 storeManifestKvStore.put(key, new KVValueAndMetadata(null, JacksonMapper.toObject(Files.readString(manifestFile.toPath()))));
             }
@@ -342,6 +388,22 @@ public class DbtCLI extends AbstractExecScript {
         }
 
         return run;
+    }
+
+    private void fetchAndStoreManifestIfExists(RunContext runContext, KVStore loadManifestKvStore, Path projectWorkingDirectory) throws IOException, ResourceExpiredException, IllegalVariableEvaluationException {
+        Optional<KVValue> manifestValue = loadManifestKvStore.getValue(this.getLoadManifest().getKey().as(runContext, String.class));
+
+        if(manifestValue.isEmpty() || manifestValue.get().value() == null || StringUtils.isBlank(manifestValue.get().value().toString())) {
+            runContext.logger().warn("Property `loadManifest` has been used but no manifest has been found in the KV Store.");
+            return;
+        }
+        var manifestFile = new File(projectWorkingDirectory.toString(), "target/manifest.json");
+        FileUtils.writeStringToFile(
+            manifestFile,
+            JacksonMapper.ofJson()
+                .writeValueAsString(manifestValue.get().value()),
+            StandardCharsets.UTF_8
+        );
     }
 
     @Builder
