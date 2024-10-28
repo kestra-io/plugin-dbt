@@ -177,7 +177,7 @@ import org.apache.commons.lang3.StringUtils;
                           target: dev"""
         ),
         @Example(
-            title = "Clone a [Git repository](https://github.com/kestra-io/dbt-example) and build dbt models in defer mode. The loadManifest property will fetch an existing manifest.json and use it for the defer build.",
+            title = "Clone a [Git repository](https://github.com/kestra-io/dbt-example) and build dbt models in defer mode. The `loadManifest` property will fetch an existing `manifest.json` and use it to run a subset of models or tests along with the `--defer` flag.",
             full = true,
             code = """
                 id: dbt_duckdb
@@ -199,10 +199,10 @@ import org.apache.commons.lang3.StringUtils;
                         containerImage: ghcr.io/kestra-io/dbt-duckdb:latest
                         loadManifest:
                           key: manifest.json
-                          namespace: company.team
+                          namespace: "{{ flow.namespace }}"
                         storeManifest:
                           key: manifest.json
-                          namespace: company.team
+                          namespace: "{{ flow.namespace }}"
                         commands:
                           - dbt build --defer --state ./target --target prod
                 
