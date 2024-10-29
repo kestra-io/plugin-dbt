@@ -177,11 +177,20 @@ import org.apache.commons.lang3.StringUtils;
                           target: dev"""
         ),
         @Example(
-            title = "Clone a [Git repository](https://github.com/kestra-io/dbt-example) and build dbt models in defer mode. The `loadManifest` property will fetch an existing `manifest.json` and use it to run a subset of models or tests along with the `--defer` flag.",
+            title = "Clone a [Git repository](https://github.com/kestra-io/dbt-example) and build dbt models using the `--defer` flag. The `loadManifest` property will fetch an existing `manifest.json` and use it to run a subset of models that have changed since the last run.",
             full = true,
             code = """
-                id: dbt_duckdb
+                id: dbt_defer
                 namespace: company.team
+                inputs:
+                  - id: dbt_command
+                    type: SELECT
+                    allowCustomValue: true
+                    defaults: dbt build --project-dir dbt --target prod --no-partial-parse
+                    values:
+                      - dbt build --project-dir dbt --target prod --no-partial-parse
+                      - dbt build --project-dir dbt --target prod --no-partial-parse --select state:modified+ --defer --state ./target
+
                 tasks:
                   - id: dbt
                     type: io.kestra.plugin.core.flow.WorkingDirectory
@@ -189,7 +198,7 @@ import org.apache.commons.lang3.StringUtils;
                       - id: clone_repository
                         type: io.kestra.plugin.git.Clone
                         url: https://github.com/kestra-io/dbt-example
-                        branch: main
+                        branch: master
                 
                       - id: dbt_build
                         type: io.kestra.plugin.dbt.cli.DbtCLI
@@ -203,9 +212,9 @@ import org.apache.commons.lang3.StringUtils;
                         storeManifest:
                           key: manifest.json
                           namespace: "{{ flow.namespace }}"
+                        projectDir: dbt
                         commands:
-                          - dbt build --defer --state ./target --target prod
-                
+                          - "{{ inputs.dbt_command }}"
                         profiles: |
                           my_dbt_project:
                             outputs:
