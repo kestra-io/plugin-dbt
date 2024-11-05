@@ -85,6 +85,7 @@ import org.apache.commons.lang3.StringUtils;
         ),
         @Example(
             title = "Sync dbt project files from a specific GitHub branch to Kestra's [Namespace Files](https://kestra.io/docs/concepts/namespace-files) and run `dbt build` command. Note that we `exclude` the `profiles.yml` file because the `profiles` is defined in the dbt task directly. This `exclude` pattern is useful if you want to override the `profiles.yml` file by defining it in the dbt task. In this example, the `profiles.yml` was [initially targeting](https://github.com/kestra-io/dbt-example/blob/master/dbt/profiles.yml) a `dev` environment, but we override it to target a `prod` environment.",
+            full = true,
             code = """
                 id: dbt_build
                 namespace: company.team
