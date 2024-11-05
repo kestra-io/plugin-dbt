@@ -84,6 +84,42 @@ import org.apache.commons.lang3.StringUtils;
                             target: dev"""
         ),
         @Example(
+            title = "Sync dbt project files from a specific GitHub branch to Kestra's [Namespace Files](https://kestra.io/docs/concepts/namespace-files) and run `dbt build` command. Note that we `exclude` the `profiles.yml` file because the `profiles` is defined in the dbt task directly. This `exclude` pattern is useful if you want to override the `profiles.yml` file by defining it in the dbt task. In this example, the `profiles.yml` was [initially targeting](https://github.com/kestra-io/dbt-example/blob/master/dbt/profiles.yml) a `dev` environment, but we override it to target a `prod` environment.",
+            code = """
+                id: dbt_build
+                namespace: company.team
+
+                tasks:
+                  - id: sync
+                    type: io.kestra.plugin.git.SyncNamespaceFiles
+                    url: https://github.com/kestra-io/dbt-example
+                    branch: master
+                    namespace: "{{ flow.namespace }}"
+                    gitDirectory: dbt
+                    dryRun: false
+
+                  - id: dbt_build
+                    type: io.kestra.plugin.dbt.cli.DbtCLI
+                    containerImage: ghcr.io/kestra-io/dbt-duckdb:latest
+                    namespaceFiles:
+                      enabled: true
+                      exclude:
+                        - profiles.yml
+                    taskRunner:
+                      type: io.kestra.plugin.scripts.runner.docker.Docker
+                    commands:
+                      - dbt build
+                    profiles: |
+                      my_dbt_project:
+                        outputs:
+                          prod:
+                            type: duckdb
+                            path: ":memory:"
+                            schema: main
+                            threads: 8
+                        target: prod"""
+        ),
+        @Example(
             title = "Install a custom dbt version and run `dbt deps` and `dbt build` commands. Note how you can also configure the memory limit for the Docker runner. This is useful when you see Zombie processes.",
             full = true,
             code = """
