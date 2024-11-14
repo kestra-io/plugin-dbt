@@ -399,7 +399,7 @@ public class DbtCLI extends AbstractExecScript {
         List<String> commandsArgs = ScriptService.scriptCommands(
             this.interpreter,
             this.getBeforeCommandsWithOptions(),
-            runContext.render(this.commands).stream().map(command -> command.concat(" --log-format json")).toList()
+            runContext.render(this.commands).stream().map(command -> command.startsWith("dbt") ? command.concat(" --log-format json") : command).toList()
         );
 
         // check that if a command uses --project-dir, the projectDir must be set
