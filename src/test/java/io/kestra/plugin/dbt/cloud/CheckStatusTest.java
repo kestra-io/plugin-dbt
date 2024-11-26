@@ -52,7 +52,7 @@ class CheckStatusTest {
                 .runId(Property.of(runOutput.getRunId().toString()))
                 .token(Property.of(this.token))
                 .accountId(Property.of(this.accountId))
-                .maxDuration(Property.of(Duration.ofMinutes(60)))
+                .maxDuration(Duration.ofMinutes(60))
                 .parseRunResults(Property.of(false))
                 .build();
 

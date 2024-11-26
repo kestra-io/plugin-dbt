@@ -3,6 +3,7 @@ package io.kestra.plugin.dbt.cloud;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
+import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
@@ -77,14 +78,16 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     @Schema(
             title = "Specify how often the task should poll for the job status."
     )
+    @PluginProperty(dynamic = true)
     @Builder.Default
-    Property<Duration> pollFrequency = Property.of(Duration.ofSeconds(5));
+    Duration pollFrequency = Duration.ofSeconds(5);
 
     @Schema(
             title = "The maximum duration the task should poll for the job completion."
     )
+    @PluginProperty(dynamic = true)
     @Builder.Default
-    Property<Duration> maxDuration = Property.of(Duration.ofMinutes(60));
+    Duration maxDuration = Duration.ofMinutes(60);
 
     @Builder.Default
     @Schema(
@@ -139,8 +142,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
                     return null;
                 }),
-                this.pollFrequency.as(runContext, Duration.class),
-                this.maxDuration.as(runContext, Duration.class)
+                this.pollFrequency,
+                this.maxDuration
         );
 
         // final response
@@ -212,7 +215,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                                                 ))
                                 ),
                         Argument.of(RunResponse.class),
-                    maxDuration.as(runContext, Duration.class)
+                    maxDuration
                 )
                 .getBody();
     }

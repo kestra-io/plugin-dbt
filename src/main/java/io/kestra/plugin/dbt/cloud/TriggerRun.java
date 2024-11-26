@@ -2,6 +2,7 @@ package io.kestra.plugin.dbt.cloud;
 
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
+import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
@@ -126,14 +127,16 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     @Schema(
             title = "Specify frequency for job state check API calls."
     )
+    @PluginProperty(dynamic = true)
     @Builder.Default
-    Property<Duration> pollFrequency = Property.of(Duration.ofSeconds(5));
+    Duration pollFrequency = Duration.ofSeconds(5);
 
     @Schema(
         title = "The maximum total wait duration."
     )
+    @PluginProperty(dynamic = true)
     @Builder.Default
-    Property<Duration> maxDuration = Property.of(Duration.ofMinutes(60));
+    Duration maxDuration = Duration.ofMinutes(60);
 
     @Builder.Default
     @Schema(
