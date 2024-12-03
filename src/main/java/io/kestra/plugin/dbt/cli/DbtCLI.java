@@ -146,7 +146,7 @@ import org.apache.commons.lang3.StringUtils;
                     taskRunner:
                       type: io.kestra.plugin.scripts.runner.docker.Docker
                       memory:
-                        memory: 1GB          
+                        memory: 1GB
                     containerImage: python:3.11-slim
                     beforeCommands:
                       - pip install uv
@@ -173,7 +173,7 @@ import org.apache.commons.lang3.StringUtils;
             code = """
                 id: dwh_and_analytics
                 namespace: company.team
-                
+
                 tasks:
                   - id: dbt
                     type: io.kestra.plugin.core.flow.WorkingDirectory
@@ -182,7 +182,7 @@ import org.apache.commons.lang3.StringUtils;
                       type: io.kestra.plugin.git.Clone
                       url: https://github.com/kestra-io/dbt-example
                       branch: master
-                
+
                     - id: dbt_build
                       type: io.kestra.plugin.dbt.cli.DbtCLI
                       taskRunner:
@@ -236,7 +236,7 @@ import org.apache.commons.lang3.StringUtils;
                         type: io.kestra.plugin.git.Clone
                         url: https://github.com/kestra-io/dbt-example
                         branch: master
-                
+
                       - id: dbt_build
                         type: io.kestra.plugin.dbt.cli.DbtCLI
                         taskRunner:
@@ -360,7 +360,7 @@ public class DbtCLI extends AbstractExecScript {
 
         //Check/fail if a KV store exists with given namespace
         if(this.getStoreManifest() != null) {
-            storeManifestKvStore = runContext.namespaceKv(this.getStoreManifest().getNamespace().as(runContext, String.class));
+            storeManifestKvStore = runContext.namespaceKv(runContext.render(this.getStoreManifest().getNamespace()).as(String.class).orElseThrow());
         }
 
         CommandsWrapper commands = this.commands(runContext)
@@ -372,16 +372,17 @@ public class DbtCLI extends AbstractExecScript {
                 }
             });
 
-        Path projectWorkingDirectory = projectDir == null ? commands.getWorkingDirectory() : commands.getWorkingDirectory().resolve(projectDir.as(runContext, String.class));
+        var renderedProjectDir = runContext.render(projectDir).as(String.class);
+        Path projectWorkingDirectory = renderedProjectDir.map(s -> commands.getWorkingDirectory().resolve(s)).orElseGet(commands::getWorkingDirectory);
 
         //Load manifest from KV store
         if(this.getLoadManifest() != null) {
-            KVStore loadManifestKvStore = runContext.namespaceKv(this.getLoadManifest().getNamespace().as(runContext, String.class));
+            KVStore loadManifestKvStore = runContext.namespaceKv(runContext.render(this.getLoadManifest().getNamespace()).as(String.class).orElseThrow());
             fetchAndStoreManifestIfExists(runContext, loadManifestKvStore, projectWorkingDirectory);
         }
 
         //Create profiles.yml
-        String profilesString = profiles == null ? null : profiles.as(runContext, String.class);
+        String profilesString = runContext.render(profiles).as(String.class).orElse(null);
         if (profilesString != null && !profilesString.isEmpty()) {
             var profileFile = new File(commands.getWorkingDirectory().toString(), "profiles.yml");
             if (profileFile.exists()) {
@@ -416,7 +417,7 @@ public class DbtCLI extends AbstractExecScript {
             .run();
 
         //Parse run results
-        if (this.parseRunResults.as(runContext, Boolean.class) && projectWorkingDirectory.resolve("target/run_results.json").toFile().exists()) {
+        if (runContext.render(this.parseRunResults).as(Boolean.class).orElse(Boolean.TRUE) && projectWorkingDirectory.resolve("target/run_results.json").toFile().exists()) {
             URI results = ResultParser.parseRunResult(runContext, projectWorkingDirectory.resolve("target/run_results.json").toFile());
             run.getOutputFiles().put("run_results.json", results);
         }
@@ -424,7 +425,7 @@ public class DbtCLI extends AbstractExecScript {
         File manifestFile = projectWorkingDirectory.resolve("target/manifest.json").toFile();
         if (manifestFile.exists()) {
             if(this.getStoreManifest() != null) {
-                final String key = this.getStoreManifest().getKey().as(runContext, String.class);
+                final String key = runContext.render(this.getStoreManifest().getKey()).as(String.class).orElseThrow();
                 storeManifestKvStore.put(key, new KVValueAndMetadata(null, JacksonMapper.toObject(Files.readString(manifestFile.toPath()))));
             }
 
@@ -437,7 +438,7 @@ public class DbtCLI extends AbstractExecScript {
     }
 
     private void fetchAndStoreManifestIfExists(RunContext runContext, KVStore loadManifestKvStore, Path projectWorkingDirectory) throws IOException, ResourceExpiredException, IllegalVariableEvaluationException {
-        Optional<KVValue> manifestValue = loadManifestKvStore.getValue(this.getLoadManifest().getKey().as(runContext, String.class));
+        Optional<KVValue> manifestValue = loadManifestKvStore.getValue(runContext.render(this.getLoadManifest().getKey()).as(String.class).get());
 
         if(manifestValue.isEmpty() || manifestValue.get().value() == null || StringUtils.isBlank(manifestValue.get().value().toString())) {
             runContext.logger().warn("Property `loadManifest` has been used but no manifest has been found in the KV Store.");

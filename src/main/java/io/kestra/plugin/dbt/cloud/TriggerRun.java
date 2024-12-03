@@ -148,46 +148,19 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
         // trigger
         Map<String, Object> body = new HashMap<>();
-        body.put("cause", this.cause.as(runContext, String.class));
+        body.put("cause", runContext.render(this.cause).as(String.class).orElseThrow());
 
-        if (this.gitSha != null) {
-            body.put("git_sha", this.gitSha.as(runContext, String.class));
-        }
+        runContext.render(this.gitSha).as(String.class).ifPresent(sha -> body.put("git_sha", sha));
+        runContext.render(this.gitBranch).as(String.class).ifPresent(branch -> body.put("git_branch", branch));
+        runContext.render(this.schemaOverride).as(String.class).ifPresent(schema -> body.put("schema_override", schema));
+        runContext.render(this.dbtVersionOverride).as(String.class).ifPresent(version -> body.put("dbt_version_override", version));
+        runContext.render(this.threadsOverride).as(String.class).ifPresent(thread -> body.put("threads_override", thread));
+        runContext.render(this.targetNameOverride).as(String.class).ifPresent(target -> body.put("target_name_override", target));
+        runContext.render(this.generateDocsOverride).as(Boolean.class).ifPresent(doc -> body.put("generate_docs_override", doc));
+        runContext.render(this.timeoutSecondsOverride).as(Integer.class).ifPresent(timeout -> body.put("timeout_seconds_override", timeout));
 
-        if (this.gitBranch != null) {
-            body.put("git_branch", this.gitBranch.as(runContext, String.class));
-        }
-
-        if (this.schemaOverride != null) {
-            body.put("schema_override", this.schemaOverride.as(runContext, String.class));
-        }
-
-        if (this.dbtVersionOverride != null) {
-            body.put("dbt_version_override", this.dbtVersionOverride.as(runContext, String.class));
-        }
-
-        if (this.threadsOverride != null) {
-            body.put("threads_override", this.threadsOverride.as(runContext, String.class));
-        }
-
-        if (this.targetNameOverride != null) {
-            body.put("target_name_override", this.targetNameOverride.as(runContext, String.class));
-        }
-
-        if (this.targetNameOverride != null) {
-            body.put("target_name_override", this.targetNameOverride.as(runContext, String.class));
-        }
-
-        if (this.generateDocsOverride != null) {
-            body.put("generate_docs_override", this.generateDocsOverride.as(runContext, Boolean.class));
-        }
-
-        if (this.timeoutSecondsOverride != null) {
-            body.put("timeout_seconds_override", this.timeoutSecondsOverride.as(runContext, Integer.class));
-        }
-
-        if (this.stepsOverride != null) {
-            body.put("steps_override", this.stepsOverride.asList(runContext, String.class));
+        if (!runContext.render(this.stepsOverride).asList(String.class).isEmpty()) {
+            body.put("steps_override", runContext.render(this.stepsOverride).asList(String.class));
         }
 
         HttpResponse<RunResponse> triggerResponse = this.request(
@@ -198,8 +171,8 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
                     UriTemplate
                         .of("/api/v2/accounts/{accountId}/jobs/{jobId}/run")
                         .expand(Map.of(
-                            "accountId", this.accountId.as(runContext, String.class),
-                            "jobId", this.jobId.as(runContext, String.class)
+                            "accountId", runContext.render(this.accountId).as(String.class).orElseThrow(),
+                            "jobId", runContext.render(this.jobId).as(String.class).orElseThrow()
                         )) + "/"
                 )
                 .body(body),
@@ -210,7 +183,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         logger.info("Job status {} with response: {}", triggerResponse.getStatus(), triggerRunResponse);
         Long runId = triggerRunResponse.getData().getId();
 
-        if (!this.wait.as(runContext, Boolean.class)) {
+        if (Boolean.FALSE.equals(runContext.render(this.wait).as(Boolean.class).orElse(Boolean.TRUE))) {
             return Output.builder()
                 .runId(runId)
                 .build();

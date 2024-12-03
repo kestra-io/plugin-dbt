@@ -27,10 +27,8 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.*;
 import java.util.List;
-import java.util.Map;
 
 @SuperBuilder
 @ToString
@@ -143,13 +141,13 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     @Override
     public ScriptOutput run(RunContext runContext) throws Exception {
         CommandsWrapper commandsWrapper = new CommandsWrapper(runContext)
-            .withEnv(this.getEnv() != null ? this.getEnv().asMap(runContext, String.class, String.class) : new HashMap<>())
+            .withEnv(runContext.render(this.getEnv()).asMap(String.class, String.class))
             .withNamespaceFiles(namespaceFiles)
             .withInputFiles(inputFiles)
             .withOutputFiles(outputFiles)
-            .withRunnerType(this.getRunner() != null ? this.getRunner().as(runContext, RunnerType.class) : null)
-            .withDockerOptions(this.getDocker() != null ? this.getDocker().as(runContext, DockerOptions.class) : null)
-            .withContainerImage(this.containerImage.as(runContext, String.class))
+            .withRunnerType(runContext.render(this.getRunner()).as(RunnerType.class).orElse(null))
+            .withDockerOptions(runContext.render(this.getDocker()).as(DockerOptions.class).orElse(null))
+            .withContainerImage(runContext.render(this.getContainerImage()).as(String.class).orElseThrow())
             .withTaskRunner(this.taskRunner)
             .withLogConsumer(new AbstractLogConsumer() {
                 @Override
@@ -160,15 +158,15 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             .withEnableOutputDirectory(true); //force output files on task runners
         Path workingDirectory = commandsWrapper.getWorkingDirectory();
 
-        String profileString = profiles != null ? profiles.as(runContext, String.class) : null;
-        if (profileString != null && !profileString.isEmpty()) {
+        Optional<String> profileString = runContext.render(profiles).as(String.class);
+        if (profileString.isPresent() && !profileString.get().isEmpty()) {
             if (Files.exists(Path.of(".profiles/profiles.yml"))) {
                 runContext.logger().warn("A 'profiles.yml' file already exist in the task working directory, it will be overridden.");
             }
 
             FileUtils.writeStringToFile(
                 new File(workingDirectory.resolve(".profile").toString(), "profiles.yml"),
-                    profileString,
+                    profileString.get(),
                 StandardCharsets.UTF_8
             );
         }
@@ -194,26 +192,26 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
 
     private String createDbtCommand(RunContext runContext) throws IllegalVariableEvaluationException {
         List<String> commands = new ArrayList<>(List.of(
-            dbtPath.as(runContext, String.class),
+            runContext.render(this.dbtPath).as(String.class).orElseThrow(),
             "--log-format json"
         ));
 
-        if (Boolean.TRUE.equals(this.debug.as(runContext, Boolean.class))) {
+        if (Boolean.TRUE.equals(runContext.render(this.debug).as(Boolean.class).orElse(false))) {
             commands.add("--debug");
         }
 
-        if (Boolean.TRUE.equals(this.failFast.as(runContext, Boolean.class))) {
+        if (Boolean.TRUE.equals(runContext.render(this.failFast).as(Boolean.class).orElse(false))) {
             commands.add("--fail-fast");
         }
 
-        if (Boolean.TRUE.equals(this.warnError.as(runContext, Boolean.class))) {
+        if (Boolean.TRUE.equals(runContext.render(this.warnError).as(Boolean.class).orElse(false))) {
             commands.add("--warn-error");
         }
 
         commands.addAll(dbtCommands(runContext));
 
-        if (this.projectDir != null) {
-            commands.add("--project-dir {{" + ScriptService.VAR_WORKING_DIR + "}}" + this.projectDir.as(runContext, String.class));
+        if (runContext.render(this.projectDir).as(String.class).isPresent()) {
+            commands.add("--project-dir {{" + ScriptService.VAR_WORKING_DIR + "}}" + runContext.render(this.projectDir).as(String.class).get());
         } else {
             commands.add("--project-dir {{" + ScriptService.VAR_WORKING_DIR + "}}");
         }
@@ -222,11 +220,11 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     }
 
     protected void parseResults(RunContext runContext, Path workingDirectory, ScriptOutput scriptOutput) throws IllegalVariableEvaluationException, IOException {
-        String baseDir = this.projectDir != null ? this.projectDir.as(runContext, String.class) : "";
+        String baseDir = runContext.render(this.projectDir).as(String.class).orElse("");
 
         File runResults = workingDirectory.resolve(baseDir + "target/run_results.json").toFile();
 
-        if (this.parseRunResults.as(runContext, Boolean.class) && runResults.exists()) {
+        if (runContext.render(this.parseRunResults).as(Boolean.class).orElse(true) && runResults.exists()) {
             URI results = ResultParser.parseRunResult(runContext, runResults);
             scriptOutput.getOutputFiles().put("run_results.json", results);
         }
