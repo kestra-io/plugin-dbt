@@ -61,7 +61,7 @@ public abstract class AbstractDbtCloud extends Task {
         httpConfig.setMaxContentLength(Integer.MAX_VALUE);
         httpConfig.setReadTimeout(HTTP_READ_TIMEOUT);
 
-        DefaultHttpClient client = (DefaultHttpClient) FACTORY.createClient(URI.create(baseUrl.as(runContext, String.class)).toURL(), httpConfig);
+        DefaultHttpClient client = (DefaultHttpClient) FACTORY.createClient(URI.create(runContext.render(baseUrl).as(String.class).orElseThrow()).toURL(), httpConfig);
         client.setMediaTypeCodecRegistry(mediaTypeCodecRegistry);
 
         return client;
@@ -78,7 +78,7 @@ public abstract class AbstractDbtCloud extends Task {
                                                    Duration timeout) throws HttpClientResponseException {
         try {
             request = request
-                .bearerAuth(this.token.as(runContext, String.class))
+                .bearerAuth(runContext.render(this.token).as(String.class).orElseThrow())
                 .contentType(MediaType.APPLICATION_JSON);
 
             try (HttpClient client = this.client(runContext)) {

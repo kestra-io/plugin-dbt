@@ -57,28 +57,28 @@ public abstract class AbstractRun extends AbstractDbt {
             this.dbtCommand(),
             "--profiles-dir {{" + ScriptService.VAR_WORKING_DIR + "}}/.profile"));
 
-        if (this.thread != null) {
-            commands.add("--threads " + this.thread);
+        if (runContext.render(this.thread).as(Integer.class).isPresent()) {
+            commands.add("--threads " + runContext.render(this.thread).as(Integer.class).get());
         }
 
-        if (this.fullRefresh.as(runContext, Boolean.class)) {
+        if (runContext.render(this.fullRefresh).as(Boolean.class).orElse(false)) {
             commands.add("--full-refresh");
         }
 
-        if (this.target != null) {
-            commands.add("--target " + this.target.as(runContext, String.class));
+        if (runContext.render(this.target).as(String.class).isPresent()) {
+            commands.add("--target " + runContext.render(this.target).as(String.class).get());
         }
 
-        if (this.selector != null) {
-            commands.add("--selector " + this.selector.as(runContext, String.class));
+        if (runContext.render(this.selector).as(String.class).isPresent()) {
+            commands.add("--selector " + runContext.render(this.target).as(String.class).get());
         }
 
-        if (this.select != null) {
-            commands.add("--select " + String.join(" ", this.select.asList(runContext, String.class)));
+        if (!runContext.render(this.select).asList(String.class).isEmpty()) {
+            commands.add("--select " + String.join(" ", runContext.render(this.select).asList(String.class)));
         }
 
-        if (this.exclude != null) {
-            commands.add("--exclude " + String.join(" ", this.exclude.asList(runContext, String.class)));
+        if (!runContext.render(this.exclude).asList(String.class).isEmpty()) {
+            commands.add("--exclude " + String.join(" ", runContext.render(this.exclude).asList(String.class)));
         }
 
         return commands;

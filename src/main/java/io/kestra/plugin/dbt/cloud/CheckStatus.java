@@ -106,7 +106,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         Logger logger = runContext.logger();
 
         // Check rendered runId provided is an Integer
-        Long runIdRendered = Long.parseLong(this.runId.as(runContext, String.class));
+        Long runIdRendered = Long.parseLong(runContext.render(this.runId).as(String.class).orElseThrow());
 
         // wait for end
         RunResponse finalRunResponse = Await.until(
@@ -139,8 +139,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
                     return null;
                 }),
-                this.pollFrequency.as(runContext, Duration.class),
-                this.maxDuration.as(runContext, Duration.class)
+                runContext.render(this.pollFrequency).as(Duration.class).orElseThrow(),
+                runContext.render(this.maxDuration).as(Duration.class).orElseThrow()
         );
 
         // final response
@@ -155,7 +155,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         Path runResultsArtifact = downloadArtifacts(runContext, runIdRendered, "run_results.json");
         Path manifestArtifact = downloadArtifacts(runContext, runIdRendered, "manifest.json");
 
-        if (this.parseRunResults.as(runContext, Boolean.class)) {
+        if (runContext.render(this.parseRunResults).as(Boolean.class).orElseThrow()) {
             ResultParser.parseRunResult(runContext, runResultsArtifact.toFile());
         }
 
@@ -207,12 +207,12 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                                                         )
                                                 )
                                                 .expand(Map.of(
-                                                        "accountId", this.accountId.as(runContext, String.class),
+                                                        "accountId", runContext.render(this.accountId).as(String.class).orElseThrow(),
                                                         "runId", id
                                                 ))
                                 ),
                         Argument.of(RunResponse.class),
-                    maxDuration.as(runContext, Duration.class)
+                    runContext.render(this.maxDuration).as(Duration.class).orElseThrow()
                 )
                 .getBody();
     }
@@ -227,7 +227,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                                         UriTemplate
                                                 .of("/api/v2/accounts/{accountId}/runs/{runId}/artifacts/{path}")
                                                 .expand(Map.of(
-                                                        "accountId", this.accountId.as(runContext, String.class),
+                                                        "accountId", runContext.render(this.accountId).as(String.class).orElseThrow(),
                                                         "runId", runId,
                                                         "path", path
                                                 ))

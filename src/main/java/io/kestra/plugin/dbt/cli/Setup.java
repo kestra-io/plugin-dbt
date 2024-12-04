@@ -69,7 +69,7 @@ import jakarta.validation.constraints.NotNull;
                         type: io.kestra.plugin.git.Clone
                         url: https://github.com/kestra-io/dbt-demo
                         branch: main
-                    
+
                       - id: dbt_setup
                         type: io.kestra.plugin.dbt.cli.Setup
                         requirements:
@@ -83,7 +83,7 @@ import jakarta.validation.constraints.NotNull;
                                 extensions:
                                   - parquet
                             target: dev
-                    
+
                       - id: dbt_build
                         type: io.kestra.plugin.dbt.cli.Build
                 """
@@ -174,14 +174,14 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
         CommandsWrapper commandsWrapper = this.commands(runContext);
         Path workingDirectory = commandsWrapper.getWorkingDirectory();
 
-        List<String> commands = this.virtualEnvCommand(runContext, workingDirectory, this.requirements.asList(runContext, String.class));
+        List<String> commands = this.virtualEnvCommand(runContext, workingDirectory, runContext.render(this.requirements).asList(String.class));
 
         // write profile
         File profileDir = workingDirectory.resolve(".profile").toFile();
         // noinspection ResultOfMethodCallIgnored
         profileDir.mkdirs();
 
-        String profilesContent = profilesContent(runContext, profiles.as(runContext, Object.class));
+        String profilesContent = profilesContent(runContext, runContext.render(this.profiles).as(Object.class).orElseThrow());
         FileUtils.writeStringToFile(
             new File(profileDir, "profiles.yml"),
             profilesContent,
@@ -235,6 +235,8 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     }
 
     private Map<String, String> finalInputFiles(RunContext runContext) throws IOException, IllegalVariableEvaluationException {
-        return this.inputFiles != null ? new HashMap<>(PluginUtilsService.transformInputFiles(runContext, this.inputFiles.as(runContext, Object.class))) : new HashMap<>();
+        return runContext.render(this.inputFiles).as(Object.class).isPresent() ?
+            new HashMap<>(PluginUtilsService.transformInputFiles(runContext, runContext.render(this.inputFiles).as(Object.class).orElseThrow())) :
+            new HashMap<>();
     }
 }
