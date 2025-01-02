@@ -147,7 +147,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     protected TaskRunner taskRunner = Docker.instance();
 
     @Builder.Default
-    protected String containerImage = DEFAULT_IMAGE;
+    protected Property<String> containerImage = Property.of(DEFAULT_IMAGE);
 
     @Schema(title = "Deprecated, use the `docker` property instead", deprecated = true)
     @Deprecated
@@ -163,7 +163,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     protected DockerOptions injectDefaults(DockerOptions original) {
         var builder = original.toBuilder();
         if (original.getImage() == null) {
-            builder.image(this.getContainerImage());
+            builder.image(this.getContainerImage().toString());
         }
 
         return builder.build();
@@ -197,7 +197,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
 
         List<String> commandsArgs = ScriptService.scriptCommands(
             this.interpreter,
-            this.getBeforeCommandsWithOptions(),
+            this.getBeforeCommandsWithOptions(runContext),
             commands
         );
 

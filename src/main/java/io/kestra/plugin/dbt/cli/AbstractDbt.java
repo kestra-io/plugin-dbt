@@ -134,17 +134,19 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
 
     private Object inputFiles;
 
-    private List<String> outputFiles;
+    private Property<List<String>> outputFiles;
 
     protected abstract java.util.List<String> dbtCommands(RunContext runContext) throws IllegalVariableEvaluationException;
 
     @Override
     public ScriptOutput run(RunContext runContext) throws Exception {
+        var renderedOutputFiles = runContext.render(this.outputFiles).asList(String.class);
+
         CommandsWrapper commandsWrapper = new CommandsWrapper(runContext)
             .withEnv(runContext.render(this.getEnv()).asMap(String.class, String.class))
             .withNamespaceFiles(namespaceFiles)
             .withInputFiles(inputFiles)
-            .withOutputFiles(outputFiles)
+            .withOutputFiles(renderedOutputFiles.isEmpty() ? null : renderedOutputFiles)
             .withRunnerType(runContext.render(this.getRunner()).as(RunnerType.class).orElse(null))
             .withDockerOptions(runContext.render(this.getDocker()).as(DockerOptions.class).orElse(null))
             .withContainerImage(runContext.render(this.getContainerImage()).as(String.class).orElseThrow())

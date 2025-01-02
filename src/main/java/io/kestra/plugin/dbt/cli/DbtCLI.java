@@ -320,7 +320,7 @@ public class DbtCLI extends AbstractExecScript {
         .build();
 
     @Builder.Default
-    protected String containerImage = DEFAULT_IMAGE;
+    protected Property<String> containerImage = Property.of(DEFAULT_IMAGE);
 
     @Schema(
         title = "Store manifest.",
@@ -345,7 +345,7 @@ public class DbtCLI extends AbstractExecScript {
 
         var builder = original.toBuilder();
         if (original.getImage() == null) {
-            builder.image(this.getContainerImage());
+            builder.image(this.getContainerImage().toString());
         }
         if (original.getEntryPoint() == null) {
             builder.entryPoint(new ArrayList<>());
@@ -399,7 +399,7 @@ public class DbtCLI extends AbstractExecScript {
         //Create and run commands
         List<String> commandsArgs = ScriptService.scriptCommands(
             this.interpreter,
-            this.getBeforeCommandsWithOptions(),
+            this.getBeforeCommandsWithOptions(runContext),
             runContext.render(this.commands).stream().map(command -> command.startsWith("dbt") ? command.concat(" --log-format json") : command).toList()
         );
 
