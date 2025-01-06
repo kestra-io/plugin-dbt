@@ -314,7 +314,7 @@ public class DbtCLI extends AbstractExecScript {
     @PluginProperty
     @Builder.Default
     @Valid
-    protected TaskRunner taskRunner = Docker.builder()
+    protected TaskRunner<?> taskRunner = Docker.builder()
         .type(Docker.class.getName())
         .entryPoint(new ArrayList<>())
         .build();

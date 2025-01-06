@@ -86,7 +86,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     @Builder.Default
     @PluginProperty
     @Valid
-    protected TaskRunner taskRunner = Docker.builder()
+    protected TaskRunner<?> taskRunner = Docker.builder()
             .type(Docker.class.getName())
             .entryPoint(new ArrayList<>())
             .build();
