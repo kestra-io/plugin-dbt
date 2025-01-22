@@ -398,7 +398,7 @@ public class DbtCLI extends AbstractExecScript {
 
         //Create and run commands
         List<String> commandsArgs = ScriptService.scriptCommands(
-            this.interpreter,
+            runContext.render(this.interpreter).asList(String.class),
             this.getBeforeCommandsWithOptions(runContext),
             runContext.render(this.commands).stream().map(command -> command.startsWith("dbt") ? command.concat(" --log-format json") : command).toList()
         );
