@@ -196,7 +196,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
         );
 
         List<String> commandsArgs = ScriptService.scriptCommands(
-            this.interpreter,
+            runContext.render(this.interpreter).asList(String.class),
             this.getBeforeCommandsWithOptions(runContext),
             commands
         );
