@@ -141,9 +141,10 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     @Override
     public ScriptOutput run(RunContext runContext) throws Exception {
         var renderedOutputFiles = runContext.render(this.outputFiles).asList(String.class);
+        var renderedEnvMap = runContext.render(this.getEnv()).asMap(String.class, String.class);
 
         CommandsWrapper commandsWrapper = new CommandsWrapper(runContext)
-            .withEnv(runContext.render(this.getEnv()).asMap(String.class, String.class))
+            .withEnv(renderedEnvMap.isEmpty() ? new HashMap<>() : renderedEnvMap)
             .withNamespaceFiles(namespaceFiles)
             .withInputFiles(inputFiles)
             .withOutputFiles(renderedOutputFiles.isEmpty() ? null : renderedOutputFiles)
