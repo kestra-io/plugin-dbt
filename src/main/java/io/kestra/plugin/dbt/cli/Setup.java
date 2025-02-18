@@ -195,18 +195,14 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
             new HashMap<>()
         );
 
-        List<String> commandsArgs = ScriptService.scriptCommands(
-            runContext.render(this.interpreter).asList(String.class),
-            this.getBeforeCommandsWithOptions(runContext),
-            commands
-        );
-
         return commandsWrapper
             .addEnv(Map.of(
                 "PYTHONUNBUFFERED", "true",
                 "PIP_ROOT_USER_ACTION", "ignore"
             ))
-            .withCommands(commandsArgs)
+            .withInterpreter(this.interpreter)
+            .withBeforeCommands(Property.of(this.getBeforeCommandsWithOptions(runContext)))
+            .withCommands(Property.of(commands))
             .run();
     }
 

@@ -9,6 +9,7 @@ import io.kestra.core.models.tasks.runners.AbstractLogConsumer;
 import io.kestra.core.models.tasks.runners.ScriptService;
 import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
+import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.plugin.dbt.ResultParser;
 import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.RunnerType;
@@ -173,18 +174,15 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             );
         }
 
-        List<String> commandsArgs = ScriptService.scriptCommands(
-            List.of("/bin/sh", "-c"),
-            null,
-            List.of(createDbtCommand(runContext))
-        );
-
         ScriptOutput run = commandsWrapper
             .addEnv(Map.of(
                 "PYTHONUNBUFFERED", "true",
                 "PIP_ROOT_USER_ACTION", "ignore"
             ))
-            .withCommands(commandsArgs)
+            .withInterpreter(Property.of(List.of("/bin/sh", "-c")))
+            .withCommands(new Property<>(JacksonMapper.ofJson().writeValueAsString(
+                List.of(createDbtCommand(runContext)))
+            ))
             .run();
 
         parseResults(runContext, workingDirectory, run);
