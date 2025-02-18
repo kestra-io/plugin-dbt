@@ -76,7 +76,7 @@ class DbtCLITest {
             .profiles(Property.of(PROFILES)
             )
             .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
-            .commands(List.of("dbt build"))
+            .commands(Property.of(List.of("dbt build")))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
@@ -98,7 +98,7 @@ class DbtCLITest {
             .profiles(Property.of(PROFILES)
             )
             .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
-            .commands(List.of("dbt build"))
+            .commands(Property.of(List.of("dbt build")))
             .storeManifest(
                 DbtCLI.KvStoreManifest.builder()
                     .key(Property.of(MANIFEST_KEY))
@@ -131,7 +131,7 @@ class DbtCLITest {
             .profiles(Property.of(PROFILES))
             .projectDir(Property.of("unit-kestra"))
             .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
-            .commands(List.of("dbt build --project-dir unit-kestra"))
+            .commands(Property.of(List.of("dbt build --project-dir unit-kestra")))
             .loadManifest(
                 DbtCLI.KvStoreManifest.builder()
                     .key(Property.of(MANIFEST_KEY))

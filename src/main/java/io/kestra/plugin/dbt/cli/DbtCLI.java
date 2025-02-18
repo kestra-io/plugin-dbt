@@ -282,9 +282,7 @@ public class DbtCLI extends AbstractExecScript {
         title = "The list of dbt CLI commands to run."
     )
     @NotNull
-    @NotEmpty
-    @PluginProperty(dynamic = true)
-    private List<String> commands;
+    private Property<List<String>> commands;
 
     @Schema(
         title = "The `profiles.yml` file content.",
@@ -396,15 +394,10 @@ public class DbtCLI extends AbstractExecScript {
             );
         }
 
-        //Create and run commands
-        List<String> commandsArgs = ScriptService.scriptCommands(
-            runContext.render(this.interpreter).asList(String.class),
-            this.getBeforeCommandsWithOptions(runContext),
-            runContext.render(this.commands).stream().map(command -> command.startsWith("dbt") ? command.concat(" --log-format json") : command).toList()
-        );
+        var renderedCommands = runContext.render(this.commands).asList(String.class);
 
         // check that if a command uses --project-dir, the projectDir must be set
-        if (commandsArgs.stream().anyMatch(cmd -> cmd.contains("--project-dir")) && this.projectDir == null) {
+        if (renderedCommands.stream().anyMatch(cmd -> cmd.contains("--project-dir")) && this.projectDir == null) {
             runContext.logger().warn("One of the dbt CLI commands uses the `--project-dir` flag, but the `projectDir` task property is not set. Make sure to set the `projectDir` property.");
         }
 
@@ -413,7 +406,13 @@ public class DbtCLI extends AbstractExecScript {
                 "PYTHONUNBUFFERED", "true",
                 "PIP_ROOT_USER_ACTION", "ignore"
             ))
-            .withCommands(commandsArgs)
+            .withInterpreter(this.interpreter)
+            .withBeforeCommands(Property.of(this.getBeforeCommandsWithOptions(runContext)))
+            .withCommands(Property.of(
+                renderedCommands.stream()
+                    .map(command -> command.startsWith("dbt") ? command.concat(" --log-format json") : command)
+                    .toList())
+            )
             .run();
 
         //Parse run results
