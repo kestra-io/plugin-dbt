@@ -122,7 +122,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     Property<Boolean> wait = Property.of(Boolean.TRUE);
 
     @Schema(
-            title = "Specify frequency for job state check API calls."
+        title = "Specify frequency for job state check API calls."
     )
     @Builder.Default
     Property<Duration> pollFrequency = Property.of(Duration.ofSeconds(5));
@@ -162,48 +162,30 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
             body.put("steps_override", runContext.render(this.stepsOverride).asList(String.class));
         }
 
-        // Prepare the URL
         String accountId = runContext.render(this.accountId).as(String.class).orElseThrow();
         String jobId = runContext.render(this.jobId).as(String.class).orElseThrow();
-        String baseUrlString = runContext.render(this.baseUrl).as(String.class).orElseThrow();
 
-        String path = String.format("/api/v2/accounts/%s/jobs/%s/run/",
-            accountId,
-            jobId
-        );
-
-        URI uri = URI.create(baseUrlString + path);
-
-        // Convert body to JSON
+        String path = String.format("/api/v2/accounts/%s/jobs/%s/run/", accountId, jobId);
+        String url = createUrl(runContext, path);
         ObjectMapper mapper = new ObjectMapper();
         String jsonBody = mapper.writeValueAsString(body);
 
-        // Create and execute request
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-            .uri(uri)
+            .uri(URI.create(url))
             .POST(HttpRequest.BodyPublishers.ofString(jsonBody));
 
-        HttpResponse<String> response = request(runContext, requestBuilder, null);
-
-        if (response.statusCode() != 200) {
-            throw new RuntimeException("Failed to trigger run. Status: " + response.statusCode() +
-                ", Body: " + response.body());
-        }
-
-        // Parse response0
-        RunResponse triggerRunResponse = mapper.readValue(response.body(), RunResponse.class);
-        logger.info("Job status {} with response: {}", response.statusCode(), triggerRunResponse);
+        // Execute request
+        RunResponse triggerRunResponse = request(runContext, requestBuilder, RunResponse.class);
+        logger.info("Job triggered successfully with response: {}", triggerRunResponse);
 
         Long runId = triggerRunResponse.getData().getId();
 
-        // Check if we need to wait for completion
         if (Boolean.FALSE.equals(runContext.render(this.wait).as(Boolean.class).orElse(Boolean.TRUE))) {
             return Output.builder()
                 .runId(runId)
                 .build();
         }
 
-        // Create and run check status job
         CheckStatus checkStatusJob = CheckStatus.builder()
             .runId(Property.of(runId.toString()))
             .baseUrl(getBaseUrl())
@@ -222,6 +204,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
             .manifest(runOutput.getManifest())
             .build();
     }
+
     @Builder
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {

@@ -193,7 +193,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         }
     }
 
-    private Optional<RunResponse> fetchRunResponse(RunContext runContext, Long id, Boolean debug) throws IllegalVariableEvaluationException {
+    private Optional<RunResponse> fetchRunResponse(RunContext runContext, Long id, Boolean debug) throws Exception {
         String accountId = runContext.render(this.accountId).as(String.class).orElseThrow();
         Duration maxDuration = runContext.render(this.maxDuration).as(Duration.class).orElseThrow();
         String baseUrlString = runContext.render(this.baseUrl).as(String.class).orElseThrow();
@@ -213,27 +213,13 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             .uri(uri)
             .GET();
 
-        HttpResponse<String> response = request(runContext, requestBuilder, maxDuration);
+        RunResponse response = request(runContext, requestBuilder, RunResponse.class ,maxDuration);
 
-        if (response.statusCode() == 404) {
-            return Optional.empty();
-        }
+        return Optional.of(response);
 
-        if (response.statusCode() != 200) {
-            throw new RuntimeException("Failed to fetch run response. Status: " + response.statusCode() +
-                ", Body: " + response.body());
-        }
-
-        try {
-            ObjectMapper mapper = new ObjectMapper();
-            RunResponse runResponse = mapper.readValue(response.body(), RunResponse.class);
-            return Optional.of(runResponse);
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException("Failed to parse run response", e);
-        }
     }
 
-    private Path downloadArtifacts(RunContext runContext, Long runId, String path) throws IllegalVariableEvaluationException, IOException {
+    private Path downloadArtifacts(RunContext runContext, Long runId, String path) throws Exception {
         String accountId = runContext.render(this.accountId).as(String.class).orElseThrow();
         String baseUrlString = runContext.render(this.baseUrl).as(String.class).orElseThrow();
 
@@ -249,20 +235,10 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             .uri(uri)
             .GET();
 
-        HttpResponse<String> response = request(runContext, requestBuilder, null);
-
-        if (response.statusCode() != 200) {
-            throw new RuntimeException("Failed to download artifacts. Status: " + response.statusCode() +
-                ", Body: " + response.body());
-        }
-
-        String artifact = response.body();
-        if (artifact == null) {
-            throw new RuntimeException("No artifact content received");
-        }
+        String response = request(runContext, requestBuilder, String.class, null);
 
         Path tempFile = runContext.workingDir().createTempFile(".json");
-        Files.writeString(tempFile, artifact, StandardOpenOption.TRUNCATE_EXISTING);
+        Files.writeString(tempFile, response, StandardOpenOption.TRUNCATE_EXISTING);
 
         return tempFile;
     }
