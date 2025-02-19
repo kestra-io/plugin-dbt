@@ -1,5 +1,7 @@
 package io.kestra.plugin.dbt.cloud;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
@@ -11,10 +13,9 @@ import io.kestra.plugin.dbt.ResultParser;
 import io.kestra.plugin.dbt.cloud.models.JobStatusHumanizedEnum;
 import io.kestra.plugin.dbt.cloud.models.RunResponse;
 import io.kestra.plugin.dbt.cloud.models.Step;
-import io.micronaut.core.type.Argument;
-import io.micronaut.http.HttpMethod;
-import io.micronaut.http.HttpRequest;
-import io.micronaut.http.uri.UriTemplate;
+
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
@@ -193,57 +194,78 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     }
 
     private Optional<RunResponse> fetchRunResponse(RunContext runContext, Long id, Boolean debug) throws IllegalVariableEvaluationException {
-        return this
-                .request(
-                        runContext,
-                        HttpRequest
-                                .create(
-                                        HttpMethod.GET,
-                                        UriTemplate
-                                                .of("/api/v2/accounts/{accountId}/runs/{runId}/" +
-                                                                "?include_related=" + URLEncoder.encode(
-                                                                "[\"trigger\",\"job\"," + (debug ? "\"debug_logs\"" : "") + ",\"run_steps\", \"environment\"]",
-                                                                StandardCharsets.UTF_8
-                                                        )
-                                                )
-                                                .expand(Map.of(
-                                                        "accountId", runContext.render(this.accountId).as(String.class).orElseThrow(),
-                                                        "runId", id
-                                                ))
-                                ),
-                        Argument.of(RunResponse.class),
-                    runContext.render(this.maxDuration).as(Duration.class).orElseThrow()
-                )
-                .getBody();
+        String accountId = runContext.render(this.accountId).as(String.class).orElseThrow();
+        Duration maxDuration = runContext.render(this.maxDuration).as(Duration.class).orElseThrow();
+        String baseUrlString = runContext.render(this.baseUrl).as(String.class).orElseThrow();
+
+        String relatedItems = "[\"trigger\",\"job\"," + (debug ? "\"debug_logs\"" : "") + ",\"run_steps\", \"environment\"]";
+        String encodedRelatedItems = URLEncoder.encode(relatedItems, StandardCharsets.UTF_8);
+
+        String path = String.format("/api/v2/accounts/%s/runs/%d/?include_related=%s",
+            accountId,
+            id,
+            encodedRelatedItems
+        );
+
+        URI uri = URI.create(baseUrlString + path);
+
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+            .uri(uri)
+            .GET();
+
+        HttpResponse<String> response = request(runContext, requestBuilder, maxDuration);
+
+        if (response.statusCode() == 404) {
+            return Optional.empty();
+        }
+
+        if (response.statusCode() != 200) {
+            throw new RuntimeException("Failed to fetch run response. Status: " + response.statusCode() +
+                ", Body: " + response.body());
+        }
+
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            RunResponse runResponse = mapper.readValue(response.body(), RunResponse.class);
+            return Optional.of(runResponse);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to parse run response", e);
+        }
     }
 
     private Path downloadArtifacts(RunContext runContext, Long runId, String path) throws IllegalVariableEvaluationException, IOException {
-        String artifact = this
-                .request(
-                        runContext,
-                        HttpRequest
-                                .create(
-                                        HttpMethod.GET,
-                                        UriTemplate
-                                                .of("/api/v2/accounts/{accountId}/runs/{runId}/artifacts/{path}")
-                                                .expand(Map.of(
-                                                        "accountId", runContext.render(this.accountId).as(String.class).orElseThrow(),
-                                                        "runId", runId,
-                                                        "path", path
-                                                ))
-                                ),
-                        Argument.of(String.class)
-                )
-                .getBody()
-                .orElseThrow();
+        String accountId = runContext.render(this.accountId).as(String.class).orElseThrow();
+        String baseUrlString = runContext.render(this.baseUrl).as(String.class).orElseThrow();
+
+        String artifactPath = String.format("/api/v2/accounts/%s/runs/%d/artifacts/%s",
+            accountId,
+            runId,
+            path
+        );
+
+        URI uri = URI.create(baseUrlString + artifactPath);
+
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+            .uri(uri)
+            .GET();
+
+        HttpResponse<String> response = request(runContext, requestBuilder, null);
+
+        if (response.statusCode() != 200) {
+            throw new RuntimeException("Failed to download artifacts. Status: " + response.statusCode() +
+                ", Body: " + response.body());
+        }
+
+        String artifact = response.body();
+        if (artifact == null) {
+            throw new RuntimeException("No artifact content received");
+        }
 
         Path tempFile = runContext.workingDir().createTempFile(".json");
-
         Files.writeString(tempFile, artifact, StandardOpenOption.TRUNCATE_EXISTING);
 
         return tempFile;
     }
-
     @Builder
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
