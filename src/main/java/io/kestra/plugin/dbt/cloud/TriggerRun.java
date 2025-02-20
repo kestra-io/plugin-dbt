@@ -1,16 +1,13 @@
 package io.kestra.plugin.dbt.cloud;
 
+import io.kestra.core.http.HttpRequest;
+import io.kestra.core.http.HttpResponse;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.dbt.cloud.models.RunResponse;
-import io.micronaut.core.type.Argument;
-import io.micronaut.http.HttpMethod;
-import io.micronaut.http.HttpRequest;
-import io.micronaut.http.HttpResponse;
-import io.micronaut.http.uri.UriTemplate;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
@@ -163,23 +160,21 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
             body.put("steps_override", runContext.render(this.stepsOverride).asList(String.class));
         }
 
-        HttpResponse<RunResponse> triggerResponse = this.request(
-            runContext,
-            HttpRequest
-                .create(
-                    HttpMethod.POST,
-                    UriTemplate
-                        .of("/api/v2/accounts/{accountId}/jobs/{jobId}/run")
-                        .expand(Map.of(
-                            "accountId", runContext.render(this.accountId).as(String.class).orElseThrow(),
-                            "jobId", runContext.render(this.jobId).as(String.class).orElseThrow()
-                        )) + "/"
-                )
-                .body(body),
-            Argument.of(RunResponse.class)
-        );
+        HttpRequest.HttpRequestBuilder requestBuilder = HttpRequest.builder()
+            .uri(URI.create(runContext.render(this.baseUrl).as(String.class).orElseThrow() + "/api/v2/accounts/" + runContext.render(this.accountId).as(String.class).orElseThrow() +
+                "/jobs/" + runContext.render(this.jobId).as(String.class).orElseThrow() + "/run/"))
+            .method("POST")
+            .body(HttpRequest.JsonRequestBody.builder()
+                .content(body)
+                .build());
 
-        RunResponse triggerRunResponse = triggerResponse.getBody().orElseThrow(() -> new IllegalStateException("Missing body on trigger"));
+        HttpResponse<RunResponse> triggerResponse = this.request(runContext, requestBuilder, RunResponse.class);
+
+        RunResponse triggerRunResponse = triggerResponse.getBody();
+        if (triggerRunResponse == null) {
+            throw new IllegalStateException("Missing body on trigger");
+        }
+
         logger.info("Job status {} with response: {}", triggerResponse.getStatus(), triggerRunResponse);
         Long runId = triggerRunResponse.getData().getId();
 
