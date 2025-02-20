@@ -407,7 +407,8 @@ public class DbtCLI extends AbstractExecScript {
                 "PIP_ROOT_USER_ACTION", "ignore"
             ))
             .withInterpreter(this.interpreter)
-            .withBeforeCommands(Property.of(this.getBeforeCommandsWithOptions(runContext)))
+            .withBeforeCommands(this.beforeCommands)
+            .withBeforeCommandsWithOptions(true)
             .withCommands(Property.of(
                 renderedCommands.stream()
                     .map(command -> command.startsWith("dbt") ? command.concat(" --log-format json") : command)

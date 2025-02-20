@@ -201,7 +201,8 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
                 "PIP_ROOT_USER_ACTION", "ignore"
             ))
             .withInterpreter(this.interpreter)
-            .withBeforeCommands(Property.of(this.getBeforeCommandsWithOptions(runContext)))
+            .withBeforeCommands(this.beforeCommands)
+            .withBeforeCommandsWithOptions(true)
             .withCommands(Property.of(commands))
             .run();
     }
