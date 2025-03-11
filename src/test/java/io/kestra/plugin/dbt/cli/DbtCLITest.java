@@ -13,6 +13,8 @@ import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -36,9 +38,9 @@ class DbtCLITest {
     @Inject
     private RunContextFactory runContextFactory;
 
-    private final String NAMESPACE_ID = "io.kestra.plugin.dbt.cli.dbtclitest";
+    private static final String NAMESPACE_ID = "io.kestra.plugin.dbt.cli.dbtclitest";
 
-    private final String MANIFEST_KEY = "manifest.json";
+    private static final String MANIFEST_KEY = "manifest.json";
 
     private static final String PROFILES = """
                     unit-kestra:
@@ -68,13 +70,15 @@ class DbtCLITest {
         }
     }
 
-    @Test
-    void run() throws Exception {
+    @ParameterizedTest
+    @EnumSource(DbtCLI.LogFormat.class)
+    void run(DbtCLI.LogFormat logFormat) throws Exception {
         DbtCLI execute = DbtCLI.builder()
             .id(IdUtils.create())
             .type(DbtCLI.class.getName())
             .profiles(Property.of(PROFILES)
             )
+            .logFormat(Property.of(logFormat))
             .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
             .commands(Property.of(List.of("dbt build")))
             .build();
