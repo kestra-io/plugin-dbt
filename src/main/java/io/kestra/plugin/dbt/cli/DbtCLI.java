@@ -427,7 +427,7 @@ public class DbtCLI extends AbstractExecScript {
                         if (command.startsWith("dbt") && !LogFormat.NONE.equals(renderedLogFormat)) {
                             return command.concat(" --log-format " +  renderedLogFormat.toString().toLowerCase());
                         }
-                        return command + renderedLogFormat.toString().toLowerCase();
+                        return command;
                     })
                     .toList())
             )
