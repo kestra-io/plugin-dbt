@@ -28,6 +28,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.*;
 import java.util.List;
 
@@ -154,6 +155,10 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             .withContainerImage(runContext.render(this.getContainerImage()).as(String.class).orElseThrow())
             .withTaskRunner(this.taskRunner)
             .withLogConsumer(new AbstractLogConsumer() {
+                @Override
+                public void accept(String line, Boolean isStdErr, Instant instant) {
+                    LogService.parse(runContext, line);
+                }
                 @Override
                 public void accept(String line, Boolean isStdErr) {
                     LogService.parse(runContext, line);

@@ -33,6 +33,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -374,6 +375,10 @@ public class DbtCLI extends AbstractExecScript {
         CommandsWrapper commandsWrapper = this.commands(runContext)
             .withEnableOutputDirectory(true) // force the output dir, so we can get the run_results.json and manifest.json files on each task runners
             .withLogConsumer(new AbstractLogConsumer() {
+                @Override
+                public void accept(String line, Boolean isStdErr, Instant instant) {
+                    LogService.parse(runContext, line);
+                }
                 @Override
                 public void accept(String line, Boolean isStdErr) {
                     LogService.parse(runContext, line);
