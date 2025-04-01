@@ -16,6 +16,7 @@ import io.kestra.plugin.scripts.exec.scripts.models.RunnerType;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.plugin.scripts.exec.scripts.runners.CommandsWrapper;
 import io.kestra.plugin.scripts.runner.docker.Docker;
+import io.kestra.plugin.scripts.runner.docker.PullPolicy;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import lombok.*;
@@ -89,9 +90,10 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     @PluginProperty
     @Valid
     protected TaskRunner<?> taskRunner = Docker.builder()
-            .type(Docker.class.getName())
-            .entryPoint(new ArrayList<>())
-            .build();
+        .type(Docker.class.getName())
+        .pullPolicy(Property.of(PullPolicy.IF_NOT_PRESENT))
+        .entryPoint(new ArrayList<>())
+        .build();
 
     @Schema(title = "The task runner container image, only used if the task runner is container-based.")
     @Builder.Default
