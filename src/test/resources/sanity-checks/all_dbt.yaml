@@ -1,5 +1,5 @@
-id: dbt
-namespace: sanitychecks
+id: all_dbt
+namespace: sanitychecks.plugin-dbt
 
 tasks:
   - id: dbt
