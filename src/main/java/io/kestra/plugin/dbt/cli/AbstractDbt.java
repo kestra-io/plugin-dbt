@@ -9,6 +9,7 @@ import io.kestra.core.models.tasks.runners.AbstractLogConsumer;
 import io.kestra.core.models.tasks.runners.ScriptService;
 import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
+import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.plugin.dbt.ResultParser;
 import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.RunnerType;
@@ -27,6 +28,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.*;
 import java.util.List;
 
@@ -141,9 +143,10 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     @Override
     public ScriptOutput run(RunContext runContext) throws Exception {
         var renderedOutputFiles = runContext.render(this.outputFiles).asList(String.class);
+        var renderedEnvMap = runContext.render(this.getEnv()).asMap(String.class, String.class);
 
         CommandsWrapper commandsWrapper = new CommandsWrapper(runContext)
-            .withEnv(runContext.render(this.getEnv()).asMap(String.class, String.class))
+            .withEnv(renderedEnvMap.isEmpty() ? new HashMap<>() : renderedEnvMap)
             .withNamespaceFiles(namespaceFiles)
             .withInputFiles(inputFiles)
             .withOutputFiles(renderedOutputFiles.isEmpty() ? null : renderedOutputFiles)
@@ -152,6 +155,10 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             .withContainerImage(runContext.render(this.getContainerImage()).as(String.class).orElseThrow())
             .withTaskRunner(this.taskRunner)
             .withLogConsumer(new AbstractLogConsumer() {
+                @Override
+                public void accept(String line, Boolean isStdErr, Instant instant) {
+                    LogService.parse(runContext, line);
+                }
                 @Override
                 public void accept(String line, Boolean isStdErr) {
                     LogService.parse(runContext, line);
@@ -173,18 +180,15 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             );
         }
 
-        List<String> commandsArgs = ScriptService.scriptCommands(
-            List.of("/bin/sh", "-c"),
-            null,
-            List.of(createDbtCommand(runContext))
-        );
-
         ScriptOutput run = commandsWrapper
             .addEnv(Map.of(
                 "PYTHONUNBUFFERED", "true",
                 "PIP_ROOT_USER_ACTION", "ignore"
             ))
-            .withCommands(commandsArgs)
+            .withInterpreter(Property.of(List.of("/bin/sh", "-c")))
+            .withCommands(new Property<>(JacksonMapper.ofJson().writeValueAsString(
+                List.of(createDbtCommand(runContext)))
+            ))
             .run();
 
         parseResults(runContext, workingDirectory, run);

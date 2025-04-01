@@ -1,30 +1,25 @@
 package io.kestra.plugin.dbt.cloud;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.Task;
-import io.kestra.core.runners.DefaultRunContext;
 import io.kestra.core.runners.RunContext;
-import io.micronaut.core.type.Argument;
-import io.micronaut.http.HttpResponse;
-import io.micronaut.http.MediaType;
-import io.micronaut.http.MutableHttpRequest;
-import io.micronaut.http.client.DefaultHttpClientConfiguration;
-import io.micronaut.http.client.HttpClient;
-import io.micronaut.http.client.exceptions.HttpClientResponseException;
-import io.micronaut.http.client.netty.DefaultHttpClient;
-import io.micronaut.http.client.netty.NettyHttpClientFactory;
-import io.micronaut.http.codec.MediaTypeCodecRegistry;
+import io.kestra.core.http.HttpRequest;
+import io.kestra.core.http.HttpResponse;
+import io.kestra.core.http.client.HttpClient;
+import io.kestra.core.http.client.HttpClientException;
+import io.kestra.core.http.client.configurations.HttpConfiguration;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 
-import java.net.MalformedURLException;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.time.Duration;
+import java.io.IOException;
+
 import jakarta.validation.constraints.NotNull;
-import reactor.core.publisher.Mono;
 
 @SuperBuilder
 @ToString
@@ -32,67 +27,55 @@ import reactor.core.publisher.Mono;
 @Getter
 @NoArgsConstructor
 public abstract class AbstractDbtCloud extends Task {
-    @Schema(
-        title = "Base url to select the tenant."
-    )
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+        .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+        .registerModule(new JavaTimeModule());
+
+    @Schema(title = "Base URL to select the tenant.")
     @NotNull
     @Builder.Default
     Property<String> baseUrl = Property.of("https://cloud.getdbt.com");
 
-    @Schema(
-        title = "Numeric ID of the account."
-    )
+    @Schema(title = "Numeric ID of the account.")
     @NotNull
     Property<String> accountId;
 
-    @Schema(
-        title = "API key."
-    )
+    @Schema(title = "API key.")
     @NotNull
     Property<String> token;
 
-    private static final Duration HTTP_READ_TIMEOUT = Duration.ofSeconds(60);
-    private static final NettyHttpClientFactory FACTORY = new NettyHttpClientFactory();
+    @Schema(title = "The HTTP client configuration.")
+    HttpConfiguration options;
 
-    protected HttpClient client(RunContext runContext) throws IllegalVariableEvaluationException, MalformedURLException, URISyntaxException {
-        MediaTypeCodecRegistry mediaTypeCodecRegistry = ((DefaultRunContext)runContext).getApplicationContext().getBean(MediaTypeCodecRegistry.class);
+    /**
+     * Perform an HTTP request using Kestra HttpClient.
+     *
+     * @param requestBuilder  The prepared HTTP request builder.
+     * @param responseType The expected response type.
+     * @param <RES>        The response class.
+     * @return HttpResponse of type RES.
+     */
+    protected <RES> HttpResponse<RES> request(RunContext runContext, HttpRequest.HttpRequestBuilder requestBuilder, Class<RES> responseType)
+        throws HttpClientException, IllegalVariableEvaluationException {
 
-        var httpConfig = new DefaultHttpClientConfiguration();
-        httpConfig.setMaxContentLength(Integer.MAX_VALUE);
-        httpConfig.setReadTimeout(HTTP_READ_TIMEOUT);
+        var request = requestBuilder
+            .addHeader("Authorization", "Bearer " + runContext.render(this.token).as(String.class).orElseThrow())
+            .addHeader("Content-Type", "application/json")
+            .build();
 
-        DefaultHttpClient client = (DefaultHttpClient) FACTORY.createClient(URI.create(runContext.render(baseUrl).as(String.class).orElseThrow()).toURL(), httpConfig);
-        client.setMediaTypeCodecRegistry(mediaTypeCodecRegistry);
+        try (HttpClient client = new HttpClient(runContext, options)) {
+            HttpResponse<String> response = client.request(request, String.class);
 
-        return client;
-    }
+            RES parsedResponse = MAPPER.readValue(response.getBody(), responseType);
+            return HttpResponse.<RES>builder()
+                .request(request)
+                .body(parsedResponse)
+                .headers(response.getHeaders())
+                .status(response.getStatus())
+                .build();
 
-    protected <REQ, RES> HttpResponse<RES> request(RunContext runContext,
-                                                   MutableHttpRequest<REQ> request,
-                                                   Argument<RES> argument) throws HttpClientResponseException {
-        return request(runContext, request, argument, null);
-    }
-    protected <REQ, RES> HttpResponse<RES> request(RunContext runContext,
-                                                   MutableHttpRequest<REQ> request,
-                                                   Argument<RES> argument,
-                                                   Duration timeout) throws HttpClientResponseException {
-        try {
-            request = request
-                .bearerAuth(runContext.render(this.token).as(String.class).orElseThrow())
-                .contentType(MediaType.APPLICATION_JSON);
-
-            try (HttpClient client = this.client(runContext)) {
-                Mono<HttpResponse<RES>> mono = Mono.from(client.exchange(request, argument));
-                return timeout != null ? mono.block(timeout) : mono.block();
-            }
-        } catch (HttpClientResponseException e) {
-            throw new HttpClientResponseException(
-                "Request failed '" + e.getStatus().getCode() + "' and body '" + e.getResponse().getBody(String.class).orElse("null") + "'",
-                e,
-                e.getResponse()
-            );
-        } catch (IllegalVariableEvaluationException | MalformedURLException | URISyntaxException e) {
-            throw new RuntimeException(e);
+        } catch (IOException e) {
+            throw new RuntimeException("Error executing HTTP request", e);
         }
     }
 }

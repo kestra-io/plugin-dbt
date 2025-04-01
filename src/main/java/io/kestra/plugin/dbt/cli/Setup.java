@@ -160,10 +160,10 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     }
 
     @Override
-    protected DockerOptions injectDefaults(DockerOptions original) {
+    protected DockerOptions injectDefaults(RunContext runContext, DockerOptions original) throws IllegalVariableEvaluationException {
         var builder = original.toBuilder();
         if (original.getImage() == null) {
-            builder.image(this.getContainerImage().toString());
+            builder.image(runContext.render(this.getContainerImage()).as(String.class).orElse(DEFAULT_IMAGE));
         }
 
         return builder.build();
@@ -195,18 +195,15 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
             new HashMap<>()
         );
 
-        List<String> commandsArgs = ScriptService.scriptCommands(
-            runContext.render(this.interpreter).asList(String.class),
-            this.getBeforeCommandsWithOptions(runContext),
-            commands
-        );
-
         return commandsWrapper
             .addEnv(Map.of(
                 "PYTHONUNBUFFERED", "true",
                 "PIP_ROOT_USER_ACTION", "ignore"
             ))
-            .withCommands(commandsArgs)
+            .withInterpreter(this.interpreter)
+            .withBeforeCommands(this.beforeCommands)
+            .withBeforeCommandsWithOptions(true)
+            .withCommands(Property.of(commands))
             .run();
     }
 

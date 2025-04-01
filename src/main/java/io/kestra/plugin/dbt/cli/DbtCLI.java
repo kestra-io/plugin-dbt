@@ -33,6 +33,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -282,9 +283,7 @@ public class DbtCLI extends AbstractExecScript {
         title = "The list of dbt CLI commands to run."
     )
     @NotNull
-    @NotEmpty
-    @PluginProperty(dynamic = true)
-    private List<String> commands;
+    private Property<List<String>> commands;
 
     @Schema(
         title = "The `profiles.yml` file content.",
@@ -337,15 +336,25 @@ public class DbtCLI extends AbstractExecScript {
     )
     protected KvStoreManifest loadManifest;
 
+    @Schema(
+        title = "Log format.",
+        description = """
+        The log format is JSON by default. The format will be applied after all commands like this --log-format <logFormat>.
+        The possible values are JSON, DEBUG, TEXT. You can set it to NONE to avoid adding this argument to your commands.
+    """
+    )
+    @Builder.Default
+    private Property<LogFormat> logFormat = Property.of(LogFormat.JSON);
+
     @Override
-    protected DockerOptions injectDefaults(DockerOptions original) {
+    protected DockerOptions injectDefaults(RunContext runContext, DockerOptions original) throws IllegalVariableEvaluationException {
         if (original == null) {
             return null;
         }
 
         var builder = original.toBuilder();
         if (original.getImage() == null) {
-            builder.image(this.getContainerImage().toString());
+            builder.image(runContext.render(this.getContainerImage()).as(String.class).orElse(DEFAULT_IMAGE));
         }
         if (original.getEntryPoint() == null) {
             builder.entryPoint(new ArrayList<>());
@@ -363,9 +372,13 @@ public class DbtCLI extends AbstractExecScript {
             storeManifestKvStore = runContext.namespaceKv(runContext.render(this.getStoreManifest().getNamespace()).as(String.class).orElseThrow());
         }
 
-        CommandsWrapper commands = this.commands(runContext)
+        CommandsWrapper commandsWrapper = this.commands(runContext)
             .withEnableOutputDirectory(true) // force the output dir, so we can get the run_results.json and manifest.json files on each task runners
             .withLogConsumer(new AbstractLogConsumer() {
+                @Override
+                public void accept(String line, Boolean isStdErr, Instant instant) {
+                    LogService.parse(runContext, line);
+                }
                 @Override
                 public void accept(String line, Boolean isStdErr) {
                     LogService.parse(runContext, line);
@@ -373,7 +386,7 @@ public class DbtCLI extends AbstractExecScript {
             });
 
         var renderedProjectDir = runContext.render(projectDir).as(String.class);
-        Path projectWorkingDirectory = renderedProjectDir.map(s -> commands.getWorkingDirectory().resolve(s)).orElseGet(commands::getWorkingDirectory);
+        Path projectWorkingDirectory = renderedProjectDir.map(s -> commandsWrapper.getWorkingDirectory().resolve(s)).orElseGet(commandsWrapper::getWorkingDirectory);
 
         //Load manifest from KV store
         if(this.getLoadManifest() != null) {
@@ -384,7 +397,7 @@ public class DbtCLI extends AbstractExecScript {
         //Create profiles.yml
         String profilesString = runContext.render(profiles).as(String.class).orElse(null);
         if (profilesString != null && !profilesString.isEmpty()) {
-            var profileFile = new File(commands.getWorkingDirectory().toString(), "profiles.yml");
+            var profileFile = new File(commandsWrapper.getWorkingDirectory().toString(), "profiles.yml");
             if (profileFile.exists()) {
                 runContext.logger().info("A 'profiles.yml' file already exist in the task working directory, it will be overridden.");
             }
@@ -396,27 +409,42 @@ public class DbtCLI extends AbstractExecScript {
             );
         }
 
-        //Create and run commands
-        List<String> commandsArgs = ScriptService.scriptCommands(
-            runContext.render(this.interpreter).asList(String.class),
-            this.getBeforeCommandsWithOptions(runContext),
-            runContext.render(this.commands).stream().map(command -> command.startsWith("dbt") ? command.concat(" --log-format json") : command).toList()
-        );
+        var renderedCommands = runContext.render(this.commands).asList(String.class);
 
         // check that if a command uses --project-dir, the projectDir must be set
-        if (commandsArgs.stream().anyMatch(cmd -> cmd.contains("--project-dir")) && this.projectDir == null) {
+        if (renderedCommands.stream().anyMatch(cmd -> cmd.contains("--project-dir")) && this.projectDir == null) {
             runContext.logger().warn("One of the dbt CLI commands uses the `--project-dir` flag, but the `projectDir` task property is not set. Make sure to set the `projectDir` property.");
         }
 
-        ScriptOutput run = commands
+        LogFormat renderedLogFormat = runContext.render(this.logFormat).as(LogFormat.class).orElseThrow();
+
+        ScriptOutput runResults = commandsWrapper
             .addEnv(Map.of(
                 "PYTHONUNBUFFERED", "true",
                 "PIP_ROOT_USER_ACTION", "ignore"
             ))
-            .withCommands(commandsArgs)
+            .withInterpreter(this.interpreter)
+            .withBeforeCommands(this.beforeCommands)
+            .withBeforeCommandsWithOptions(true)
+            .withCommands(Property.of(
+                renderedCommands.stream()
+                    .map(command -> {
+                        if (command.startsWith("dbt") && !LogFormat.NONE.equals(renderedLogFormat)) {
+                            return command.concat(" --log-format " +  renderedLogFormat.toString().toLowerCase());
+                        }
+                        return command;
+                    })
+                    .toList())
+            )
             .run();
 
         //Parse run results
+        parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore);
+
+        return runResults;
+    }
+
+    private void parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore) throws IllegalVariableEvaluationException, IOException {
         if (runContext.render(this.parseRunResults).as(Boolean.class).orElse(Boolean.TRUE) && projectWorkingDirectory.resolve("target/run_results.json").toFile().exists()) {
             URI results = ResultParser.parseRunResult(runContext, projectWorkingDirectory.resolve("target/run_results.json").toFile());
             run.getOutputFiles().put("run_results.json", results);
@@ -433,8 +461,6 @@ public class DbtCLI extends AbstractExecScript {
             run.getOutputFiles().put("manifest.json", manifest);
 
         }
-
-        return run;
     }
 
     private void fetchAndStoreManifestIfExists(RunContext runContext, KVStore loadManifestKvStore, Path projectWorkingDirectory) throws IOException, ResourceExpiredException, IllegalVariableEvaluationException {
@@ -463,5 +489,12 @@ public class DbtCLI extends AbstractExecScript {
         @NotNull
         @Schema(title = "Namespace", description = "KV store namespace containing the manifest.json")
         Property<String> namespace;
+    }
+
+    enum LogFormat {
+        JSON,
+        TEXT,
+        DEBUG,
+        NONE
     }
 }
