@@ -19,7 +19,7 @@ import java.nio.file.Path;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Invoke dbt `list` command."
+    title = "Invoke dbt list command."
 )
 @Plugin(
     examples = {

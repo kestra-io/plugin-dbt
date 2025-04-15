@@ -30,7 +30,7 @@ import java.util.Map;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Trigger job to run.",
+    title = "Trigger a dbt cloud job to run.",
     description = "Use this task to kick off a run for a job. When this endpoint returns a successful response, a " +
         "new run will be enqueued for the account. If you activate the `wait` option, it will wait for the job to be ended " +
         "and will display all the log and dynamic tasks."

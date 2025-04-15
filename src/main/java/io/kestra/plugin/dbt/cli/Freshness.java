@@ -19,7 +19,7 @@ import java.nio.file.Path;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Invoke dbt `source freshness` command."
+    title = "Invoke dbt source freshness command."
 )
 @Plugin(
     examples = {
