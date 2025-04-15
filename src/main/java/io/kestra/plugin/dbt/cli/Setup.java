@@ -49,7 +49,7 @@ import jakarta.validation.constraints.NotNull;
 @Schema(
     title = "Setup dbt in a Python virtualenv.",
     description = """
-        Use it to install dbt requirements locally in a Python virtualenv if you don't want to use dbt via Docker.
+        Use this task to install dbt requirements locally in a Python virtualenv if you don't want to use dbt via Docker.
         In this case, you need to use a `WorkingDirectory` task and this `Setup` task to setup dbt prior to using any of the dbt tasks."""
 )
 @Plugin(

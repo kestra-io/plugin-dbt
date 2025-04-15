@@ -15,7 +15,7 @@ import lombok.experimental.SuperBuilder;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Invoke dbt `seed` command."
+    title = "Invoke dbt seed command."
 )
 @Plugin(
     examples = {

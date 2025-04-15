@@ -20,7 +20,7 @@ import java.nio.file.Path;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Invoke dbt `deps` command."
+    title = "Invoke dbt deps command."
 )
 @Plugin(
     examples = {

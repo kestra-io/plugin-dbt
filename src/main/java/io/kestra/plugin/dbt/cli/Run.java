@@ -15,7 +15,7 @@ import lombok.experimental.SuperBuilder;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Invoke dbt `run` command."
+    title = "Invoke dbt run command."
 )
 @Plugin(
     examples = {
