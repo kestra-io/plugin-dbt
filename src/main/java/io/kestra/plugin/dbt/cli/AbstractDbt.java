@@ -11,6 +11,9 @@ import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.plugin.dbt.ResultParser;
+import io.kestra.plugin.dbt.internals.PythonBasedPlugin;
+import io.kestra.plugin.dbt.internals.PythonEnvironmentManager;
+import io.kestra.plugin.dbt.internals.PythonEnvironmentManager.ResolvedPythonEnvironment;
 import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.RunnerType;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
@@ -37,8 +40,7 @@ import java.util.List;
 @EqualsAndHashCode
 @Getter
 @NoArgsConstructor
-public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOutput>, NamespaceFilesInterface, InputFilesInterface, OutputFilesInterface {
-    private static final String DEFAULT_IMAGE = "ghcr.io/kestra-io/dbt";
+public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOutput>, NamespaceFilesInterface, InputFilesInterface, OutputFilesInterface, PythonBasedPlugin {
 
     @Builder.Default
     @Schema(
@@ -138,6 +140,12 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
 
     private Property<List<String>> outputFiles;
 
+    protected Property<List<String>> dependencies;
+
+    protected Property<String> pythonVersion;
+
+    protected Property<Boolean> dependencyCacheEnabled = Property.of(true);
+
     protected abstract java.util.List<String> dbtCommands(RunContext runContext) throws IllegalVariableEvaluationException;
 
     @Override
@@ -145,12 +153,14 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
         var renderedOutputFiles = runContext.render(this.outputFiles).asList(String.class);
         var renderedEnvMap = runContext.render(this.getEnv()).asMap(String.class, String.class);
 
+        RunnerType runnerType = runContext.render(this.getRunner()).as(RunnerType.class).orElse(null);
+
         CommandsWrapper commandsWrapper = new CommandsWrapper(runContext)
             .withEnv(renderedEnvMap.isEmpty() ? new HashMap<>() : renderedEnvMap)
             .withNamespaceFiles(namespaceFiles)
             .withInputFiles(inputFiles)
             .withOutputFiles(renderedOutputFiles.isEmpty() ? null : renderedOutputFiles)
-            .withRunnerType(runContext.render(this.getRunner()).as(RunnerType.class).orElse(null))
+            .withRunnerType(runnerType)
             .withDockerOptions(runContext.render(this.getDocker()).as(DockerOptions.class).orElse(null))
             .withContainerImage(runContext.render(this.getContainerImage()).as(String.class).orElseThrow())
             .withTaskRunner(this.taskRunner)
@@ -180,11 +190,17 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             );
         }
 
+        PythonEnvironmentManager pythonEnvironmentManager = new PythonEnvironmentManager(runContext, this);
+        ResolvedPythonEnvironment pythonEnvironment = pythonEnvironmentManager.setup(containerImage, taskRunner, runnerType);
+
+        Map<String, String> env = new HashMap<>();
+        env.put("PYTHONUNBUFFERED", "true");
+        env.put("PIP_ROOT_USER_ACTION", "ignore");
+        if (pythonEnvironment.packages() != null) {
+            env.put("PYTHONPATH", pythonEnvironment.packages().path().toString());
+        };
         ScriptOutput run = commandsWrapper
-            .addEnv(Map.of(
-                "PYTHONUNBUFFERED", "true",
-                "PIP_ROOT_USER_ACTION", "ignore"
-            ))
+            .addEnv(env)
             .withInterpreter(Property.of(List.of("/bin/sh", "-c")))
             .withCommands(new Property<>(JacksonMapper.ofJson().writeValueAsString(
                 List.of(createDbtCommand(runContext)))
@@ -192,6 +208,11 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             .run();
 
         parseResults(runContext, workingDirectory, run);
+
+        // Cache upload
+        if (pythonEnvironmentManager.isCacheEnabled() && pythonEnvironment.packages() != null && !pythonEnvironment.cached()) {
+            pythonEnvironmentManager.uploadCache(runContext, pythonEnvironment.packages());
+        }
 
         return run;
     }
@@ -202,15 +223,15 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             "--log-format json"
         ));
 
-        if (Boolean.TRUE.equals(runContext.render(this.debug).as(Boolean.class).orElse(false))) {
+        if (runContext.render(this.debug).as(Boolean.class).orElse(false)) {
             commands.add("--debug");
         }
 
-        if (Boolean.TRUE.equals(runContext.render(this.failFast).as(Boolean.class).orElse(false))) {
+        if (runContext.render(this.failFast).as(Boolean.class).orElse(false)) {
             commands.add("--fail-fast");
         }
 
-        if (Boolean.TRUE.equals(runContext.render(this.warnError).as(Boolean.class).orElse(false))) {
+        if (runContext.render(this.warnError).as(Boolean.class).orElse(false)) {
             commands.add("--warn-error");
         }
 

@@ -8,7 +8,6 @@ import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.runners.AbstractLogConsumer;
-import io.kestra.core.models.tasks.runners.ScriptService;
 import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
@@ -16,6 +15,9 @@ import io.kestra.core.storages.kv.KVStore;
 import io.kestra.core.storages.kv.KVValue;
 import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.plugin.dbt.ResultParser;
+import io.kestra.plugin.dbt.internals.PythonBasedPlugin;
+import io.kestra.plugin.dbt.internals.PythonEnvironmentManager;
+import io.kestra.plugin.dbt.internals.PythonEnvironmentManager.ResolvedPythonEnvironment;
 import io.kestra.plugin.scripts.exec.AbstractExecScript;
 import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
@@ -35,11 +37,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import org.apache.commons.lang3.StringUtils;
 
@@ -275,9 +277,8 @@ import org.apache.commons.lang3.StringUtils;
         )
     }
 )
-public class DbtCLI extends AbstractExecScript {
+public class DbtCLI extends AbstractExecScript implements PythonBasedPlugin {
     private static final ObjectMapper MAPPER = JacksonMapper.ofYaml();
-    private static final String DEFAULT_IMAGE = "ghcr.io/kestra-io/dbt";
 
     @Schema(
         title = "The list of dbt CLI commands to run."
@@ -345,6 +346,12 @@ public class DbtCLI extends AbstractExecScript {
     )
     @Builder.Default
     private Property<LogFormat> logFormat = Property.of(LogFormat.JSON);
+
+    protected Property<List<String>> dependencies;
+
+    protected Property<String> pythonVersion;
+
+    protected Property<Boolean> dependencyCacheEnabled = Property.of(true);
 
     @Override
     protected DockerOptions injectDefaults(RunContext runContext, DockerOptions original) throws IllegalVariableEvaluationException {
@@ -418,13 +425,20 @@ public class DbtCLI extends AbstractExecScript {
 
         LogFormat renderedLogFormat = runContext.render(this.logFormat).as(LogFormat.class).orElseThrow();
 
+        PythonEnvironmentManager pythonEnvironmentManager = new PythonEnvironmentManager(runContext, this);
+        ResolvedPythonEnvironment pythonEnvironment = pythonEnvironmentManager.setup(containerImage, taskRunner, runner);
+
+        Map<String, String> env = new HashMap<>();
+        env.put("PYTHONUNBUFFERED", "true");
+        env.put("PIP_ROOT_USER_ACTION", "ignore");
+        if (pythonEnvironment.packages() != null) {
+            env.put("PYTHONPATH", pythonEnvironment.packages().path().toString());
+        };
+
         ScriptOutput runResults = commandsWrapper
-            .addEnv(Map.of(
-                "PYTHONUNBUFFERED", "true",
-                "PIP_ROOT_USER_ACTION", "ignore"
-            ))
+            .addEnv(env)
             .withInterpreter(this.interpreter)
-            .withBeforeCommands(this.beforeCommands)
+            .withBeforeCommands(beforeCommands)
             .withBeforeCommandsWithOptions(true)
             .withCommands(Property.of(
                 renderedCommands.stream()
@@ -438,9 +452,13 @@ public class DbtCLI extends AbstractExecScript {
             )
             .run();
 
-        //Parse run results
+        // Parse run results
         parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore);
 
+        // Cache upload
+        if (pythonEnvironmentManager.isCacheEnabled() && pythonEnvironment.packages() != null && !pythonEnvironment.cached()) {
+            pythonEnvironmentManager.uploadCache(runContext, pythonEnvironment.packages());
+        }
         return runResults;
     }
 
