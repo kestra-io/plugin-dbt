@@ -82,7 +82,8 @@ import org.apache.commons.lang3.StringUtils;
                               dev:
                                 type: duckdb
                                 path: ":memory:"
-                            target: dev"""
+                            target: dev
+                """
         ),
         @Example(
             title = "Sync dbt project files from a specific GitHub branch to Kestra's [Namespace Files](https://kestra.io/docs/concepts/namespace-files) and run `dbt build` command. Note that we `exclude` the `profiles.yml` file because the `profiles` is defined in the dbt task directly. This `exclude` pattern is useful if you want to override the `profiles.yml` file by defining it in the dbt task. In this example, the `profiles.yml` was [initially targeting](https://github.com/kestra-io/dbt-example/blob/master/dbt/profiles.yml) a `dev` environment, but we override it to target a `prod` environment.",
@@ -119,7 +120,8 @@ import org.apache.commons.lang3.StringUtils;
                             path: ":memory:"
                             schema: main
                             threads: 8
-                        target: prod"""
+                        target: prod
+                """
         ),
         @Example(
             title = "Install a custom dbt version and run `dbt deps` and `dbt build` commands. Note how you can also configure the memory limit for the Docker runner. This is useful when you see Zombie processes.",
@@ -166,7 +168,8 @@ import org.apache.commons.lang3.StringUtils;
                             fixed_retries: 1
                             threads: 16
                             timeout_seconds: 300
-                        target: dev"""
+                        target: dev
+            """
         ),
         @Example(
             title = "Clone a [Git repository](https://github.com/kestra-io/dbt-example) and build dbt models. Note that, as the dbt project files are in a separate directory, you need to set the `projectDir` task property and use `--project-dir` in each dbt CLI command.",
@@ -212,7 +215,8 @@ import org.apache.commons.lang3.StringUtils;
                               fixed_retries: 1
                               threads: 16
                               timeout_seconds: 300
-                          target: dev"""
+                          target: dev
+                """
         ),
         @Example(
             title = "Clone a [Git repository](https://github.com/kestra-io/dbt-example) and build dbt models using the `--defer` flag. The `loadManifest` property will fetch an existing `manifest.json` and use it to run a subset of models that have changed since the last run.",
