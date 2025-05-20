@@ -10,6 +10,7 @@ import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.runners.RunnerUtils;
 import io.kestra.core.runners.StandAloneRunner;
+import io.kestra.core.tenant.TenantService;
 import io.kestra.core.utils.IdUtils;
 import io.micronaut.context.ApplicationContext;
 import io.micronaut.context.annotation.Value;
@@ -61,7 +62,7 @@ class SerializationTest {
         embeddedServer.start();
 
         Execution execution = runnerUtils.runOne(
-            null,
+            TenantService.MAIN_TENANT,
             "io.kestra.tests",
             "cloud",
             null,
