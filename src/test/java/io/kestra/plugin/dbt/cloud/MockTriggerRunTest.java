@@ -1,5 +1,6 @@
 package io.kestra.plugin.dbt.cloud;
 
+import io.kestra.core.http.client.HttpClientResponseException;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.junit.annotations.KestraTest;
@@ -9,6 +10,7 @@ import io.kestra.core.utils.IdUtils;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.hamcrest.MatcherAssert.assertThat;
 
 import com.github.tomakehurst.wiremock.junit5.WireMockTest;
@@ -128,5 +130,27 @@ class MockTriggerRunTest {
         assertThat(output.getRunId(), is(789L));
         assertThat(output.getRunResults().toString(), containsString("kestra://"));
         assertThat(output.getManifest(), is(notNullValue()));
+    }
+
+    @Test
+    void shouldThrowOnNon200Response() {
+        stubFor(post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+            .willReturn(aResponse()
+                .withStatus(500)
+                .withHeader("Content-Type", "application/json")));
+
+        RunContext runContext = runContextFactory.of(Map.of());
+
+        TriggerRun task = TriggerRun.builder()
+            .accountId(Property.of("123"))
+            .jobId(Property.of("456"))
+            .token(Property.of("demo"))
+            .baseUrl(Property.of("http://localhost:28181"))
+            .wait(Property.of(false))
+            .build();
+
+        assertThatThrownBy(() -> task.run(runContext))
+            .isInstanceOf(HttpClientResponseException.class)
+            .hasMessageContaining("Failed http request with response code '500'");
     }
 }
