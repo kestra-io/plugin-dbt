@@ -8,12 +8,15 @@ import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
+import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.utils.Await;
 import io.kestra.plugin.dbt.ResultParser;
+import io.kestra.plugin.dbt.cloud.models.ManifestArtifact;
 import io.kestra.plugin.dbt.cloud.models.JobStatusHumanizedEnum;
 import io.kestra.plugin.dbt.cloud.models.RunResponse;
 import io.kestra.plugin.dbt.cloud.models.Step;
 
+import io.kestra.plugin.dbt.models.RunResult;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
@@ -151,15 +154,22 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             );
         }
 
-        Path runResultsArtifact = downloadArtifacts(runContext, runIdRendered, "run_results.json");
-        Path manifestArtifact = downloadArtifacts(runContext, runIdRendered, "manifest.json");
+        Path runResultsArtifact = downloadArtifacts(runContext, runIdRendered, "run_results.json", RunResult.class);
+        Path manifestArtifact = downloadArtifacts(runContext, runIdRendered, "manifest.json", ManifestArtifact.class);
 
-        if (runContext.render(this.parseRunResults).as(Boolean.class).orElseThrow()) {
-            ResultParser.parseRunResult(runContext, runResultsArtifact.toFile());
+
+        URI runResultsUri = null;
+
+        if (Boolean.TRUE.equals(runContext.render(this.parseRunResults).as(Boolean.class).orElse(false))) {
+            runResultsUri = ResultParser.parseRunResult(runContext, runResultsArtifact.toFile());
+        } else {
+            if (Files.exists(runResultsArtifact)) {
+                runResultsUri = runContext.storage().putFile(runResultsArtifact.toFile());
+            }
         }
 
         return Output.builder()
-                .runResults(runResultsArtifact.toFile().exists() ? runContext.storage().putFile(runResultsArtifact.toFile()) : null)
+                .runResults(runResultsUri)
                 .manifest(manifestArtifact.toFile().exists() ? runContext.storage().putFile(manifestArtifact.toFile()) : null)
                 .build();
     }
@@ -200,15 +210,20 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         return Optional.ofNullable(this.request(runContext, requestBuilder, RunResponse.class).getBody());
     }
 
-    private Path downloadArtifacts(RunContext runContext, Long runId, String path) throws IllegalVariableEvaluationException, IOException, HttpClientException {
+    private <T> Path downloadArtifacts(RunContext runContext, Long runId, String path, Class<T> responseType)
+        throws IllegalVariableEvaluationException, IOException, HttpClientException {
         HttpRequest.HttpRequestBuilder requestBuilder = HttpRequest.builder()
-            .uri(URI.create(runContext.render(this.baseUrl).as(String.class).orElseThrow() + "/api/v2/accounts/" + runContext.render(this.accountId).as(String.class).orElseThrow() + "/runs/" + runId + "/artifacts/" + path))
+            .uri(URI.create(runContext.render(this.baseUrl).as(String.class).orElseThrow()
+                + "/api/v2/accounts/" + runContext.render(this.accountId).as(String.class).orElseThrow()
+                + "/runs/" + runId + "/artifacts/" + path))
             .method("GET");
 
-        String artifact = this.request(runContext, requestBuilder, String.class).getBody();
+        T artifact = this.request(runContext, requestBuilder, responseType).getBody();
+
+        String artifactJson = JacksonMapper.ofJson().writeValueAsString(artifact);
 
         Path tempFile = runContext.workingDir().createTempFile(".json");
-        Files.writeString(tempFile, artifact, StandardOpenOption.TRUNCATE_EXISTING);
+        Files.writeString(tempFile, artifactJson, StandardOpenOption.TRUNCATE_EXISTING);
 
         return tempFile;
     }
