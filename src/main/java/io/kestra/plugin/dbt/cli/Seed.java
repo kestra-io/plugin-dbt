@@ -15,7 +15,9 @@ import lombok.experimental.SuperBuilder;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Invoke dbt seed command."
+    title = "Invoke dbt seed command (Deprecated).",
+    description = "This task is deprecated, please use the [io.kestra.plugin.dbt.cli.DbtCLI](https://kestra.io/plugins/tasks/io.kestra.plugin.dbt.cli.DbtCLI) task instead.",
+    deprecated = true
 )
 @Plugin(
     examples = {
@@ -34,7 +36,7 @@ import lombok.experimental.SuperBuilder;
                         type: io.kestra.plugin.git.Clone
                         url: https://github.com/kestra-io/dbt-demo
                         branch: main
-  
+
                       - id: dbt_seed
                         type: io.kestra.plugin.dbt.cli.Seed
                         taskRunner:
@@ -54,6 +56,7 @@ import lombok.experimental.SuperBuilder;
         )
     }
 )
+@Deprecated
 public class Seed extends AbstractRun {
     @Override
     protected String dbtCommand() {

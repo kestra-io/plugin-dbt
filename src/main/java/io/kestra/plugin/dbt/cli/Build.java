@@ -15,7 +15,9 @@ import lombok.experimental.SuperBuilder;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Invoke dbt build command."
+    title = "Invoke dbt build command (Deprecated).",
+    description = "This task is deprecated, please use the [io.kestra.plugin.dbt.cli.DbtCLI](https://kestra.io/plugins/tasks/io.kestra.plugin.dbt.cli.DbtCLI) task instead.",
+    deprecated = true
 )
 @Plugin(
     examples = {
@@ -34,10 +36,10 @@ import lombok.experimental.SuperBuilder;
                         type: io.kestra.plugin.git.Clone
                         url: https://github.com/kestra-io/dbt-demo
                         branch: main
-  
+
                       - id: dbt_build
                         type: io.kestra.plugin.dbt.cli.Build
-                        taskRunner: 
+                        taskRunner:
                           type: io.kestra.plugin.scripts.runner.docker.Docker
                         dbtPath: /usr/local/bin/dbt
                         containerImage: ghcr.io/kestra-io/dbt-duckdb
@@ -54,6 +56,7 @@ import lombok.experimental.SuperBuilder;
         )
     }
 )
+@Deprecated
 public class Build extends AbstractRun {
     @Override
     protected String dbtCommand() {
