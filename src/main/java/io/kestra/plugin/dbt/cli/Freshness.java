@@ -19,7 +19,9 @@ import java.nio.file.Path;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Invoke dbt source freshness command."
+    title = "Invoke dbt source freshness command (Deprecated).",
+    description = "This task is deprecated, please use the [io.kestra.plugin.dbt.cli.DbtCLI](https://kestra.io/plugins/tasks/io.kestra.plugin.dbt.cli.DbtCLI) task instead.",
+    deprecated = true
 )
 @Plugin(
     examples = {
@@ -38,7 +40,7 @@ import java.nio.file.Path;
                         type: io.kestra.plugin.git.Clone
                         url: https://github.com/kestra-io/dbt-demo
                         branch: main
-  
+
                       - id: dbt_freshness
                         type: io.kestra.plugin.dbt.cli.Freshness
                         taskRunner:
@@ -58,6 +60,7 @@ import java.nio.file.Path;
         )
     }
 )
+@Deprecated
 public class Freshness extends AbstractRun {
     @Override
     protected String dbtCommand() {

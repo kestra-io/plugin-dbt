@@ -20,7 +20,9 @@ import java.nio.file.Path;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Invoke dbt deps command."
+    title = "Invoke dbt deps command (Deprecated).",
+    description = "This task is deprecated, please use the [io.kestra.plugin.dbt.cli.DbtCLI](https://kestra.io/plugins/tasks/io.kestra.plugin.dbt.cli.DbtCLI) task instead.",
+    deprecated = true
 )
 @Plugin(
     examples = {
@@ -39,10 +41,10 @@ import java.nio.file.Path;
                         type: io.kestra.plugin.git.Clone
                         url: https://github.com/kestra-io/dbt-demo
                         branch: main
-  
+
                       - id: dbt_deps
                         type: io.kestra.plugin.dbt.cli.Deps
-                        taskRunner: 
+                        taskRunner:
                           type: io.kestra.plugin.scripts.runner.docker.Docker
                         dbtPath: /usr/local/bin/dbt
                         containerImage: ghcr.io/kestra-io/dbt-duckdb
@@ -59,6 +61,7 @@ import java.nio.file.Path;
         )
     }
 )
+@Deprecated
 public class Deps extends AbstractRun {
     @Override
     protected String dbtCommand() {

@@ -47,10 +47,9 @@ import jakarta.validation.constraints.NotNull;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Setup dbt in a Python virtualenv.",
-    description = """
-        Use this task to install dbt requirements locally in a Python virtualenv if you don't want to use dbt via Docker.
-        In this case, you need to use a `WorkingDirectory` task and this `Setup` task to setup dbt prior to using any of the dbt tasks."""
+    title = "Setup dbt in a Python virtualenv (Deprecated).",
+    description = "This task is deprecated, please use the [io.kestra.plugin.dbt.cli.DbtCLI](https://kestra.io/plugins/tasks/io.kestra.plugin.dbt.cli.DbtCLI) task instead.",
+    deprecated = true
 )
 @Plugin(
     examples = {
@@ -90,6 +89,7 @@ import jakarta.validation.constraints.NotNull;
         )
     }
 )
+@Deprecated
 public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutput> {
     static final private ObjectMapper MAPPER = JacksonMapper.ofYaml();
 
@@ -237,3 +237,6 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
             new HashMap<>();
     }
 }
+
+
+
