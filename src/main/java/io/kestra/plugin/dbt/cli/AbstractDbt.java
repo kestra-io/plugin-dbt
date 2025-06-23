@@ -31,6 +31,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.*;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @SuperBuilder
 @ToString
@@ -157,11 +158,11 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             .withLogConsumer(new AbstractLogConsumer() {
                 @Override
                 public void accept(String line, Boolean isStdErr, Instant instant) {
-                    LogService.parse(runContext, line);
+                    LogService.parse(runContext, line, new AtomicBoolean(false));
                 }
                 @Override
                 public void accept(String line, Boolean isStdErr) {
-                    LogService.parse(runContext, line);
+                    LogService.parse(runContext, line, new AtomicBoolean(false));
                 }
             })
             .withEnableOutputDirectory(true); //force output files on task runners
