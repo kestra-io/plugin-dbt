@@ -189,9 +189,7 @@ class DbtCLITest {
     }
 
     private void createSaFile(Path workingDir) throws IOException {
-        Path existingSa = Path.of(Objects.requireNonNull(
-            this.getClass().getClassLoader().getResource("unit.json")
-        ).getPath());
+        Path existingSa = Path.of(System.getenv("GOOGLE_APPLICATION_CREDENTIALS"));
         Path workingDirSa = workingDir.resolve("sa.json");
         Files.copy(existingSa, workingDirSa);
     }
