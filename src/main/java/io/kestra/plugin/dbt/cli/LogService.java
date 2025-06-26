@@ -8,13 +8,14 @@ import io.kestra.core.serializers.JacksonMapper;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 class LogService {
     static final protected ObjectMapper MAPPER = JacksonMapper.ofJson()
         .setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
     @SuppressWarnings("unchecked")
-    protected static void parse(RunContext runContext, String line) {
+    protected static void parse(RunContext runContext, String line, AtomicBoolean hasWarning) {
         try {
             Map<String, Object> jsonLog = (Map<String, Object>) MAPPER.readValue(line, Object.class);
 
@@ -85,6 +86,7 @@ class LogService {
                     runContext.logger().info(format, (Object[]) args);
                     break;
                 case "warn":
+                    hasWarning.set(true);
                     runContext.logger().warn(format, (Object[]) args);
                     break;
                 default:

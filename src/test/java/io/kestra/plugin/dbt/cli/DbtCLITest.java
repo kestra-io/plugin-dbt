@@ -1,5 +1,6 @@
 package io.kestra.plugin.dbt.cli;
 
+import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
@@ -158,6 +159,33 @@ class DbtCLITest {
         ScriptOutput runOutputLoad = loadManifest.run(runContextLoad);
 
         assertThat(runOutputLoad.getExitCode(), is(0));
+    }
+
+    @Test
+    void run_withWarning_shouldReturnWarningState() throws Exception {
+        DbtCLI execute = DbtCLI.builder()
+            .id(IdUtils.create())
+            .type(DbtCLI.class.getName())
+            .profiles(Property.of(PROFILES))
+            .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
+            .commands(Property.of(List.of(
+                "dbt deps",
+                "dbt run-operation emit_warning_log"
+            )))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
+
+        Path workingDir = runContext.workingDir().path(true);
+        copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), workingDir);
+        createSaFile(workingDir);
+
+        DbtCLI.Output runOutput = execute.run(runContext);
+
+        assertThat("dbt command should succeed with exit code 0", runOutput.getExitCode(), is(0));
+        assertThat("warningDetected flag should be true", runOutput.isWarningDetected(), is(true));
+        assertThat("finalState should be present", runOutput.finalState().isPresent(), is(true));
+        assertThat("finalState should be WARNING", runOutput.finalState().get(), is(State.Type.WARNING));
     }
 
     private void createSaFile(Path workingDir) throws IOException {

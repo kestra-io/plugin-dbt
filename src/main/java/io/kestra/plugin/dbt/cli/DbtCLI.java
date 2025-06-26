@@ -6,9 +6,10 @@ import io.kestra.core.exceptions.ResourceExpiredException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
+import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.runners.AbstractLogConsumer;
-import io.kestra.core.models.tasks.runners.ScriptService;
 import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
@@ -38,8 +39,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import org.apache.commons.lang3.StringUtils;
 
@@ -279,7 +280,7 @@ import org.apache.commons.lang3.StringUtils;
         )
     }
 )
-public class DbtCLI extends AbstractExecScript {
+public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Output> {
     private static final ObjectMapper MAPPER = JacksonMapper.ofYaml();
     private static final String DEFAULT_IMAGE = "ghcr.io/kestra-io/dbt";
 
@@ -368,8 +369,9 @@ public class DbtCLI extends AbstractExecScript {
     }
 
     @Override
-    public ScriptOutput run(RunContext runContext) throws Exception {
+    public Output run(RunContext runContext) throws Exception {
         KVStore storeManifestKvStore = null;
+        AtomicBoolean hasWarning = new AtomicBoolean(false);
 
         //Check/fail if a KV store exists with given namespace
         if(this.getStoreManifest() != null) {
@@ -381,11 +383,11 @@ public class DbtCLI extends AbstractExecScript {
             .withLogConsumer(new AbstractLogConsumer() {
                 @Override
                 public void accept(String line, Boolean isStdErr, Instant instant) {
-                    LogService.parse(runContext, line);
+                    LogService.parse(runContext, line, hasWarning);
                 }
                 @Override
                 public void accept(String line, Boolean isStdErr) {
-                    LogService.parse(runContext, line);
+                    LogService.parse(runContext, line, hasWarning);
                 }
             });
 
@@ -445,7 +447,10 @@ public class DbtCLI extends AbstractExecScript {
         //Parse run results
         parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore);
 
-        return runResults;
+        return Output.builder()
+            .warningDetected(hasWarning.get())
+            .exitCode(runResults.getExitCode())
+            .build();
     }
 
     private void parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore) throws IllegalVariableEvaluationException, IOException {
@@ -481,6 +486,18 @@ public class DbtCLI extends AbstractExecScript {
                 .writeValueAsString(manifestValue.get().value()),
             StandardCharsets.UTF_8
         );
+    }
+
+    @SuperBuilder
+    @Getter
+    public static class Output extends ScriptOutput {
+        @Builder.Default
+        private final transient boolean warningDetected = false;
+
+        @Override
+        public Optional<State.Type> finalState() {
+            return this.warningDetected ? Optional.of(State.Type.WARNING) : Optional.empty();
+        }
     }
 
     @Builder
