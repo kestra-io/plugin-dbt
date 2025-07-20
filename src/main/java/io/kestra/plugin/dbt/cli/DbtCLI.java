@@ -9,6 +9,7 @@ import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
+import io.kestra.core.models.tasks.RunnableTaskException;
 import io.kestra.core.models.tasks.runners.AbstractLogConsumer;
 import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
@@ -36,6 +37,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -424,31 +426,49 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
         LogFormat renderedLogFormat = runContext.render(this.logFormat).as(LogFormat.class).orElseThrow();
 
-        ScriptOutput runResults = commandsWrapper
-            .addEnv(Map.of(
-                "PYTHONUNBUFFERED", "true",
-                "PIP_ROOT_USER_ACTION", "ignore"
-            ))
-            .withInterpreter(this.interpreter)
-            .withBeforeCommands(this.beforeCommands)
-            .withBeforeCommandsWithOptions(true)
-            .withCommands(Property.of(
-                renderedCommands.stream()
-                    .map(command -> {
-                        if (command.startsWith("dbt") && !LogFormat.NONE.equals(renderedLogFormat)) {
-                            return command.concat(" --log-format " +  renderedLogFormat.toString().toLowerCase());
-                        }
-                        return command;
-                    })
-                    .toList())
-            )
-            .run();
+        ScriptOutput runResults;
+        try {
+            runResults = commandsWrapper
+                .addEnv(Map.of(
+                    "PYTHONUNBUFFERED", "true",
+                    "PIP_ROOT_USER_ACTION", "ignore"
+                ))
+                .withInterpreter(this.interpreter)
+                .withBeforeCommands(this.beforeCommands)
+                .withBeforeCommandsWithOptions(true)
+                .withCommands(Property.of(
+                    renderedCommands.stream()
+                        .map(command -> {
+                            if (command.startsWith("dbt") && !LogFormat.NONE.equals(renderedLogFormat)) {
+                                return command.concat(" --log-format " + renderedLogFormat.toString().toLowerCase());
+                            }
+                            return command;
+                        })
+                        .toList())
+                )
+                .run();
+        } catch (Exception e) {
+            runResults = (e instanceof RunnableTaskException rte && rte.getOutput() instanceof ScriptOutput so)
+                ? so
+                : ScriptOutput.builder().exitCode(1).outputFiles(new HashMap<>()).build();
+
+            parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore);
+            Output dbtOutput = Output.builder()
+                .warningDetected(hasWarning.get())
+                .outputFiles(runResults.getOutputFiles())
+                .exitCode(runResults.getExitCode())
+                .vars(runResults.getVars())
+                .build();
+
+            throw new RunnableTaskException(e.getMessage(), dbtOutput);
+        }
 
         //Parse run results
         parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore);
 
         return Output.builder()
             .warningDetected(hasWarning.get())
+            .outputFiles(runResults.getOutputFiles())
             .exitCode(runResults.getExitCode())
             .build();
     }
