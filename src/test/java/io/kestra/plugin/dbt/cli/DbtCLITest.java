@@ -2,6 +2,7 @@ package io.kestra.plugin.dbt.cli;
 
 import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.models.tasks.RunnableTaskException;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.storages.StorageInterface;
@@ -29,7 +30,8 @@ import java.util.stream.Stream;
 import static io.kestra.core.utils.Rethrow.throwConsumer;
 import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @KestraTest
 class DbtCLITest {
@@ -192,5 +194,37 @@ class DbtCLITest {
         Path existingSa = Path.of(System.getenv("GOOGLE_APPLICATION_CREDENTIALS"));
         Path workingDirSa = workingDir.resolve("sa.json");
         Files.copy(existingSa, workingDirSa);
+    }
+
+    @Test
+    void run_withFailure_shouldCaptureRunResults() throws Exception {
+        DbtCLI execute = DbtCLI.builder()
+            .id(IdUtils.create())
+            .type(DbtCLI.class.getName())
+            .profiles(Property.ofValue(PROFILES))
+            .commands(Property.ofValue(List.of(
+                "dbt deps",
+                "mkdir -p models",
+                "echo 'SELECT * FROM definitely_non_existent_table_12345' > models/failing_test_model.sql",
+                "dbt run --models failing_test_model"
+            )))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
+
+        Path workingDir = runContext.workingDir().path(true);
+        copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), workingDir);
+        createSaFile(workingDir);
+
+        RunnableTaskException exception = assertThrows(RunnableTaskException.class, () -> {
+            execute.run(runContext);
+        });
+
+        DbtCLI.Output output = (DbtCLI.Output) exception.getOutput();
+
+        assertThat(output.getExitCode(), is(not(0)));
+        assertThat(output.getOutputFiles(), is(notNullValue()));
+        assertThat("run_results.json should be captured on failure",
+            output.getOutputFiles(), hasKey("run_results.json"));
     }
 }
