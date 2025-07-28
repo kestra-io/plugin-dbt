@@ -9,12 +9,23 @@
     )
 }}
 
+WITH deduplicated AS (
+    SELECT
+        unique_key,
+        source,
+        status,
+        status_change_date,
+        ROW_NUMBER() OVER (PARTITION BY unique_key ORDER BY status_change_date DESC) as rn
+    FROM {{ ref('requests') }}
+    LIMIT 10
+)
+
 SELECT
     unique_key,
     source,
     status,
     status_change_date
-FROM {{ ref('requests') }}
-    LIMIT 10
+FROM deduplicated
+WHERE rn = 1
 
 {% endsnapshot %}
