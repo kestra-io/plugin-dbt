@@ -8,6 +8,7 @@ import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
+import io.kestra.core.utils.RetryUtils;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -15,8 +16,7 @@ import org.mockito.Mockito;
 import java.net.URI;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -91,12 +91,6 @@ class CheckStatusRetryTest {
                     HttpResponse.<String>builder()
                         .status(HttpResponse.Status.builder().code(502).build())
                         .build()
-                ))
-                .thenThrow(new HttpClientResponseException(
-                    "Bad Gateway",
-                    HttpResponse.<String>builder()
-                        .status(HttpResponse.Status.builder().code(502).build())
-                        .build()
                 )))) {
 
             var task = CheckStatus.builder()
@@ -109,12 +103,16 @@ class CheckStatusRetryTest {
                 .initialDelayMs(Property.ofValue(100L))
                 .build();
 
-            assertThrows(HttpClientResponseException.class,
+            var ex = assertThrows(RetryUtils.RetryFailed.class,
                 () -> task.request(runContext, requestBuilder, Map.class)
             );
 
+            assertInstanceOf(HttpClientResponseException.class, ex.getCause());
+            var cause = (HttpClientResponseException) ex.getCause();
+            assertEquals(502, cause.getResponse().getStatus().getCode());
+
             var mockClient = mocked.constructed().getFirst();
-            verify(mockClient, times(3)).request(any(HttpRequest.class), eq(String.class));
+            verify(mockClient, times(2)).request(any(HttpRequest.class), eq(String.class));
         }
     }
 }

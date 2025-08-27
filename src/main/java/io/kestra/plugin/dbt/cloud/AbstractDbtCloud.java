@@ -12,7 +12,9 @@ import io.kestra.core.http.client.HttpClientResponseException;
 import io.kestra.core.http.client.configurations.HttpConfiguration;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.Task;
+import io.kestra.core.models.tasks.retrys.Exponential;
 import io.kestra.core.runners.RunContext;
+import io.kestra.core.utils.RetryUtils;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
@@ -20,8 +22,6 @@ import lombok.experimental.SuperBuilder;
 
 import java.io.IOException;
 import java.time.Duration;
-
-import static org.awaitility.Awaitility.await;
 
 @SuperBuilder
 @ToString
@@ -63,15 +63,6 @@ public abstract class AbstractDbtCloud extends Task {
     @Builder.Default
     Property<Long> initialDelayMs = Property.ofValue(1000L);
 
-    /**
-     * Perform an HTTP request using Kestra HttpClient with retry logic.
-     *
-     * @param runContext     The Kestra execution context.
-     * @param requestBuilder The prepared HTTP request builder.
-     * @param responseType   The expected response type.
-     * @param <RES>          The response class.
-     * @return HttpResponse of type RES.
-     */
     protected <RES> HttpResponse<RES> request(
         RunContext runContext,
         HttpRequest.HttpRequestBuilder requestBuilder,
@@ -83,55 +74,33 @@ public abstract class AbstractDbtCloud extends Task {
             .addHeader("Content-Type", "application/json")
             .build();
 
-        int rMaxRetries = runContext.render(this.maxRetries).as(Integer.class).orElse(3);
-        long rInitialDelay = runContext.render(this.initialDelayMs).as(Long.class).orElse(1000L);
-
-        int attempt = 0;
+        var rMaxRetries = runContext.render(this.maxRetries).as(Integer.class).orElse(3);
+        var rInitialDelay = runContext.render(this.initialDelayMs).as(Long.class).orElse(1000L);
 
         try (var client = new HttpClient(runContext, options)) {
-            while (true) {
-                try {
-                    HttpResponse<String> response = client.request(request, String.class);
-
-                    RES parsedResponse = MAPPER.readValue(response.getBody(), responseType);
+            return new RetryUtils().<HttpResponse<RES>, HttpClientException>of(
+                Exponential.builder()
+                    .delayFactor(2.0)
+                    .interval(Duration.ofMillis(rInitialDelay))
+                    .maxInterval(Duration.ofSeconds(30))
+                    .maxAttempts(rMaxRetries)
+                    .build()
+            ).run(
+                (res, throwable) -> throwable instanceof HttpClientResponseException ex &&
+                    (ex.getResponse().getStatus().getCode() == 502 ||
+                        ex.getResponse().getStatus().getCode() == 503 ||
+                        ex.getResponse().getStatus().getCode() == 504),
+                () -> {
+                    var response = client.request(request, String.class);
+                    var parsedResponse = MAPPER.readValue(response.getBody(), responseType);
                     return HttpResponse.<RES>builder()
                         .request(request)
                         .body(parsedResponse)
                         .headers(response.getHeaders())
                         .status(response.getStatus())
                         .build();
-
-                } catch (HttpClientException e) {
-                    int statusCode = extractStatusCode(e);
-
-                    if ((statusCode == 502 || statusCode == 503 || statusCode == 504) && attempt < rMaxRetries) {
-                        long backoff = (long) (rInitialDelay * Math.pow(2, attempt));
-                        runContext.logger().warn(
-                            "Request failed with status {}. Retrying in {} ms (attempt {}/{})",
-                            statusCode, backoff, attempt + 1, rMaxRetries
-                        );
-
-                        await()
-                            .pollDelay(Duration.ofMillis(backoff))
-                            .atMost(Duration.ofMillis(backoff + 50))
-                            .until(() -> true);
-
-                        attempt++;
-                        continue;
-                    }
-
-                    throw e;
-                } catch (IOException e) {
-                    throw new RuntimeException("Error executing HTTP request", e);
                 }
-            }
+            );
         }
-    }
-
-    private int extractStatusCode(HttpClientException e) {
-        if (e instanceof HttpClientResponseException ex) {
-            return ex.getResponse().getStatus().getCode();
-        }
-        return -1;
     }
 }
