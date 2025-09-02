@@ -16,7 +16,7 @@ jobs:
       dockerfiles_changed: ${{ steps.filter.outputs.dockerfiles }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -25,7 +25,7 @@ jobs:
             dockerfiles:
               - added|modified: 'dockerfiles/*.Dockerfile'
       - name: Generate Markdown Summary
-        run: | 
+        run: |
           echo New/modified Dockerfiles: ${{ steps.filter.outputs.dockerfiles_files }} >> $GITHUB_STEP_SUMMARY
 
   ghcr:
@@ -36,11 +36,11 @@ jobs:
       contents: read
       packages: write
     strategy:
-      matrix: 
+      matrix:
         image: ${{ fromJson(needs.changes.outputs.dockerfiles) }}
     steps:
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -54,13 +54,13 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - id: image-tag  # example output: "ghcr.io/kestra-io/pydata:latest"
         run: |
           export IMAGE=$(basename ${{ matrix.image }} .Dockerfile)
           echo "image_url=ghcr.io/kestra-io/$IMAGE:latest" >> $GITHUB_OUTPUT
           echo "file=${{ matrix.image }}" >> $GITHUB_OUTPUT
-      
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
