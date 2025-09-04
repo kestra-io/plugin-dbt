@@ -6,23 +6,17 @@ import io.kestra.core.models.executions.Execution;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.queues.QueueException;
 import io.kestra.core.repositories.LocalFlowRepositoryLoader;
-import io.kestra.core.runners.RunContext;
-import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.runners.RunnerUtils;
-import io.kestra.core.runners.StandAloneRunner;
+import io.kestra.core.runners.TestRunner;
 import io.kestra.core.tenant.TenantService;
-import io.kestra.core.utils.IdUtils;
 import io.micronaut.context.ApplicationContext;
-import io.micronaut.context.annotation.Value;
 import io.micronaut.http.HttpResponse;
-import io.micronaut.http.annotation.Body;
 import io.micronaut.http.annotation.Controller;
 import io.micronaut.http.annotation.Post;
 import io.micronaut.runtime.server.EmbeddedServer;
 import jakarta.inject.Inject;
 import org.apache.commons.io.IOUtils;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -34,7 +28,6 @@ import java.util.concurrent.TimeoutException;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
-import static org.hamcrest.Matchers.containsString;
 
 @KestraTest
 class SerializationTest {
@@ -42,7 +35,7 @@ class SerializationTest {
     private ApplicationContext applicationContext;
 
     @Inject
-    protected StandAloneRunner runner;
+    protected TestRunner runner;
 
     @Inject
     protected RunnerUtils runnerUtils;
