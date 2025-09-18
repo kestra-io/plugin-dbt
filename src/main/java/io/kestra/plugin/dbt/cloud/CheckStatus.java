@@ -80,20 +80,20 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             title = "Specify how often the task should poll for the job status."
     )
     @Builder.Default
-    Property<Duration> pollFrequency = Property.of(Duration.ofSeconds(5));
+    Property<Duration> pollFrequency = Property.ofValue(Duration.ofSeconds(5));
 
     @Schema(
             title = "The maximum duration the task should poll for the job completion."
     )
     @Builder.Default
-    Property<Duration> maxDuration = Property.of(Duration.ofMinutes(60));
+    Property<Duration> maxDuration = Property.ofValue(Duration.ofMinutes(60));
 
     @Builder.Default
     @Schema(
             title = "Parse run result.",
             description = "Whether to parse the run result to display the duration of each dbt node in the Gantt view."
     )
-    protected Property<Boolean> parseRunResults = Property.of(Boolean.TRUE);
+    protected Property<Boolean> parseRunResults = Property.ofValue(Boolean.TRUE);
 
     @Builder.Default
     @Getter(AccessLevel.NONE)

@@ -45,7 +45,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     @Schema(
         title = "Stop execution at the first failure."
     )
-    Property<Boolean> failFast = Property.of(false);
+    Property<Boolean> failFast = Property.ofValue(false);
 
     @Builder.Default
     @Schema(
@@ -53,14 +53,14 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
         description = "Examples include --models that selects nothing, deprecations, configurations with no " +
             "associated models, invalid test configurations, and missing sources/refs in tests."
     )
-    Property<Boolean> warnError = Property.of(false);
+    Property<Boolean> warnError = Property.ofValue(false);
 
     @Builder.Default
     @Schema(
         title = "Display debug logging during dbt execution.",
         description = "Useful for debugging and making bug reports."
     )
-    Property<Boolean> debug = Property.of(false);
+    Property<Boolean> debug = Property.ofValue(false);
 
     @Schema(
         title = "Which directory to look in for the dbt_project.yml file.",
@@ -72,7 +72,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     @Schema(
         title = "The path to the dbt CLI"
     )
-    Property<String> dbtPath = Property.of("./bin/dbt");
+    Property<String> dbtPath = Property.ofValue("./bin/dbt");
 
     @Schema(
         title = "The `profiles.yml` file content",
@@ -96,7 +96,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
 
     @Schema(title = "The task runner container image, only used if the task runner is container-based.")
     @Builder.Default
-    protected Property<String>  containerImage = Property.of(DEFAULT_IMAGE);
+    protected Property<String>  containerImage = Property.ofValue(DEFAULT_IMAGE);
 
     @Schema(
         title = "The runner type.",
@@ -131,7 +131,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
         title = "Parse run result",
         description = "Parsing run result to display duration of each task inside dbt"
     )
-    protected Property<Boolean> parseRunResults = Property.of(Boolean.TRUE);
+    protected Property<Boolean> parseRunResults = Property.ofValue(Boolean.TRUE);
 
     private NamespaceFiles namespaceFiles;
 
@@ -186,7 +186,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
                 "PYTHONUNBUFFERED", "true",
                 "PIP_ROOT_USER_ACTION", "ignore"
             ))
-            .withInterpreter(Property.of(List.of("/bin/sh", "-c")))
+            .withInterpreter(Property.ofValue(List.of("/bin/sh", "-c")))
             .withCommands(new Property<>(JacksonMapper.ofJson().writeValueAsString(
                 List.of(createDbtCommand(runContext)))
             ))

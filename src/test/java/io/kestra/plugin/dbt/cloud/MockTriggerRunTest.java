@@ -39,11 +39,11 @@ class MockTriggerRunTest {
         TriggerRun task = TriggerRun.builder()
             .id(IdUtils.create())
             .type(TriggerRun.class.getName())
-            .accountId(Property.of("123"))
-            .jobId(Property.of("456"))
-            .token(Property.of("my-token"))
-            .baseUrl(Property.of("http://localhost:28181"))
-            .wait(Property.of(false))
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("my-token"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .wait(Property.ofValue(false))
             .build();
 
         RunContext runContext = runContextFactory.of(Map.of());
@@ -104,12 +104,12 @@ class MockTriggerRunTest {
         TriggerRun task = TriggerRun.builder()
             .id(IdUtils.create())
             .type(TriggerRun.class.getName())
-            .accountId(Property.of("123"))
-            .jobId(Property.of("456"))
-            .token(Property.of("demo"))
-            .parseRunResults(Property.of(true))
-            .baseUrl(Property.of("http://localhost:28181"))
-            .wait(Property.of(true))
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("demo"))
+            .parseRunResults(Property.ofValue(true))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .wait(Property.ofValue(true))
             .build();
 
         RunContext runContext = runContextFactory.of(Map.of(
@@ -142,11 +142,11 @@ class MockTriggerRunTest {
         RunContext runContext = runContextFactory.of(Map.of());
 
         TriggerRun task = TriggerRun.builder()
-            .accountId(Property.of("123"))
-            .jobId(Property.of("456"))
-            .token(Property.of("demo"))
-            .baseUrl(Property.of("http://localhost:28181"))
-            .wait(Property.of(false))
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("demo"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .wait(Property.ofValue(false))
             .build();
 
         assertThatThrownBy(() -> task.run(runContext))

@@ -309,7 +309,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         title = "Parse run result.",
         description = "Parsing run result to display duration of each task inside dbt."
     )
-    protected Property<Boolean> parseRunResults = Property.of(Boolean.TRUE);
+    protected Property<Boolean> parseRunResults = Property.ofValue(Boolean.TRUE);
 
     @Schema(
         title = "The task runner to use.",
@@ -326,7 +326,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         .build();
 
     @Builder.Default
-    protected Property<String> containerImage = Property.of(DEFAULT_IMAGE);
+    protected Property<String> containerImage = Property.ofValue(DEFAULT_IMAGE);
 
     @Schema(
         title = "Store manifest.",
@@ -351,7 +351,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     """
     )
     @Builder.Default
-    private Property<LogFormat> logFormat = Property.of(LogFormat.JSON);
+    private Property<LogFormat> logFormat = Property.ofValue(LogFormat.JSON);
 
     @Override
     protected DockerOptions injectDefaults(RunContext runContext, DockerOptions original) throws IllegalVariableEvaluationException {
@@ -436,7 +436,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                 .withInterpreter(this.interpreter)
                 .withBeforeCommands(this.beforeCommands)
                 .withBeforeCommandsWithOptions(true)
-                .withCommands(Property.of(
+                .withCommands(Property.ofValue(
                     renderedCommands.stream()
                         .map(command -> {
                             if (command.startsWith("dbt") && !LogFormat.NONE.equals(renderedLogFormat)) {

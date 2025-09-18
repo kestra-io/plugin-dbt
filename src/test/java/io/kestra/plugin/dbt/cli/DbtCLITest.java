@@ -79,11 +79,11 @@ class DbtCLITest {
         DbtCLI execute = DbtCLI.builder()
             .id(IdUtils.create())
             .type(DbtCLI.class.getName())
-            .profiles(Property.of(PROFILES)
+            .profiles(Property.ofValue(PROFILES)
             )
-            .logFormat(Property.of(logFormat))
+            .logFormat(Property.ofValue(logFormat))
             .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
-            .commands(Property.of(List.of("dbt build")))
+            .commands(Property.ofValue(List.of("dbt build")))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
@@ -102,14 +102,14 @@ class DbtCLITest {
         DbtCLI execute = DbtCLI.builder()
             .id(IdUtils.create())
             .type(DbtCLI.class.getName())
-            .profiles(Property.of(PROFILES)
+            .profiles(Property.ofValue(PROFILES)
             )
             .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
-            .commands(Property.of(List.of("dbt build")))
+            .commands(Property.ofValue(List.of("dbt build")))
             .storeManifest(
                 DbtCLI.KvStoreManifest.builder()
-                    .key(Property.of(MANIFEST_KEY))
-                    .namespace(Property.of(NAMESPACE_ID))
+                    .key(Property.ofValue(MANIFEST_KEY))
+                    .namespace(Property.ofValue(NAMESPACE_ID))
                     .build()
             )
             .build();
@@ -135,14 +135,14 @@ class DbtCLITest {
         DbtCLI loadManifest = DbtCLI.builder()
             .id(IdUtils.create())
             .type(DbtCLI.class.getName())
-            .profiles(Property.of(PROFILES))
-            .projectDir(Property.of("unit-kestra"))
+            .profiles(Property.ofValue(PROFILES))
+            .projectDir(Property.ofValue("unit-kestra"))
             .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
-            .commands(Property.of(List.of("dbt build --project-dir unit-kestra")))
+            .commands(Property.ofValue(List.of("dbt build --project-dir unit-kestra")))
             .loadManifest(
                 DbtCLI.KvStoreManifest.builder()
-                    .key(Property.of(MANIFEST_KEY))
-                    .namespace(Property.of(NAMESPACE_ID))
+                    .key(Property.ofValue(MANIFEST_KEY))
+                    .namespace(Property.ofValue(NAMESPACE_ID))
                     .build()
             )
             .build();
@@ -168,9 +168,9 @@ class DbtCLITest {
         DbtCLI execute = DbtCLI.builder()
             .id(IdUtils.create())
             .type(DbtCLI.class.getName())
-            .profiles(Property.of(PROFILES))
+            .profiles(Property.ofValue(PROFILES))
             .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
-            .commands(Property.of(List.of(
+            .commands(Property.ofValue(List.of(
                 "dbt deps",
                 "dbt run-operation emit_warning_log"
             )))

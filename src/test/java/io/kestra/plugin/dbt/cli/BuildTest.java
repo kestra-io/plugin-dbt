@@ -63,8 +63,8 @@ class BuildTest {
             .id(IdUtils.create())
             .type(Setup.class.getName())
             .taskRunner(Process.instance())
-            .profiles(Property.of(PROFILES))
-            .requirements(Property.of(List.of("dbt-bigquery")))
+            .profiles(Property.ofValue(PROFILES))
+            .requirements(Property.ofValue(List.of("dbt-bigquery")))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, setup, Map.of());
@@ -79,9 +79,9 @@ class BuildTest {
         Map<String, String> env = new HashMap<>();
         env.put("GOOGLE_APPLICATION_CREDENTIALS", runContext.workingDir().resolve(Path.of("sa.json")).toString());
         Build task = Build.builder()
-            .thread((Property.of(8)))
+            .thread((Property.ofValue(8)))
             .taskRunner(Process.instance())
-            .env(Property.of(env))
+            .env(Property.ofValue(env))
             .build();
 
         ScriptOutput runOutput = task.run(runContext);

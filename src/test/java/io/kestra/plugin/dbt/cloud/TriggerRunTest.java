@@ -37,9 +37,9 @@ class TriggerRunTest {
         TriggerRun task = TriggerRun.builder()
             .id(IdUtils.create())
             .type(TriggerRun.class.getName())
-            .accountId(Property.of(this.accountId))
-            .token(Property.of(this.token))
-            .jobId(Property.of(this.jobId))
+            .accountId(Property.ofValue(this.accountId))
+            .token(Property.ofValue(this.token))
+            .jobId(Property.ofValue(this.jobId))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());

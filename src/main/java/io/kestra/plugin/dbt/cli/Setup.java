@@ -128,7 +128,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     )
     @NotNull
     @Deprecated(since = "0.16.0", forRemoval = true)
-    protected Property<Boolean> exitOnFailed = Property.of(Boolean.TRUE);
+    protected Property<Boolean> exitOnFailed = Property.ofValue(Boolean.TRUE);
 
     @Schema(
         title = "Input files are extra files that will be available in the dbt working directory.",
@@ -147,7 +147,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     protected TaskRunner<?> taskRunner = Docker.instance();
 
     @Builder.Default
-    protected Property<String> containerImage = Property.of(DEFAULT_IMAGE);
+    protected Property<String> containerImage = Property.ofValue(DEFAULT_IMAGE);
 
     @Schema(title = "Deprecated, use the `docker` property instead", deprecated = true)
     @Deprecated
@@ -155,7 +155,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
 
     @JsonSetter
     public void setDockerOptions(DockerOptions dockerOptions) {
-        this.dockerOptions = Property.of(dockerOptions);
+        this.dockerOptions = Property.ofValue(dockerOptions);
         this.docker = dockerOptions;
     }
 
@@ -203,7 +203,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
             .withInterpreter(this.interpreter)
             .withBeforeCommands(this.beforeCommands)
             .withBeforeCommandsWithOptions(true)
-            .withCommands(Property.of(commands))
+            .withCommands(Property.ofValue(commands))
             .run();
     }
 

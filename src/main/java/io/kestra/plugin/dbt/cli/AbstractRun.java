@@ -27,7 +27,7 @@ public abstract class AbstractRun extends AbstractDbt {
         title = "Whether dbt will drop incremental models and fully-recalculate the incremental table " +
             "from the model definition."
     )
-    Property<Boolean> fullRefresh = Property.of(Boolean.FALSE);
+    Property<Boolean> fullRefresh = Property.ofValue(Boolean.FALSE);
 
     @Schema(
         title = "Which target to load for the given profile"

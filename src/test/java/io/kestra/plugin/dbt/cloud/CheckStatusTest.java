@@ -40,20 +40,20 @@ class CheckStatusTest {
         TriggerRun task = TriggerRun.builder()
                 .id(IdUtils.create())
                 .type(TriggerRun.class.getName())
-                .accountId(Property.of(this.accountId))
-                .wait(Property.of(false))
-                .token(Property.of(this.token))
-                .jobId(Property.of(this.jobId))
+                .accountId(Property.ofValue(this.accountId))
+                .wait(Property.ofValue(false))
+                .token(Property.ofValue(this.token))
+                .jobId(Property.ofValue(this.jobId))
                 .build();
 
         TriggerRun.Output runOutput = task.run(runContext);
 
         CheckStatus checkStatus = CheckStatus.builder()
-                .runId(Property.of(runOutput.getRunId().toString()))
-                .token(Property.of(this.token))
-                .accountId(Property.of(this.accountId))
-                .maxDuration(Property.of(Duration.ofMinutes(60)))
-                .parseRunResults(Property.of(false))
+                .runId(Property.ofValue(runOutput.getRunId().toString()))
+                .token(Property.ofValue(this.token))
+                .accountId(Property.ofValue(this.accountId))
+                .maxDuration(Property.ofValue(Duration.ofMinutes(60)))
+                .parseRunResults(Property.ofValue(false))
                 .build();
 
         CheckStatus.Output checkStatusOutput = checkStatus.run(runContext);

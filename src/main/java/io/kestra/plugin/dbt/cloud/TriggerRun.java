@@ -66,7 +66,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     )
     @Builder.Default
     @NotNull
-    Property<String> cause = Property.of("Triggered by Kestra.");
+    Property<String> cause = Property.ofValue("Triggered by Kestra.");
 
     @Schema(
         title = "The git SHA to check out before running this job."
@@ -118,26 +118,26 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         description = "Allowing to capture job status & logs."
     )
     @Builder.Default
-    Property<Boolean> wait = Property.of(Boolean.TRUE);
+    Property<Boolean> wait = Property.ofValue(Boolean.TRUE);
 
     @Schema(
             title = "Specify frequency for job state check API calls."
     )
     @Builder.Default
-    Property<Duration> pollFrequency = Property.of(Duration.ofSeconds(5));
+    Property<Duration> pollFrequency = Property.ofValue(Duration.ofSeconds(5));
 
     @Schema(
         title = "The maximum total wait duration."
     )
     @Builder.Default
-    Property<Duration> maxDuration = Property.of(Duration.ofMinutes(60));
+    Property<Duration> maxDuration = Property.ofValue(Duration.ofMinutes(60));
 
     @Builder.Default
     @Schema(
         title = "Parse run result.",
         description = "Parsing run result to display duration of each task inside dbt."
     )
-    protected Property<Boolean> parseRunResults = Property.of(Boolean.TRUE);
+    protected Property<Boolean> parseRunResults = Property.ofValue(Boolean.TRUE);
 
     @Override
     public TriggerRun.Output run(RunContext runContext) throws Exception {
@@ -185,7 +185,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         }
 
         CheckStatus checkStatusJob = CheckStatus.builder()
-            .runId(Property.of(runId.toString()))
+            .runId(Property.ofValue(runId.toString()))
             .baseUrl(getBaseUrl())
             .token(getToken())
             .accountId(getAccountId())
