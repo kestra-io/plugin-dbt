@@ -1,0 +1,13 @@
+{
+  "metadata": {
+    "project_name": "kestra_unit_test"
+  },
+  "nodes": {},
+  "sources": {},
+  "exposures": {},
+  "metrics": {},
+  "selectors": [],
+  "disabled": {},
+  "parent_map": {},
+  "child_map": {}
+}

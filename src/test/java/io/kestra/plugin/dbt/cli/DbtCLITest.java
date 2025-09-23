@@ -13,7 +13,6 @@ import io.kestra.core.utils.TestsUtils;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -129,7 +128,6 @@ class DbtCLITest {
         assertThat(((Map<String, Object>) manifestValue.get("metadata")).get("project_name"), is("unit_kestra"));
     }
 
-    @Disabled("To run put a manifest.json under src/test/resources/manifest/")
     @Test
     void testDbtWithLoadManifest_manifestShouldBeLoadedFromKvStore() throws Exception {
         DbtCLI loadManifest = DbtCLI.builder()
