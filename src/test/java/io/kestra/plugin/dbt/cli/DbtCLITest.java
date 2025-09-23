@@ -129,7 +129,6 @@ class DbtCLITest {
         assertThat(((Map<String, Object>) manifestValue.get("metadata")).get("project_name"), is("unit_kestra"));
     }
 
-    @Disabled("To run put a manifest.json under src/test/resources/manifest/")
     @Test
     void testDbtWithLoadManifest_manifestShouldBeLoadedFromKvStore() throws Exception {
         DbtCLI loadManifest = DbtCLI.builder()
