@@ -13,7 +13,6 @@ import io.kestra.core.utils.TestsUtils;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
