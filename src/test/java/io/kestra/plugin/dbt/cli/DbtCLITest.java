@@ -225,4 +225,20 @@ class DbtCLITest {
         assertThat("run_results.json should be captured on failure",
             output.getOutputFiles(), hasKey("run_results.json"));
     }
+
+    @Test
+    void run_withFusionEngine_shouldUseFusionImage() throws Exception {
+        DbtCLI execute = DbtCLI.builder()
+            .id(IdUtils.create())
+            .type(DbtCLI.class.getName())
+            .profiles(Property.ofValue(PROFILES))
+            .engine(Property.ofValue(DbtCLI.Engine.FUSION))
+            .commands(Property.ofValue(List.of("dbt --version")))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
+        ScriptOutput runOutput = execute.run(runContext);
+
+        assertThat(runOutput.getExitCode(), is(0));
+    }
 }
