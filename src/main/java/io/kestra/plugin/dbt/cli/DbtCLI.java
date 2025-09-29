@@ -284,7 +284,8 @@ import org.apache.commons.lang3.StringUtils;
 )
 public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Output> {
     private static final ObjectMapper MAPPER = JacksonMapper.ofYaml();
-    private static final String DEFAULT_IMAGE = "ghcr.io/kestra-io/dbt";
+    private static final String CORE_IMAGE = "ghcr.io/kestra-io/dbt";
+    private static final String FUSION_IMAGE = "ghcr.io/kestra-io/dbt-fusion";
 
     @Schema(
         title = "The list of dbt CLI commands to run."
@@ -326,7 +327,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         .build();
 
     @Builder.Default
-    protected Property<String> containerImage = Property.ofValue(DEFAULT_IMAGE);
+    protected Property<String> containerImage = Property.ofValue(CORE_IMAGE);
 
     @Schema(
         title = "Store manifest.",
@@ -353,6 +354,13 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     @Builder.Default
     private Property<LogFormat> logFormat = Property.ofValue(LogFormat.JSON);
 
+    @Schema(
+        title = "dbt engine",
+        description = "Choose between dbt-core (default) or dbt-fusion."
+    )
+    @Builder.Default
+    private Property<Engine> engine = Property.ofValue(Engine.CORE);
+
     @Override
     protected DockerOptions injectDefaults(RunContext runContext, DockerOptions original) throws IllegalVariableEvaluationException {
         if (original == null) {
@@ -361,8 +369,15 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
         var builder = original.toBuilder();
         if (original.getImage() == null) {
-            builder.image(runContext.render(this.getContainerImage()).as(String.class).orElse(DEFAULT_IMAGE));
+            Engine selectedEngine = runContext.render(this.engine).as(Engine.class).orElse(Engine.CORE);
+
+            if (selectedEngine == Engine.FUSION) {
+                builder.image(FUSION_IMAGE);
+            } else {
+                builder.image(CORE_IMAGE);
+            }
         }
+
         if (original.getEntryPoint() == null) {
             builder.entryPoint(new ArrayList<>());
         }
@@ -537,5 +552,10 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         TEXT,
         DEBUG,
         NONE
+    }
+
+    public enum Engine {
+        CORE,
+        FUSION
     }
 }
