@@ -284,24 +284,24 @@ import org.apache.commons.lang3.StringUtils;
         )
     },
     metrics = {
-    @Metric(
-        name = "log.stats.success",
-        type = Counter.TYPE,
-        unit = "records",
-        description = "The number of successful log entries parsed from DBT output."
-    ),
-    @Metric(
-        name = "log.stats.warn",
-        type = Counter.TYPE,
-        unit = "records",
-        description = "The number of warning log entries parsed from DBT output."
-    ),
-    @Metric(
-        name = "log.stats.error",
-        type = Counter.TYPE,
-        unit = "records",
-        description = "The number of error log entries parsed from DBT output."
-    )
+        @Metric(
+            name = "log.stats.success",
+            type = Counter.TYPE,
+            unit = "records",
+            description = "The number of successful log entries parsed from DBT output."
+        ),
+        @Metric(
+            name = "log.stats.warn",
+            type = Counter.TYPE,
+            unit = "records",
+            description = "The number of warning log entries parsed from DBT output."
+        ),
+        @Metric(
+            name = "log.stats.error",
+            type = Counter.TYPE,
+            unit = "records",
+            description = "The number of error log entries parsed from DBT output."
+        )
     }
 )
 public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Output> {
