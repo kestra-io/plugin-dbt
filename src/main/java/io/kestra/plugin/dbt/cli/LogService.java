@@ -48,6 +48,7 @@ class LogService {
             additional.remove("invocation_id");
             additional.remove("level");
             additional.remove("log_version");
+            additional.remove("code");
             additional.remove("msg");
             additional.remove("thread");
             additional.remove("thread_name");
