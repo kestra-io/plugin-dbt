@@ -2,9 +2,6 @@ package io.kestra.plugin.dbt.cli;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.kestra.core.models.annotations.Metric;
-import io.kestra.core.models.annotations.Plugin;
-import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.executions.metrics.Counter;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
@@ -12,30 +9,7 @@ import io.kestra.core.serializers.JacksonMapper;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
-
-@Plugin(
-metrics = {
-    @Metric(
-        name = "log.stats.success",
-        type = Counter.TYPE,
-        unit = "records",
-        description = "The number of successful log entries parsed from DBT output."
-    ),
-    @Metric(
-        name = "log.stats.warn",
-        type = Counter.TYPE,
-        unit = "records",
-        description = "The number of warning log entries parsed from DBT output."
-    ),
-    @Metric(
-        name = "log.stats.error",
-        type = Counter.TYPE,
-        unit = "records",
-        description = "The number of error log entries parsed from DBT output."
-    )
-    }
-)
-    
+ 
 class LogService {
     static final protected ObjectMapper MAPPER = JacksonMapper.ofJson()
         .setSerializationInclusion(JsonInclude.Include.NON_NULL);
@@ -99,10 +73,7 @@ class LogService {
                 if (data.containsKey("stats")) {
                     Map<String, Integer> stats  = (Map<String, Integer>) data.get("stats");
 
-                    stats.forEach((s, integer) -> {
-                        String metricName = "log.stats." + s.toLowerCase();
-                        runContext.metric(Counter.of(metricName, integer));
-                    });
+                    stats.forEach((s, integer) -> runContext.metric(Counter.of(s, integer)));
                 }
             }
 
