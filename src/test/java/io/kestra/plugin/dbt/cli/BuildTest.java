@@ -64,22 +64,28 @@ class BuildTest {
             .type(Setup.class.getName())
             .taskRunner(Process.instance())
             .profiles(Property.ofValue(PROFILES))
-            .requirements(Property.ofValue(List.of("dbt-bigquery")))
+            .requirements(Property.ofValue(List.of(
+                "dbt-bigquery==1.8.3",
+                "click\\<8.1"
+            )))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, setup, Map.of());
 
         copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), runContext.workingDir().path(true));
 
-        setup.run(runContext);
-
-        try(var inputStream = new ByteArrayInputStream(Base64.getDecoder().decode(System.getenv("GOOGLE_SERVICE_ACCOUNT").getBytes()))) {
+        // Copy sa.json before to run the task
+        try (var inputStream = new ByteArrayInputStream(Base64.getDecoder().decode(System.getenv("GOOGLE_SERVICE_ACCOUNT").getBytes()))) {
             Files.copy(inputStream, runContext.workingDir().resolve(Path.of("sa.json")));
         }
+
         Map<String, String> env = new HashMap<>();
         env.put("GOOGLE_APPLICATION_CREDENTIALS", runContext.workingDir().resolve(Path.of("sa.json")).toString());
+
+        setup.run(runContext);
+
         Build task = Build.builder()
-            .thread((Property.ofValue(8)))
+            .thread(Property.ofValue(8))
             .taskRunner(Process.instance())
             .env(Property.ofValue(env))
             .build();
