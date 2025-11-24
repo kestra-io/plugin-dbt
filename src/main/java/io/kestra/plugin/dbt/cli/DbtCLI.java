@@ -378,7 +378,16 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
     @Schema(
         title = "dbt engine",
-        description = "Choose between dbt-core (default) or dbt-fusion."
+        description = """
+        Selects the default container image when no explicit image is provided.
+
+        Image resolution priority:
+            - If `taskRunner.image` is set, that image is used.
+            - Otherwise, if `containerImage` is set on the task, it is used.
+            - Otherwise, the `engine` determines the default image:
+               - CORE   → ghcr.io/kestra-io/dbt
+               - FUSION → ghcr.io/kestra-io/dbt-fusion
+        """
     )
     @Builder.Default
     private Property<Engine> engine = Property.ofValue(Engine.CORE);
@@ -391,12 +400,13 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
         var builder = original.toBuilder();
         if (original.getImage() == null) {
-            Engine selectedEngine = runContext.render(this.engine).as(Engine.class).orElse(Engine.CORE);
+            var rContainerImage = runContext.render(this.containerImage).as(String.class).orElse(null);
 
-            if (selectedEngine == Engine.FUSION) {
-                builder.image(FUSION_IMAGE);
+            if (rContainerImage != null) {
+                builder.image(rContainerImage);
             } else {
-                builder.image(CORE_IMAGE);
+                var rEngine = runContext.render(this.engine).as(Engine.class).orElse(Engine.CORE);
+                builder.image(rEngine == Engine.FUSION ? FUSION_IMAGE : CORE_IMAGE);
             }
         }
 
