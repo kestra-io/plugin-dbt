@@ -27,9 +27,11 @@ import io.kestra.plugin.scripts.exec.scripts.runners.CommandsWrapper;
 import io.kestra.plugin.scripts.runner.docker.Docker;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang3.StringUtils;
 
 import java.io.File;
 import java.io.IOException;
@@ -38,15 +40,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.*;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
-
-import jakarta.validation.constraints.NotNull;
-import org.apache.commons.lang3.StringUtils;
 
 @SuperBuilder
 @ToString
@@ -132,49 +128,49 @@ import org.apache.commons.lang3.StringUtils;
             title = "Install a custom dbt version and run `dbt deps` and `dbt build` commands. Note how you can also configure the memory limit for the Docker runner. This is useful when you see Zombie processes.",
             full = true,
             code = """
-            id: dbt_custom_dependencies
-            namespace: company.team
+                id: dbt_custom_dependencies
+                namespace: company.team
 
-            inputs:
-              - id: dbt_version
-                type: STRING
-                defaults: "dbt-duckdb==1.6.0"
+                inputs:
+                  - id: dbt_version
+                    type: STRING
+                    defaults: "dbt-duckdb==1.6.0"
 
-            tasks:
-              - id: git
-                type: io.kestra.plugin.core.flow.WorkingDirectory
                 tasks:
-                  - id: clone_repository
-                    type: io.kestra.plugin.git.Clone
-                    url: https://github.com/kestra-io/dbt-example
-                    branch: main
+                  - id: git
+                    type: io.kestra.plugin.core.flow.WorkingDirectory
+                    tasks:
+                      - id: clone_repository
+                        type: io.kestra.plugin.git.Clone
+                        url: https://github.com/kestra-io/dbt-example
+                        branch: main
 
-                  - id: dbt
-                    type: io.kestra.plugin.dbt.cli.DbtCLI
-                    taskRunner:
-                      type: io.kestra.plugin.scripts.runner.docker.Docker
-                      memory:
-                        memory: 1GB
-                    containerImage: python:3.11-slim
-                    beforeCommands:
-                      - pip install uv
-                      - uv venv --quiet
-                      - . .venv/bin/activate --quiet
-                      - uv pip install --quiet {{ inputs.dbt_version }}
-                    commands:
-                      - dbt deps
-                      - dbt build
-                    profiles: |
-                      my_dbt_project:
-                        outputs:
-                          dev:
-                            type: duckdb
-                            path: ":memory:"
-                            fixed_retries: 1
-                            threads: 16
-                            timeout_seconds: 300
-                        target: dev
-            """
+                      - id: dbt
+                        type: io.kestra.plugin.dbt.cli.DbtCLI
+                        taskRunner:
+                          type: io.kestra.plugin.scripts.runner.docker.Docker
+                          memory:
+                            memory: 1GB
+                        containerImage: python:3.11-slim
+                        beforeCommands:
+                          - pip install uv
+                          - uv venv --quiet
+                          - . .venv/bin/activate --quiet
+                          - uv pip install --quiet {{ inputs.dbt_version }}
+                        commands:
+                          - dbt deps
+                          - dbt build
+                        profiles: |
+                          my_dbt_project:
+                            outputs:
+                              dev:
+                                type: duckdb
+                                path: ":memory:"
+                                fixed_retries: 1
+                                threads: 16
+                                timeout_seconds: 300
+                            target: dev
+                """
         ),
         @Example(
             title = "Clone a [Git repository](https://github.com/kestra-io/dbt-example) and build dbt models. Note that, as the dbt project files are in a separate directory, you need to set the `projectDir` task property and use `--project-dir` in each dbt CLI command.",
@@ -215,7 +211,7 @@ import org.apache.commons.lang3.StringUtils;
                             prod:
                               type: duckdb
                               path: dbt2.duckdb
-                              extensions:\s
+                              extensions:
                                 - parquet
                               fixed_retries: 1
                               threads: 16
@@ -369,9 +365,9 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     @Schema(
         title = "Log format.",
         description = """
-        The log format is JSON by default. The format will be applied after all commands like this --log-format <logFormat>.
-        The possible values are JSON, DEBUG, TEXT. You can set it to NONE to avoid adding this argument to your commands.
-    """
+            The log format is JSON by default. The format will be applied after all commands like this --log-format <logFormat>.
+            The possible values are JSON, DEBUG, TEXT. You can set it to NONE to avoid adding this argument to your commands.
+            """
     )
     @Builder.Default
     private Property<LogFormat> logFormat = Property.ofValue(LogFormat.JSON);
@@ -379,15 +375,15 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     @Schema(
         title = "dbt engine",
         description = """
-        Selects the default container image when no explicit image is provided.
+            Selects the default container image when no explicit image is provided.
 
-        Image resolution priority:
-            - If `taskRunner.image` is set, that image is used.
-            - Otherwise, if `containerImage` is set on the task, it is used.
-            - Otherwise, the `engine` determines the default image:
-               - CORE   → ghcr.io/kestra-io/dbt
-               - FUSION → ghcr.io/kestra-io/dbt-fusion
-        """
+            Image resolution priority:
+                - If `taskRunner.image` is set, that image is used.
+                - Otherwise, if `containerImage` is set on the task, it is used.
+                - Otherwise, the `engine` determines the default image:
+                   - CORE   → ghcr.io/kestra-io/dbt
+                   - FUSION → ghcr.io/kestra-io/dbt-fusion
+            """
     )
     @Builder.Default
     private Property<Engine> engine = Property.ofValue(Engine.CORE);
@@ -419,11 +415,14 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
     @Override
     public Output run(RunContext runContext) throws Exception {
+
+        var logger = runContext.logger();
+
         KVStore storeManifestKvStore = null;
         AtomicBoolean hasWarning = new AtomicBoolean(false);
 
-        //Check/fail if a KV store exists with given namespace
-        if(this.getStoreManifest() != null) {
+        // Check/fail if a KV store exists with given namespace
+        if (this.getStoreManifest() != null) {
             storeManifestKvStore = runContext.namespaceKv(runContext.render(this.getStoreManifest().getNamespace()).as(String.class).orElseThrow());
         }
 
@@ -434,27 +433,27 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                 public void accept(String line, Boolean isStdErr, Instant instant) {
                     LogService.parse(runContext, line, hasWarning);
                 }
+
                 @Override
                 public void accept(String line, Boolean isStdErr) {
                     LogService.parse(runContext, line, hasWarning);
                 }
             });
 
-        var renderedProjectDir = runContext.render(projectDir).as(String.class);
-        Path projectWorkingDirectory = renderedProjectDir.map(s -> commandsWrapper.getWorkingDirectory().resolve(s)).orElseGet(commandsWrapper::getWorkingDirectory);
+        var rProjectDir = runContext.render(projectDir).as(String.class);
+        Path projectWorkingDirectory = rProjectDir.map(s -> commandsWrapper.getWorkingDirectory().resolve(s)).orElseGet(commandsWrapper::getWorkingDirectory);
 
-        //Load manifest from KV store
-        if(this.getLoadManifest() != null) {
+        // Load manifest from KV store
+        if (this.getLoadManifest() != null) {
             KVStore loadManifestKvStore = runContext.namespaceKv(runContext.render(this.getLoadManifest().getNamespace()).as(String.class).orElseThrow());
             fetchAndStoreManifestIfExists(runContext, loadManifestKvStore, projectWorkingDirectory);
         }
 
-        //Create profiles.yml
         String profilesString = runContext.render(profiles).as(String.class).orElse(null);
         if (profilesString != null && !profilesString.isEmpty()) {
             var profileFile = new File(commandsWrapper.getWorkingDirectory().toString(), "profiles.yml");
             if (profileFile.exists()) {
-                runContext.logger().info("A 'profiles.yml' file already exist in the task working directory, it will be overridden.");
+                logger.info("A 'profiles.yml' file already exist in the task working directory, it will be overridden.");
             }
 
             FileUtils.writeStringToFile(
@@ -464,14 +463,13 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
             );
         }
 
-        var renderedCommands = runContext.render(this.commands).asList(String.class);
+        var rCommands = runContext.render(this.commands).asList(String.class);
 
-        // check that if a command uses --project-dir, the projectDir must be set
-        if (renderedCommands.stream().anyMatch(cmd -> cmd.contains("--project-dir")) && this.projectDir == null) {
-            runContext.logger().warn("One of the dbt CLI commands uses the `--project-dir` flag, but the `projectDir` task property is not set. Make sure to set the `projectDir` property.");
+        if (rCommands.stream().anyMatch(cmd -> cmd.contains("--project-dir")) && this.projectDir == null) {
+            logger.warn("One of the dbt CLI commands uses the `--project-dir` flag, but the `projectDir` task property is not set. Make sure to set the `projectDir` property.");
         }
 
-        LogFormat renderedLogFormat = runContext.render(this.logFormat).as(LogFormat.class).orElseThrow();
+        LogFormat rLogFormat = runContext.render(this.logFormat).as(LogFormat.class).orElseThrow();
 
         ScriptOutput runResults;
         try {
@@ -484,10 +482,10 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                 .withBeforeCommands(this.beforeCommands)
                 .withBeforeCommandsWithOptions(true)
                 .withCommands(Property.ofValue(
-                    renderedCommands.stream()
+                    rCommands.stream()
                         .map(command -> {
-                            if (command.startsWith("dbt") && !LogFormat.NONE.equals(renderedLogFormat)) {
-                                return command.concat(" --log-format " + renderedLogFormat.toString().toLowerCase());
+                            if (command.startsWith("dbt") && !LogFormat.NONE.equals(rLogFormat)) {
+                                return command.concat(" --log-format " + rLogFormat.toString().toLowerCase());
                             }
                             return command;
                         })
@@ -510,7 +508,6 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
             throw new RunnableTaskException(e.getMessage(), dbtOutput);
         }
 
-        //Parse run results
         parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore);
 
         return Output.builder()
@@ -528,21 +525,20 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
         File manifestFile = projectWorkingDirectory.resolve("target/manifest.json").toFile();
         if (manifestFile.exists()) {
-            if(this.getStoreManifest() != null) {
+            if (this.getStoreManifest() != null) {
                 final String key = runContext.render(this.getStoreManifest().getKey()).as(String.class).orElseThrow();
                 storeManifestKvStore.put(key, new KVValueAndMetadata(null, JacksonMapper.toObject(Files.readString(manifestFile.toPath()))));
             }
 
             URI manifest = ResultParser.parseManifest(runContext, manifestFile);
             run.getOutputFiles().put("manifest.json", manifest);
-
         }
     }
 
     private void fetchAndStoreManifestIfExists(RunContext runContext, KVStore loadManifestKvStore, Path projectWorkingDirectory) throws IOException, ResourceExpiredException, IllegalVariableEvaluationException {
         Optional<KVValue> manifestValue = loadManifestKvStore.getValue(runContext.render(this.getLoadManifest().getKey()).as(String.class).get());
 
-        if(manifestValue.isEmpty() || manifestValue.get().value() == null || StringUtils.isBlank(manifestValue.get().value().toString())) {
+        if (manifestValue.isEmpty() || manifestValue.get().value() == null || StringUtils.isBlank(manifestValue.get().value().toString())) {
             runContext.logger().warn("Property `loadManifest` has been used but no manifest has been found in the KV Store.");
             return;
         }
