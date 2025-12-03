@@ -1,8 +1,8 @@
 group: io.kestra.plugin.dbt.cli
 name: "cli"
 title: "Dbt CLI"
-description: "This sub-group of plugins contains tasks for using dbt with its CLI. dbt is a data transformation tool that enables data analysts and engineers to transform, test and document data in the cloud data warehouse."
-body: ""
+description: "Tasks that run dbt via the CLI for building, testing, and managing projects."
+body: "Wraps dbt commands (build, run, test, compile, seed, snapshot, deps, etc.) using container or custom task runners, letting you provide project directories, a dbt binary path, profiles, and environment variables. Supports fail-fast, warn-error, run-result parsing, and storing artifacts for downstream steps."
 videos: []
 createdBy: "Kestra Core Team"
 managedBy: "Kestra Core Team"
