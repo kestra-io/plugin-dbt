@@ -1,8 +1,8 @@
 group: io.kestra.plugin.dbt.cloud
 name: "cloud"
 title: "Dbt Cloud"
-description: "This sub-group of plugins contains tasks for using dbt Cloud. dbt is a data transformation tool that enables data analysts and engineers to transform, test and document data in the cloud data warehouse."
-body: ""
+description: "Tasks that trigger and monitor dbt Cloud jobs through the API."
+body: "Use these tasks to start jobs, poll run state, and download artifacts like run_results.json and manifest.json. Requires baseUrl, accountId, token, and jobId or runId, with options to override git refs, targets, timeouts, and wait for completion while streaming logs and parsed run results."
 videos: []
 createdBy: "Kestra Core Team"
 managedBy: "Kestra Core Team"
