@@ -56,7 +56,7 @@ import static java.lang.Math.max;
                   - id: check_status
                     type: io.kestra.plugin.dbt.cloud.CheckStatus
                     accountId: "dbt_account"
-                    token: "dbt_token"
+                    token: "{{ secret('DBT_TOKEN') }}"
                     runId: "run_id"
                 """
         )

@@ -47,7 +47,7 @@ import java.util.Map;
                   - id: trigger_run
                     type: io.kestra.plugin.dbt.cloud.TriggerRun
                     accountId: "dbt_account"
-                    token: "dbt_token"
+                    token: "{{ secret('DBT_TOKEN') }}"
                     jobId: "job_id"
                 """
         )
