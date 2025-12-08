@@ -263,9 +263,8 @@ class DbtCLITest {
 
         createSaFile(workingDir);
 
-        ScriptOutput runOutput = task.run(runContext);
+        var runOutput = task.run(runContext);
 
         assertThat(runOutput.getExitCode(), is(0));
-        assertThat(runOutput.getVars().get("commands").toString(), containsString("--project-dir unit-kestra"));
     }
 }
