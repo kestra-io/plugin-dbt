@@ -466,11 +466,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         }
 
         var rCommands = runContext.render(this.commands).asList(String.class);
-
-        if (rCommands.stream().anyMatch(cmd -> cmd.contains("--project-dir")) && this.projectDir == null) {
-            logger.warn("One of the dbt CLI commands uses the `--project-dir` flag, but the `projectDir` task property is not set. Make sure to set the `projectDir` property.");
-        }
-
+        
         LogFormat rLogFormat = runContext.render(this.logFormat).as(LogFormat.class).orElseThrow();
 
         ScriptOutput runResults;
