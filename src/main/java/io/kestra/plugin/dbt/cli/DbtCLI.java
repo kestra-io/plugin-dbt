@@ -44,8 +44,6 @@ import java.util.*;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static io.kestra.core.utils.Rethrow.throwFunction;
-
 @SuperBuilder
 @ToString
 @EqualsAndHashCode
@@ -466,7 +464,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         }
 
         var rCommands = runContext.render(this.commands).asList(String.class);
-        
+
         LogFormat rLogFormat = runContext.render(this.logFormat).as(LogFormat.class).orElseThrow();
 
         ScriptOutput runResults;
@@ -482,7 +480,6 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                 .withCommands(Property.ofValue(
                     rCommands.stream()
                         .map(command -> {
-
                             if (command.startsWith("dbt") && rProjectDir.orElse(null) != null && !command.contains("--project-dir")) {
                                 command = command.concat(" --project-dir " + rProjectDir.get());
                             }
