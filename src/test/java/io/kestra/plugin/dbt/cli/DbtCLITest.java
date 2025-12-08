@@ -241,4 +241,30 @@ class DbtCLITest {
 
         assertThat(runOutput.getExitCode(), is(0));
     }
+
+    @Test
+    void run_withProjectDir_shouldInjectProjectDirFlag() throws Exception {
+        DbtCLI task = DbtCLI.builder()
+            .id(IdUtils.create())
+            .type(DbtCLI.class.getName())
+            .projectDir(Property.ofValue("unit-kestra"))
+            .commands(Property.ofValue(List.of("dbt build")))
+            .containerImage(Property.ofValue("ghcr.io/kestra-io/dbt-bigquery:latest"))
+            .profiles(Property.ofValue(PROFILES))
+            .build();
+
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+
+        Path workingDir = runContext.workingDir().path(true);
+        Path projectDir = workingDir.resolve("unit-kestra");
+        Files.createDirectories(projectDir);
+
+        copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), projectDir);
+
+        createSaFile(workingDir);
+
+        var runOutput = task.run(runContext);
+
+        assertThat(runOutput.getExitCode(), is(0));
+    }
 }
