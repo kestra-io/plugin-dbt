@@ -194,8 +194,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
                         type: io.kestra.plugin.scripts.runner.docker.Docker
                       containerImage: ghcr.io/kestra-io/dbt-duckdb:latest
                       commands:
-                        - dbt deps --project-dir dbt --target prod
-                        - dbt build --project-dir dbt --target prod
+                        - dbt deps --target prod
+                        - dbt build --target prod
                       projectDir: dbt
                       profiles: |
                         my_dbt_project:
@@ -231,8 +231,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
                     allowCustomValue: true
                     defaults: dbt build --project-dir dbt --target prod --no-partial-parse
                     values:
-                      - dbt build --project-dir dbt --target prod --no-partial-parse
-                      - dbt build --project-dir dbt --target prod --no-partial-parse --select state:modified+ --defer --state ./target
+                      - dbt build --target prod --no-partial-parse
+                      - dbt build --target prod --no-partial-parse --select state:modified+ --defer --state ./target
 
                 tasks:
                   - id: dbt
