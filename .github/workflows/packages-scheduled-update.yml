@@ -1,8 +1,6 @@
-name: Scheduled Packages Update
+name: Update All Packages
 
 on:
-  schedule:
-    - cron: '0 9 * * MON'
   workflow_dispatch:
 
 jobs:
