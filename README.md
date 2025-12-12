@@ -57,3 +57,22 @@ Apache 2.0 © [Kestra Technologies](https://kestra.io)
 We release new versions every month. Give the [main repository](https://github.com/kestra-io/kestra) a star to stay up to date with the latest releases and get notified about future updates.
 
 ![Star the repo](https://kestra.io/star.gif)
+
+## Building Docker images with a specific dbt version
+
+You can pin the dbt package version used in the built Docker images by providing the `DBT_VERSION` build arg at build time. The Dockerfiles in `dockerfiles/` accept `ARG DBT_VERSION` and will pin the dbt adapter packages when supplied.
+
+Local build example (pin to 1.9.1):
+
+```bash
+docker build \
+  --build-arg DBT_VERSION=1.9.1 \
+  -t ghcr.io/kestra-io/dbt-duckdb:dbt-1.9.1 \
+  -f dockerfiles/dbt-duckdb.Dockerfile .
+```
+
+GitHub Actions
+- `packages.yml` (runs on Dockerfile changes) now supports `workflow_dispatch` with an optional `dbt_version` input; this is passed as the build arg and the image will be tagged using the dbt version (for example: `ghcr.io/kestra-io/dbt-duckdb:1.9.1`).
+- `packages-scheduled-update.yml` accepts `image_tag` and a new optional `dbt_version` input. When `dbt_version` is provided, an additional tag `dbt-<version>` is added for each image.
+
+Note: Some Dockerfiles use external installer scripts (like `dbt-fusion.Dockerfile`) and may require a different approach to pinning the dbt version; check the installer script for a supported `--version` argument and adapt the Dockerfile if needed.

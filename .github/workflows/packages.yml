@@ -6,6 +6,12 @@ on:
       - dockerfiles/*
     branches:
       - master
+  workflow_dispatch:
+    inputs:
+      dbt_version:
+        description: 'Pin dbt version to install in built images (optional). Example: 1.9.1'
+        required: false
+        default: ''
 
 jobs:
   changes:
@@ -38,6 +44,8 @@ jobs:
     strategy:
       matrix:
         image: ${{ fromJson(needs.changes.outputs.dockerfiles) }}
+    env:
+      DBT_VERSION: ${{ github.event.inputs.dbt_version }}
     steps:
       - name: checkout
         uses: actions/checkout@v6
@@ -58,7 +66,12 @@ jobs:
       - id: image-tag  # example output: "ghcr.io/kestra-io/pydata:latest"
         run: |
           export IMAGE=$(basename ${{ matrix.image }} .Dockerfile)
-          echo "image_url=ghcr.io/kestra-io/$IMAGE:latest" >> $GITHUB_OUTPUT
+          if [ -n "$DBT_VERSION" ]; then
+            TAG="dbt-$DBT_VERSION"
+          else
+            TAG="latest"
+          fi
+          echo "image_url=ghcr.io/kestra-io/$IMAGE:$TAG" >> $GITHUB_OUTPUT
           echo "file=${{ matrix.image }}" >> $GITHUB_OUTPUT
 
       - name: Build and push Docker image
@@ -66,6 +79,7 @@ jobs:
         with:
           context: .
           push: true
+          build-args: DBT_VERSION=${{ env.DBT_VERSION }}
           tags: ${{ steps.image-tag.outputs.image_url }}
           file: ${{ steps.image-tag.outputs.file }}
           platforms: linux/amd64,linux/arm64
