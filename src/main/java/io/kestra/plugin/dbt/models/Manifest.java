@@ -12,6 +12,7 @@ import java.util.Map;
 @Jacksonized
 @SuperBuilder
 public class Manifest {
+    Map<String, Object> metadata;
     Map<String, Node> nodes;
 
     @Value
@@ -20,6 +21,14 @@ public class Manifest {
     public static class Node {
         @JsonProperty("compiled_sql")
         String compiledSql;
+
+        String database;
+
+        String schema;
+
+        String name;
+
+        String alias;
 
         @JsonProperty("resource_type")
         String resourceType;
@@ -31,4 +40,3 @@ public class Manifest {
         String uniqueId;
     }
 }
-

@@ -7,3 +7,5 @@ kestra:
     type: local
     local:
       base-path: /tmp/unittest
+  encryption:
+    secret-key: test

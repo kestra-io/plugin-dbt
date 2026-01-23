@@ -20,6 +20,7 @@ import io.kestra.core.storages.kv.KVStore;
 import io.kestra.core.storages.kv.KVValue;
 import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.plugin.dbt.ResultParser;
+import io.kestra.plugin.dbt.RunContextUtils;
 import io.kestra.plugin.scripts.exec.AbstractExecScript;
 import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
@@ -415,7 +416,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-
+        RunContextUtils.ensureSecretKey(runContext);
         var logger = runContext.logger();
 
         KVStore storeManifestKvStore = null;
@@ -518,20 +519,22 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     }
 
     private void parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore) throws IllegalVariableEvaluationException, IOException {
-        if (runContext.render(this.parseRunResults).as(Boolean.class).orElse(Boolean.TRUE) && projectWorkingDirectory.resolve("target/run_results.json").toFile().exists()) {
-            URI results = ResultParser.parseRunResult(runContext, projectWorkingDirectory.resolve("target/run_results.json").toFile());
-            run.getOutputFiles().put("run_results.json", results);
-        }
-
         File manifestFile = projectWorkingDirectory.resolve("target/manifest.json").toFile();
+        io.kestra.plugin.dbt.models.Manifest manifest = null;
         if (manifestFile.exists()) {
             if (this.getStoreManifest() != null) {
                 final String key = runContext.render(this.getStoreManifest().getKey()).as(String.class).orElseThrow();
                 storeManifestKvStore.put(key, new KVValueAndMetadata(null, JacksonMapper.toObject(Files.readString(manifestFile.toPath()))));
             }
 
-            URI manifest = ResultParser.parseManifest(runContext, manifestFile);
-            run.getOutputFiles().put("manifest.json", manifest);
+            ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestFile);
+            manifest = manifestResult.manifest();
+            run.getOutputFiles().put("manifest.json", manifestResult.uri());
+        }
+
+        if (runContext.render(this.parseRunResults).as(Boolean.class).orElse(Boolean.TRUE) && projectWorkingDirectory.resolve("target/run_results.json").toFile().exists()) {
+            URI results = ResultParser.parseRunResult(runContext, projectWorkingDirectory.resolve("target/run_results.json").toFile(), manifest);
+            run.getOutputFiles().put("run_results.json", results);
         }
     }
 

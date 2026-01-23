@@ -1,6 +1,10 @@
 package io.kestra.plugin.dbt.cli;
 
+import io.kestra.core.models.executions.Execution;
+import io.kestra.core.models.executions.TaskRun;
+import io.kestra.core.models.flows.Flow;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.models.tasks.Task;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
@@ -9,6 +13,7 @@ import io.kestra.plugin.core.runner.Process;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
@@ -17,6 +22,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import static io.kestra.core.utils.Rethrow.throwConsumer;
@@ -70,12 +76,14 @@ class BuildTest {
             )))
             .build();
 
-        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, setup, Map.of());
+        RunContext runContext = mockRunContext(setup);
 
         copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), runContext.workingDir().path(true));
 
         // Copy sa.json before to run the task
-        try (var inputStream = new ByteArrayInputStream(Base64.getDecoder().decode(System.getenv("GOOGLE_SERVICE_ACCOUNT").getBytes()))) {
+        String encodedServiceAccount = System.getenv("GOOGLE_SERVICE_ACCOUNT");
+        Assumptions.assumeTrue(encodedServiceAccount != null && !encodedServiceAccount.isBlank(), "GOOGLE_SERVICE_ACCOUNT is not set");
+        try (var inputStream = new ByteArrayInputStream(Base64.getDecoder().decode(encodedServiceAccount.getBytes()))) {
             Files.copy(inputStream, runContext.workingDir().resolve(Path.of("sa.json")));
         }
 
@@ -96,5 +104,61 @@ class BuildTest {
         assertTrue(runOutput.getOutputFiles().containsKey("run_results.json"));
         assertTrue(runOutput.getOutputFiles().containsKey("manifest.json"));
         assertThat(runContext.dynamicWorkerResults(), hasSize(12));
+    }
+
+    private RunContext mockRunContext(Task task) {
+        ensureFactorySecretKey();
+        Flow flow = TestsUtils.mockFlow();
+        Execution execution = TestsUtils.mockExecution(flow, Map.of(), null);
+        TaskRun taskRun = TestsUtils.mockTaskRun(execution, task);
+        RunContext runContext = runContextFactory.of(flow, task, execution, taskRun, false);
+        ensureSecretKey(runContext);
+        return runContext;
+    }
+
+    private void ensureFactorySecretKey() {
+        try {
+            Class<?> type = runContextFactory.getClass();
+            java.lang.reflect.Field field = null;
+            while (type != null && field == null) {
+                try {
+                    field = type.getDeclaredField("secretKey");
+                } catch (NoSuchFieldException e) {
+                    type = type.getSuperclass();
+                }
+            }
+            if (field == null) {
+                return;
+            }
+            field.setAccessible(true);
+            if (field.get(runContextFactory) == null) {
+                field.set(runContextFactory, Optional.empty());
+            }
+        } catch (IllegalAccessException e) {
+            throw new IllegalStateException("Failed to initialize run context factory secret key", e);
+        }
+    }
+
+    private void ensureSecretKey(RunContext runContext) {
+        try {
+            Class<?> type = runContext.getClass();
+            java.lang.reflect.Field field = null;
+            while (type != null && field == null) {
+                try {
+                    field = type.getDeclaredField("secretKey");
+                } catch (NoSuchFieldException e) {
+                    type = type.getSuperclass();
+                }
+            }
+            if (field == null) {
+                return;
+            }
+            field.setAccessible(true);
+            if (field.get(runContext) == null) {
+                field.set(runContext, Optional.empty());
+            }
+        } catch (IllegalAccessException e) {
+            throw new IllegalStateException("Failed to initialize run context secret key", e);
+        }
     }
 }
