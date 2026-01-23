@@ -161,11 +161,18 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         Path runResultsArtifact = downloadArtifacts(runContext, runIdRendered, "run_results.json", RunResult.class);
         Path manifestArtifact = downloadArtifacts(runContext, runIdRendered, "manifest.json", ManifestArtifact.class);
 
+        io.kestra.plugin.dbt.models.Manifest manifest = null;
+        URI manifestUri = null;
+        if (manifestArtifact.toFile().exists()) {
+            ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestArtifact.toFile());
+            manifest = manifestResult.manifest();
+            manifestUri = manifestResult.uri();
+        }
 
         URI runResultsUri = null;
 
-        if (Boolean.TRUE.equals(runContext.render(this.parseRunResults).as(Boolean.class).orElse(false))) {
-            runResultsUri = ResultParser.parseRunResult(runContext, runResultsArtifact.toFile());
+        if (runContext.render(this.parseRunResults).as(Boolean.class).orElse(false)) {
+            runResultsUri = ResultParser.parseRunResult(runContext, runResultsArtifact.toFile(), manifest);
         } else {
             if (Files.exists(runResultsArtifact)) {
                 runResultsUri = runContext.storage().putFile(runResultsArtifact.toFile());
@@ -174,7 +181,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
         return Output.builder()
                 .runResults(runResultsUri)
-                .manifest(manifestArtifact.toFile().exists() ? runContext.storage().putFile(manifestArtifact.toFile()) : null)
+                .manifest(manifestUri)
                 .build();
     }
 

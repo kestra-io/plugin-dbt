@@ -1,7 +1,11 @@
 package io.kestra.plugin.dbt.cli;
 
+import io.kestra.core.models.executions.Execution;
+import io.kestra.core.models.executions.TaskRun;
+import io.kestra.core.models.flows.Flow;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.models.tasks.Task;
 import io.kestra.core.models.tasks.RunnableTaskException;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
@@ -13,17 +17,21 @@ import io.kestra.plugin.core.runner.Process;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import static io.kestra.core.utils.Rethrow.throwConsumer;
@@ -82,7 +90,7 @@ class DbtCLITest {
             .commands(Property.ofValue(List.of("dbt build --select zipcode")))
             .build();
 
-        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
+        RunContext runContext = mockRunContext(execute, Map.of());
 
         Path workingDir = runContext.workingDir().path(true);
         copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), workingDir);
@@ -110,7 +118,7 @@ class DbtCLITest {
             )
             .build();
 
-        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
+        RunContext runContext = mockRunContext(execute, Map.of());
 
         Path workingDir = runContext.workingDir().path(true);
         copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), workingDir);
@@ -142,7 +150,7 @@ class DbtCLITest {
             )
             .build();
 
-        RunContext runContextLoad = TestsUtils.mockRunContext(runContextFactory, loadManifest, Map.of());
+        RunContext runContextLoad = mockRunContext(loadManifest, Map.of());
 
         Path workingDir = runContextLoad.workingDir().path(true);
         copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()),
@@ -201,7 +209,7 @@ class DbtCLITest {
             )))
             .build();
 
-        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
+        RunContext runContext = mockRunContext(execute, Map.of());
 
         Path workingDir = runContext.workingDir().path(true);
         copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), workingDir);
@@ -216,9 +224,23 @@ class DbtCLITest {
     }
 
     private void createSaFile(Path workingDir) throws IOException {
-        Path existingSa = Path.of(System.getenv("GOOGLE_APPLICATION_CREDENTIALS"));
+        String credentialsPath = System.getenv("GOOGLE_APPLICATION_CREDENTIALS");
+        String encodedServiceAccount = System.getenv("GOOGLE_SERVICE_ACCOUNT");
+        Assumptions.assumeTrue(
+            (credentialsPath != null && !credentialsPath.isBlank()) ||
+                (encodedServiceAccount != null && !encodedServiceAccount.isBlank()),
+            "GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_SERVICE_ACCOUNT must be set"
+        );
+
         Path workingDirSa = workingDir.resolve("sa.json");
-        Files.copy(existingSa, workingDirSa);
+        if (credentialsPath != null && !credentialsPath.isBlank()) {
+            Files.copy(Path.of(credentialsPath), workingDirSa);
+            return;
+        }
+
+        try (var inputStream = new ByteArrayInputStream(Base64.getDecoder().decode(encodedServiceAccount.getBytes()))) {
+            Files.copy(inputStream, workingDirSa);
+        }
     }
 
     @Test
@@ -227,6 +249,7 @@ class DbtCLITest {
             .id(IdUtils.create())
             .type(DbtCLI.class.getName())
             .profiles(Property.ofValue(PROFILES))
+            .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
             .commands(Property.ofValue(List.of(
                 "dbt deps",
                 "mkdir -p models",
@@ -235,7 +258,7 @@ class DbtCLITest {
             )))
             .build();
 
-        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
+        RunContext runContext = mockRunContext(execute, Map.of());
 
         Path workingDir = runContext.workingDir().path(true);
         copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), workingDir);
@@ -263,7 +286,7 @@ class DbtCLITest {
             .commands(Property.ofValue(List.of("dbt --version")))
             .build();
 
-        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
+        RunContext runContext = mockRunContext(execute, Map.of());
         ScriptOutput runOutput = execute.run(runContext);
 
         assertThat(runOutput.getExitCode(), is(0));
@@ -280,7 +303,7 @@ class DbtCLITest {
             .profiles(Property.ofValue(PROFILES))
             .build();
 
-        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        var runContext = mockRunContext(task, Map.of());
 
         Path workingDir = runContext.workingDir().path(true);
         Path projectDir = workingDir.resolve("unit-kestra");
@@ -293,5 +316,61 @@ class DbtCLITest {
         var runOutput = task.run(runContext);
 
         assertThat(runOutput.getExitCode(), is(0));
+    }
+
+    private RunContext mockRunContext(Task task, Map<String, Object> inputs) {
+        ensureFactorySecretKey();
+        Flow flow = TestsUtils.mockFlow();
+        Execution execution = TestsUtils.mockExecution(flow, inputs, null);
+        TaskRun taskRun = TestsUtils.mockTaskRun(execution, task);
+        RunContext runContext = runContextFactory.of(flow, task, execution, taskRun, false);
+        ensureSecretKey(runContext);
+        return runContext;
+    }
+
+    private void ensureFactorySecretKey() {
+        try {
+            Class<?> type = runContextFactory.getClass();
+            java.lang.reflect.Field field = null;
+            while (type != null && field == null) {
+                try {
+                    field = type.getDeclaredField("secretKey");
+                } catch (NoSuchFieldException e) {
+                    type = type.getSuperclass();
+                }
+            }
+            if (field == null) {
+                return;
+            }
+            field.setAccessible(true);
+            if (field.get(runContextFactory) == null) {
+                field.set(runContextFactory, Optional.empty());
+            }
+        } catch (IllegalAccessException e) {
+            throw new IllegalStateException("Failed to initialize run context factory secret key", e);
+        }
+    }
+
+    private void ensureSecretKey(RunContext runContext) {
+        try {
+            Class<?> type = runContext.getClass();
+            java.lang.reflect.Field field = null;
+            while (type != null && field == null) {
+                try {
+                    field = type.getDeclaredField("secretKey");
+                } catch (NoSuchFieldException e) {
+                    type = type.getSuperclass();
+                }
+            }
+            if (field == null) {
+                return;
+            }
+            field.setAccessible(true);
+            if (field.get(runContext) == null) {
+                field.set(runContext, Optional.empty());
+            }
+        } catch (IllegalAccessException e) {
+            throw new IllegalStateException("Failed to initialize run context secret key", e);
+        }
     }
 }

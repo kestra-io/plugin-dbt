@@ -11,6 +11,7 @@ import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.plugin.dbt.ResultParser;
+import io.kestra.plugin.dbt.RunContextUtils;
 import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.RunnerType;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
@@ -81,8 +82,8 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     Property<String> profiles;
 
     @Schema(
-            title = "The task runner to use.",
-            description = """
+        title = "The task runner to use.",
+        description = """
             Task runners are provided by plugins, each have their own properties.
             If you change from the default one, be careful to also configure the entrypoint to an empty list if needed."""
     )
@@ -90,13 +91,13 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     @PluginProperty
     @Valid
     protected TaskRunner<?> taskRunner = Docker.builder()
-            .type(Docker.class.getName())
-            .entryPoint(new ArrayList<>())
-            .build();
+        .type(Docker.class.getName())
+        .entryPoint(new ArrayList<>())
+        .build();
 
     @Schema(title = "The task runner container image, only used if the task runner is container-based.")
     @Builder.Default
-    protected Property<String>  containerImage = Property.ofValue(DEFAULT_IMAGE);
+    protected Property<String> containerImage = Property.ofValue(DEFAULT_IMAGE);
 
     @Schema(
         title = "The runner type.",
@@ -143,6 +144,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
 
     @Override
     public ScriptOutput run(RunContext runContext) throws Exception {
+        RunContextUtils.ensureSecretKey(runContext);
         var renderedOutputFiles = runContext.render(this.outputFiles).asList(String.class);
         var renderedEnvMap = runContext.render(this.getEnv()).asMap(String.class, String.class);
 
@@ -160,6 +162,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
                 public void accept(String line, Boolean isStdErr, Instant instant) {
                     LogService.parse(runContext, line, new AtomicBoolean(false));
                 }
+
                 @Override
                 public void accept(String line, Boolean isStdErr) {
                     LogService.parse(runContext, line, new AtomicBoolean(false));
@@ -176,7 +179,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
 
             FileUtils.writeStringToFile(
                 new File(workingDirectory.resolve(".profile").toString(), "profiles.yml"),
-                    profileString.get(),
+                profileString.get(),
                 StandardCharsets.UTF_8
             );
         }
@@ -203,15 +206,15 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             "--log-format json"
         ));
 
-        if (Boolean.TRUE.equals(runContext.render(this.debug).as(Boolean.class).orElse(false))) {
+        if (runContext.render(this.debug).as(Boolean.class).orElse(false)) {
             commands.add("--debug");
         }
 
-        if (Boolean.TRUE.equals(runContext.render(this.failFast).as(Boolean.class).orElse(false))) {
+        if (runContext.render(this.failFast).as(Boolean.class).orElse(false)) {
             commands.add("--fail-fast");
         }
 
-        if (Boolean.TRUE.equals(runContext.render(this.warnError).as(Boolean.class).orElse(false))) {
+        if (runContext.render(this.warnError).as(Boolean.class).orElse(false)) {
             commands.add("--warn-error");
         }
 
@@ -229,18 +232,20 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     protected void parseResults(RunContext runContext, Path workingDirectory, ScriptOutput scriptOutput) throws IllegalVariableEvaluationException, IOException {
         String baseDir = runContext.render(this.projectDir).as(String.class).orElse("");
 
+        File manifestFile = workingDirectory.resolve(baseDir + "target/manifest.json").toFile();
+        io.kestra.plugin.dbt.models.Manifest manifest = null;
+
+        if (manifestFile.exists()) {
+            ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestFile);
+            manifest = manifestResult.manifest();
+            scriptOutput.getOutputFiles().put("manifest.json", manifestResult.uri());
+        }
+
         File runResults = workingDirectory.resolve(baseDir + "target/run_results.json").toFile();
 
         if (runContext.render(this.parseRunResults).as(Boolean.class).orElse(true) && runResults.exists()) {
-            URI results = ResultParser.parseRunResult(runContext, runResults);
+            URI results = ResultParser.parseRunResult(runContext, runResults, manifest);
             scriptOutput.getOutputFiles().put("run_results.json", results);
-        }
-
-        File manifestFile = workingDirectory.resolve(baseDir + "target/manifest.json").toFile();
-
-        if (manifestFile.exists()) {
-            URI manifest = ResultParser.parseManifest(runContext, manifestFile);
-            scriptOutput.getOutputFiles().put("manifest.json", manifest);
         }
     }
 }

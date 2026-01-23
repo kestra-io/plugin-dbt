@@ -20,6 +20,8 @@ import io.kestra.core.storages.kv.KVStore;
 import io.kestra.core.storages.kv.KVValue;
 import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.plugin.dbt.ResultParser;
+import io.kestra.plugin.dbt.RunContextUtils;
+import io.kestra.plugin.dbt.models.Manifest;
 import io.kestra.plugin.scripts.exec.AbstractExecScript;
 import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
@@ -302,7 +304,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
     }
 )
 public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Output> {
-    private static final ObjectMapper MAPPER = JacksonMapper.ofYaml();
     private static final String CORE_IMAGE = "ghcr.io/kestra-io/dbt";
     private static final String FUSION_IMAGE = "ghcr.io/kestra-io/dbt-fusion";
 
@@ -400,7 +401,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-
+        RunContextUtils.ensureSecretKey(runContext);
         var logger = runContext.logger();
 
         KVStore storeManifestKvStore = null;
@@ -408,11 +409,15 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
         // Check/fail if a KV store exists with given namespace
         if (this.getStoreManifest() != null) {
-            storeManifestKvStore = runContext.namespaceKv(runContext.render(this.getStoreManifest().getNamespace()).as(String.class).orElseThrow());
+            storeManifestKvStore = runContext.namespaceKv(
+                runContext.render(this.getStoreManifest().getNamespace())
+                    .as(String.class)
+                    .orElseThrow()
+            );
         }
 
         CommandsWrapper commandsWrapper = this.commands(runContext)
-            .withEnableOutputDirectory(true) // force the output dir, so we can get the run_results.json and manifest.json files on each task runners
+            .withEnableOutputDirectory(true)
             .withLogConsumer(new AbstractLogConsumer() {
                 @Override
                 public void accept(String line, Boolean isStdErr, Instant instant) {
@@ -426,11 +431,17 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
             });
 
         var rProjectDir = runContext.render(projectDir).as(String.class);
-        Path projectWorkingDirectory = rProjectDir.map(s -> commandsWrapper.getWorkingDirectory().resolve(s)).orElseGet(commandsWrapper::getWorkingDirectory);
+        Path projectWorkingDirectory = rProjectDir
+            .map(s -> commandsWrapper.getWorkingDirectory().resolve(s))
+            .orElseGet(commandsWrapper::getWorkingDirectory);
+
+        logger.info("dbt project working directory: {}", projectWorkingDirectory);
 
         // Load manifest from KV store
         if (this.getLoadManifest() != null) {
-            KVStore loadManifestKvStore = runContext.namespaceKv(runContext.render(this.getLoadManifest().getNamespace()).as(String.class).orElseThrow());
+            KVStore loadManifestKvStore = runContext.namespaceKv(
+                runContext.render(this.getLoadManifest().getNamespace()).as(String.class).orElseThrow()
+            );
             fetchAndStoreManifestIfExists(runContext, loadManifestKvStore, projectWorkingDirectory);
         }
 
@@ -438,19 +449,27 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         if (profilesString != null && !profilesString.isEmpty()) {
             var profileFile = new File(commandsWrapper.getWorkingDirectory().toString(), "profiles.yml");
             if (profileFile.exists()) {
-                logger.info("A 'profiles.yml' file already exist in the task working directory, it will be overridden.");
+                logger.info("A 'profiles.yml' file already exists in the task working directory; it will be overridden.");
             }
-
-            FileUtils.writeStringToFile(
-                profileFile,
-                profilesString,
-                StandardCharsets.UTF_8
-            );
+            FileUtils.writeStringToFile(profileFile, profilesString, StandardCharsets.UTF_8);
         }
 
         var rCommands = runContext.render(this.commands).asList(String.class);
 
         LogFormat rLogFormat = runContext.render(this.logFormat).as(LogFormat.class).orElseThrow();
+
+        // Strict minimum: force dbt to write artifacts in ./target (and logs in ./logs) deterministically.
+        // Some dbt variants (e.g., fusion) don't support --target-path, so only append it when supported.
+        final String targetPathArg = " --target-path target";
+        final String logPathArg = " --log-path logs";
+        boolean supportsTargetPath = runContext.render(this.engine)
+            .as(Engine.class)
+            .orElse(Engine.CORE) != Engine.FUSION;
+        String resolvedImage = runContext.render(this.containerImage).as(String.class).orElse(null);
+        if (resolvedImage != null && !resolvedImage.isBlank() && !CORE_IMAGE.equals(resolvedImage)) {
+            supportsTargetPath = false;
+        }
+        final boolean finalSupportsTargetPath = supportsTargetPath;
 
         ScriptOutput runResults;
         try {
@@ -465,13 +484,26 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                 .withCommands(Property.ofValue(
                     rCommands.stream()
                         .map(command -> {
-                            if (command.startsWith("dbt") && rProjectDir.orElse(null) != null && !command.contains("--project-dir")) {
+                            if (!command.startsWith("dbt")) {
+                                return command;
+                            }
+
+                            if (rProjectDir.orElse(null) != null && !command.contains("--project-dir")) {
                                 command = command.concat(" --project-dir " + rProjectDir.get());
                             }
 
-                            if (command.startsWith("dbt") && !LogFormat.NONE.equals(rLogFormat)) {
-                                return command.concat(" --log-format " + rLogFormat.toString().toLowerCase());
+                            if (!LogFormat.NONE.equals(rLogFormat) && !command.contains("--log-format")) {
+                                command = command.concat(" --log-format " + rLogFormat.toString().toLowerCase());
                             }
+
+                            if (finalSupportsTargetPath && !command.contains("--target-path")) {
+                                command = command.concat(targetPathArg);
+                            }
+
+                            if (!command.contains("--log-path")) {
+                                command = command.concat(logPathArg);
+                            }
+
                             return command;
                         })
                         .toList())
@@ -503,20 +535,30 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     }
 
     private void parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore) throws IllegalVariableEvaluationException, IOException {
-        if (runContext.render(this.parseRunResults).as(Boolean.class).orElse(Boolean.TRUE) && projectWorkingDirectory.resolve("target/run_results.json").toFile().exists()) {
-            URI results = ResultParser.parseRunResult(runContext, projectWorkingDirectory.resolve("target/run_results.json").toFile());
-            run.getOutputFiles().put("run_results.json", results);
-        }
-
         File manifestFile = projectWorkingDirectory.resolve("target/manifest.json").toFile();
-        if (manifestFile.exists()) {
-            if (this.getStoreManifest() != null) {
+        Manifest manifest = null;
+        if (!manifestFile.exists()) {
+            runContext.logger().warn("dbt manifest not found at {} (assets will NOT be emitted)", manifestFile.getAbsolutePath());
+        } else {
+            runContext.logger().info("dbt manifest found at {}", manifestFile.getAbsolutePath());
+            if (this.getStoreManifest() != null && storeManifestKvStore != null) {
                 final String key = runContext.render(this.getStoreManifest().getKey()).as(String.class).orElseThrow();
                 storeManifestKvStore.put(key, new KVValueAndMetadata(null, JacksonMapper.toObject(Files.readString(manifestFile.toPath()))));
             }
 
-            URI manifest = ResultParser.parseManifest(runContext, manifestFile);
-            run.getOutputFiles().put("manifest.json", manifest);
+            ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestFile);
+            runContext.logger().info("Manifest parse done. uri={}, metadata={}, nodes={}",
+                manifestResult.uri(),
+                manifestResult.manifest() != null ? manifestResult.manifest().getMetadata().size() : -1,
+                manifestResult.manifest() != null ? manifestResult.manifest().getNodes().size() : -1
+            );
+            manifest = manifestResult.manifest();
+            run.getOutputFiles().put("manifest.json", manifestResult.uri());
+        }
+
+        if (runContext.render(this.parseRunResults).as(Boolean.class).orElse(Boolean.TRUE) && projectWorkingDirectory.resolve("target/run_results.json").toFile().exists()) {
+            URI results = ResultParser.parseRunResult(runContext, projectWorkingDirectory.resolve("target/run_results.json").toFile(), manifest);
+            run.getOutputFiles().put("run_results.json", results);
         }
     }
 
