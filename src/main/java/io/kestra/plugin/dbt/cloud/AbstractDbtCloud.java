@@ -78,7 +78,7 @@ public abstract class AbstractDbtCloud extends Task {
         var rInitialDelay = runContext.render(this.initialDelayMs).as(Long.class).orElse(1000L);
 
         try (var client = new HttpClient(runContext, options)) {
-            return new RetryUtils().<HttpResponse<RES>, HttpClientException>of(
+            return RetryUtils.<HttpResponse<RES>, HttpClientException>of(
                 Exponential.builder()
                     .delayFactor(2.0)
                     .interval(Duration.ofMillis(rInitialDelay))
