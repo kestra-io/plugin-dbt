@@ -2,7 +2,7 @@ group: io.kestra.plugin.dbt.cli
 name: "cli"
 title: "Dbt CLI"
 description: "Tasks that run dbt via the CLI for building, testing, and managing projects."
-body: "Wraps dbt commands (build, run, test, compile, seed, snapshot, deps, etc.) using container or custom task runners, letting you provide project directories, a dbt binary path, profiles, and environment variables. Supports fail-fast, warn-error, run-result parsing, and storing artifacts for downstream steps."
+body: "Wraps dbt commands (build, run, test, compile, seed, snapshot, deps, etc.) using container or custom task runners so you can orchestrate dbt projects alongside the rest of your Kestra pipeline—refresh models before downstream loads, validate data, or publish docs. Lets you provide project directories, a dbt binary path, profiles, and environment variables. Supports fail-fast, warn-error, run-result parsing, and storing artifacts for downstream steps."
 videos: []
 createdBy: "Kestra Core Team"
 managedBy: "Kestra Core Team"

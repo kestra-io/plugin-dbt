@@ -51,7 +51,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @NoArgsConstructor
 @Schema(
     title = "Run dbt commands via CLI",
-    description = "Executes dbt CLI commands in the working directory using a configurable runner or container image. Adds `--project-dir` and `--log-format` to dbt commands when applicable, parses run results, and can persist or reload `manifest.json` from the KV Store."
+    description = "Executes dbt CLI commands in the working directory using a configurable runner or container image so you can orchestrate dbt projects inside a Kestra flow (e.g., rebuild models before downstream loads or data quality checks). Adds `--project-dir` and `--log-format` to dbt commands when applicable, parses run results, and can persist or reload `manifest.json` from the KV Store."
 )
 @Plugin(
     examples = {
