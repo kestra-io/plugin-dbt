@@ -30,10 +30,8 @@ import java.util.Map;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Trigger a dbt cloud job to run.",
-    description = "Use this task to kick off a run for a job. When this endpoint returns a successful response, a " +
-        "new run will be enqueued for the account. If you activate the `wait` option, it will wait for the job to be ended " +
-        "and will display all the log and dynamic tasks."
+    title = "Start a dbt Cloud job run",
+    description = "Triggers a dbt Cloud job via API. Optionally waits for completion to stream logs, surface dynamic steps, and collect run results; wait defaults to true with 5s polling and a 60m cap."
 )
 @Plugin(
     examples = {
@@ -56,86 +54,99 @@ import java.util.Map;
 public class TriggerRun extends AbstractDbtCloud implements RunnableTask<TriggerRun.Output> {
 
     @Schema(
-        title = "Numeric ID of the job."
+        title = "Job ID",
+        description = "Numeric dbt Cloud job identifier to trigger."
     )
     @NotNull
     Property<String> jobId;
 
     @Schema(
-        title = "A text description of the reason for running this job."
+        title = "Run cause",
+        description = "Reason passed to dbt Cloud. Defaults to \"Triggered by Kestra.\""
     )
     @Builder.Default
     @NotNull
     Property<String> cause = Property.ofValue("Triggered by Kestra.");
 
     @Schema(
-        title = "The git SHA to check out before running this job."
+        title = "Git SHA override",
+        description = "Specific commit to checkout before the run."
     )
     Property<String> gitSha;
 
     @Schema(
-        title = "The git branch to check out before running this job."
+        title = "Git branch override",
+        description = "Branch to checkout when triggering the job."
     )
     Property<String> gitBranch;
 
     @Schema(
-        title = "Override the destination schema in the configured target for this job."
+        title = "Schema override",
+        description = "Destination schema to use instead of the job target default."
     )
     Property<String> schemaOverride;
 
     @Schema(
-        title = "Override the version of dbt used to run this job."
+        title = "dbt version override",
+        description = "dbt version string to force for this run."
     )
     Property<String> dbtVersionOverride;
 
     @Schema(
-        title = "Override the number of threads used to run this job."
+        title = "Threads override",
+        description = "Thread count for the run."
     )
     Property<String> threadsOverride;
 
     @Schema(
-        title = "Override the target.name context variable used when running this job."
+        title = "Target name override",
+        description = "Value for the `target.name` context variable."
     )
     Property<String> targetNameOverride;
 
     @Schema(
-        title = "Override whether or not this job generates docs."
+        title = "Generate docs override",
+        description = "Whether the run builds docs even if the job is configured otherwise."
     )
     Property<Boolean> generateDocsOverride;
 
     @Schema(
-        title = "Override the timeout in seconds for this job."
+        title = "Timeout override",
+        description = "Job timeout in seconds for this run."
     )
     Property<Integer> timeoutSecondsOverride;
 
     @Schema(
-        title = "Override the list of steps for this job."
+        title = "Steps override",
+        description = "Custom steps list executed instead of the job defaults."
     )
     Property<List<String>> stepsOverride;
 
     @Schema(
-        title = "Wait for the end of the run.",
-        description = "Allowing to capture job status & logs."
+        title = "Wait for completion",
+        description = "If true (default), polls dbt Cloud until the run ends and streams logs and artifacts."
     )
     @Builder.Default
     Property<Boolean> wait = Property.ofValue(Boolean.TRUE);
 
     @Schema(
-            title = "Specify frequency for job state check API calls."
+            title = "Poll frequency",
+            description = "Interval between status checks when waiting. Default 5s."
     )
     @Builder.Default
     Property<Duration> pollFrequency = Property.ofValue(Duration.ofSeconds(5));
 
     @Schema(
-        title = "The maximum total wait duration."
+        title = "Max wait duration",
+        description = "Ceiling for waiting on job completion. Default 60m."
     )
     @Builder.Default
     Property<Duration> maxDuration = Property.ofValue(Duration.ofMinutes(60));
 
     @Builder.Default
     @Schema(
-        title = "Parse run result.",
-        description = "Parsing run result to display duration of each task inside dbt."
+        title = "Parse run results",
+        description = "If true (default), parses dbt run results to expose node durations and warnings."
     )
     protected Property<Boolean> parseRunResults = Property.ofValue(Boolean.TRUE);
 
@@ -207,17 +218,20 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
         @Schema(
-            title = "The run ID."
+            title = "Run ID",
+            description = "dbt Cloud run identifier returned by the trigger call."
         )
         private Long runId;
 
         @Schema(
-            title = "URI of a run result."
+            title = "Run results URI",
+            description = "Internal storage URI for `run_results.json`, when available."
         )
         private URI runResults;
 
         @Schema(
-            title = "URI of a manifest."
+            title = "Manifest URI",
+            description = "Internal storage URI for `manifest.json`, when available."
         )
         private URI manifest;
     }

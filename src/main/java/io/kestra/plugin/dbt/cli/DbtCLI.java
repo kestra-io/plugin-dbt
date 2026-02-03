@@ -50,7 +50,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Execute dbt CLI commands."
+    title = "Run dbt commands via CLI",
+    description = "Executes dbt CLI commands in the working directory using a configurable runner or container image so you can orchestrate dbt projects inside a Kestra flow (e.g., rebuild models before downstream loads or data quality checks). Adds `--project-dir` and `--log-format` to dbt commands when applicable, parses run results, and can persist or reload `manifest.json` from the KV Store."
 )
 @Plugin(
     examples = {
@@ -306,35 +307,34 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     private static final String FUSION_IMAGE = "ghcr.io/kestra-io/dbt-fusion";
 
     @Schema(
-        title = "The list of dbt CLI commands to run."
+        title = "dbt commands to execute",
+        description = "Ordered CLI commands. Lines starting with `dbt` inherit `--project-dir` when `projectDir` is set and append `--log-format` unless `logFormat` is `NONE`."
     )
     @NotNull
     private Property<List<String>> commands;
 
     @Schema(
-        title = "The `profiles.yml` file content.",
-        description = "If a `profile.yml` file already exists in the current working directory, it will be overridden."
+        title = "Inline dbt profiles.yml",
+        description = "Content written to `profiles.yml` in the working directory, overriding any existing file."
     )
     private Property<String> profiles;
 
     @Schema(
-        title = "The dbt project directory, if it's not the working directory.",
-        description = "To use it, also use this directory in the `--project-dir` flag on the dbt CLI commands."
+        title = "dbt project directory",
+        description = "Relative path to the project when it differs from the working directory. Added automatically to dbt commands as `--project-dir`."
     )
     private Property<String> projectDir;
 
     @Builder.Default
     @Schema(
-        title = "Parse run result.",
-        description = "Parsing run result to display duration of each task inside dbt."
+        title = "Parse run results",
+        description = "If true (default), reads `target/run_results.json` to expose durations and warnings in task outputs."
     )
     protected Property<Boolean> parseRunResults = Property.ofValue(Boolean.TRUE);
 
     @Schema(
-        title = "The task runner to use.",
-        description = """
-            Task runners are provided by plugins, each have their own properties.
-            If you change from the default one, be careful to also configure the entrypoint to an empty list if needed."""
+        title = "Task runner",
+        description = "Runner configuration for executing commands. Default is Docker with an empty entrypoint; adjust entrypoint when switching runners."
     )
     @PluginProperty
     @Builder.Default
@@ -348,42 +348,27 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     protected Property<String> containerImage = Property.ofValue(CORE_IMAGE);
 
     @Schema(
-        title = "Store manifest.",
-        description = "Use this field to persist your manifest.json in the KV Store."
+        title = "Store manifest",
+        description = "Persists `target/manifest.json` to the KV Store under the provided namespace/key after the run completes."
     )
     protected KvStoreManifest storeManifest;
 
     @Schema(
-        title = "Load manifest.",
-        description = """
-            Use this field to retrieve an existing manifest.json in the KV Store and put it in the inputFiles.
-            The manifest.json will be put under ./target/manifest.json or under ./projectDir/target/manifest.json if you specify a projectDir.
-            """
+        title = "Load manifest",
+        description = "Fetches an existing `manifest.json` from the KV Store and writes it to `target/manifest.json` (under `projectDir` when set) before running commands; logs a warning if absent."
     )
     protected KvStoreManifest loadManifest;
 
     @Schema(
-        title = "Log format.",
-        description = """
-            The log format is JSON by default. The format will be applied after all commands like this --log-format <logFormat>.
-            The possible values are JSON, DEBUG, TEXT. You can set it to NONE to avoid adding this argument to your commands.
-            """
+        title = "dbt log format",
+        description = "Adds `--log-format <value>` to dbt commands unless set to `NONE`. Default JSON; supports JSON, DEBUG, TEXT, or NONE."
     )
     @Builder.Default
     private Property<LogFormat> logFormat = Property.ofValue(LogFormat.JSON);
 
     @Schema(
         title = "dbt engine",
-        description = """
-            Selects the default container image when no explicit image is provided.
-
-            Image resolution priority:
-                - If `taskRunner.image` is set, that image is used.
-                - Otherwise, if `containerImage` is set on the task, it is used.
-                - Otherwise, the `engine` determines the default image:
-                   - CORE   → ghcr.io/kestra-io/dbt
-                   - FUSION → ghcr.io/kestra-io/dbt-fusion
-            """
+        description = "Selects the fallback image when none is set on the task or runner: CORE → `ghcr.io/kestra-io/dbt` (default), FUSION → `ghcr.io/kestra-io/dbt-fusion`."
     )
     @Builder.Default
     private Property<Engine> engine = Property.ofValue(Engine.CORE);

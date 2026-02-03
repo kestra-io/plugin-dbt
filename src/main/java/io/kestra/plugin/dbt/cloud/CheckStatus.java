@@ -42,7 +42,8 @@ import static java.lang.Math.max;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Check the status of a dbt Cloud job."
+    title = "Monitor a dbt Cloud run",
+    description = "Polls a dbt Cloud run until it ends, streaming step logs and downloading artifacts. Fails on non-successful statuses; defaults to 5s polling and a 60m timeout, and can parse run results for node timings."
 )
 @Plugin(
     examples = {
@@ -70,28 +71,31 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     );
 
     @Schema(
-            title = "The job run ID to check the status for."
+            title = "Run ID",
+            description = "dbt Cloud run identifier to monitor."
     )
     @NotNull
     Property<String> runId;
 
 
     @Schema(
-            title = "Specify how often the task should poll for the job status."
+            title = "Poll frequency",
+            description = "Interval between status checks while waiting. Default 5s."
     )
     @Builder.Default
     Property<Duration> pollFrequency = Property.ofValue(Duration.ofSeconds(5));
 
     @Schema(
-            title = "The maximum duration the task should poll for the job completion."
+            title = "Max wait duration",
+            description = "Upper bound for waiting on completion. Default 60m."
     )
     @Builder.Default
     Property<Duration> maxDuration = Property.ofValue(Duration.ofMinutes(60));
 
     @Builder.Default
     @Schema(
-            title = "Parse run result.",
-            description = "Whether to parse the run result to display the duration of each dbt node in the Gantt view."
+            title = "Parse run results",
+            description = "If true (default), parses `run_results.json` to expose node timings; otherwise uploads the artifact as-is."
     )
     protected Property<Boolean> parseRunResults = Property.ofValue(Boolean.TRUE);
 
@@ -232,12 +236,14 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
         @Schema(
-                title = "URI of the run result"
+                title = "Run results URI",
+                description = "Internal storage URI for the downloaded `run_results.json`, when present."
         )
         private URI runResults;
 
         @Schema(
-                title = "URI of a manifest"
+                title = "Manifest URI",
+                description = "Internal storage URI for the downloaded `manifest.json`, when present."
         )
         private URI manifest;
     }
