@@ -76,17 +76,7 @@ class BuildTest {
             )))
             .build();
 
-        RunContext runContext = runContextFactory.of(
-            TestsUtils.mockFlow(),
-            setup,
-            TestsUtils.mockExecution(TestsUtils.mockFlow(), Map.of()),
-            TestsUtils.mockTaskRun(
-                TestsUtils.mockExecution(TestsUtils.mockFlow(), Map.of()),
-                setup
-            ),
-            false,
-            secureVariableRendererFactory.createOrGet()
-        );
+        RunContext runContext = runContextFactory.of();
 
         copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), runContext.workingDir().path(true));
 
