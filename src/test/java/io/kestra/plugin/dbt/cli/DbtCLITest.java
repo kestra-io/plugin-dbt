@@ -145,7 +145,16 @@ class DbtCLITest {
             )
             .build();
 
-        RunContext runContextLoad = TestsUtils.mockRunContext(runContextFactory, loadManifest, Map.of());
+        RunContext runContextLoad = runContextFactory.of(
+            TestsUtils.mockFlow(),
+            loadManifest,
+            TestsUtils.mockExecution(TestsUtils.mockFlow(), Map.of()),
+            TestsUtils.mockTaskRun(
+                TestsUtils.mockExecution(TestsUtils.mockFlow(), Map.of()),
+                loadManifest
+            ),
+            false
+        );
 
         Path workingDir = runContextLoad.workingDir().path(true);
         copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()),
