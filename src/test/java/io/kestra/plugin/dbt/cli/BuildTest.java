@@ -1,10 +1,8 @@
 package io.kestra.plugin.dbt.cli;
 
 import io.kestra.core.models.property.Property;
-import io.kestra.core.runners.DefaultRunContext;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
-import io.kestra.core.runners.SecureVariableRendererFactory;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
 import io.kestra.plugin.core.runner.Process;
