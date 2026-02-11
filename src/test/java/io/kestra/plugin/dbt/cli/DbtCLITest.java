@@ -5,7 +5,6 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTaskException;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
-import io.kestra.core.storages.StorageInterface;
 import io.kestra.core.storages.kv.KVStore;
 import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.core.utils.IdUtils;
@@ -34,9 +33,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @KestraTest
 class DbtCLITest {
-    @Inject
-    StorageInterface storageInterface;
-
     @Inject
     private RunContextFactory runContextFactory;
 
