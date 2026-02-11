@@ -48,10 +48,6 @@ class BuildTest {
     @Inject
     private RunContextFactory runContextFactory;
 
-    @Inject
-    SecureVariableRendererFactory secureVariableRendererFactory;
-
-
     public void copyFolder(Path src, Path dest) throws IOException {
         try (Stream<Path> stream = Files.walk(src)) {
             stream
@@ -76,7 +72,7 @@ class BuildTest {
             )))
             .build();
 
-        RunContext runContext = runContextFactory.of();
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, setup, Map.of());
 
         copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), runContext.workingDir().path(true));
 

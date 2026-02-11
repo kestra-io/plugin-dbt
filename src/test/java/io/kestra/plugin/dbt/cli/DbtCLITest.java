@@ -35,9 +35,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 @KestraTest
 class DbtCLITest {
     @Inject
-    StorageInterface storageInterface;
-
-    @Inject
     private RunContextFactory runContextFactory;
 
     private static final String NAMESPACE_ID = "io.kestra.plugin.dbt.cli.dbtclitest";
@@ -85,16 +82,7 @@ class DbtCLITest {
             .commands(Property.ofValue(List.of("dbt build")))
             .build();
 
-        RunContext runContext = runContextFactory.of(
-            TestsUtils.mockFlow(),
-            execute,
-            TestsUtils.mockExecution(TestsUtils.mockFlow(), Map.of()),
-            TestsUtils.mockTaskRun(
-                TestsUtils.mockExecution(TestsUtils.mockFlow(), Map.of()),
-                execute
-            ),
-            false
-        );
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
 
 
         Path workingDir = runContext.workingDir().path(true);
