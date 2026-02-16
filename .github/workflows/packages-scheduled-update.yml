@@ -1,9 +1,15 @@
-name: Scheduled Packages Update
+name: Update All Packages
 
 on:
-  schedule:
-    - cron: '0 9 * * MON'
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to use for all packages'
+        required: true
+      dbt_version:
+        description: 'Pin dbt version to install in built images (optional). Example: 1.9.1'
+        required: false
+        default: ''
 
 jobs:
   list-dockerfiles:
@@ -21,6 +27,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      DBT_VERSION: ${{ github.event.inputs.dbt_version }}
     strategy:
       matrix:
         image: ${{ fromJson(needs.list-dockerfiles.outputs.matrix) }}
@@ -41,10 +49,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: image-tag  # example output: "ghcr.io/kestra-io/dbt-snowflake:latest"
+      - id: image-tag  # example output: "ghcr.io/kestra-io/dbt-snowflake:<image_tag>"
         run: |
           export IMAGE=$(basename ${{ matrix.image }} .Dockerfile)
-          echo "image_url=ghcr.io/kestra-io/$IMAGE:latest" >> $GITHUB_OUTPUT
+          IMAGE_URL="ghcr.io/kestra-io/$IMAGE:${{ inputs.image_tag }}"
+          TAGS="$IMAGE_URL"
+          # If DBT_VERSION is provided, add an additional dbt-tag
+          if [ -n "$DBT_VERSION" ]; then
+            DBT_TAG="ghcr.io/kestra-io/$IMAGE:dbt-$DBT_VERSION"
+            TAGS="$TAGS,$DBT_TAG"
+          fi
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
           echo "file=dockerfiles/${{ matrix.image }}" >> $GITHUB_OUTPUT
 
       - name: Build and push Docker image
@@ -53,6 +68,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ steps.image-tag.outputs.image_url }}
+          build-args: DBT_VERSION=${{ env.DBT_VERSION }}
+          tags: ${{ steps.image-tag.outputs.tags }}
           file: ${{ steps.image-tag.outputs.file }}
           platforms: linux/amd64,linux/arm64
