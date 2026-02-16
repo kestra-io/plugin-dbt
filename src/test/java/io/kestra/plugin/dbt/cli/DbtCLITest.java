@@ -78,7 +78,7 @@ class DbtCLITest {
             )
             .logFormat(Property.ofValue(logFormat))
             .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
-            .commands(Property.ofValue(List.of("dbt build")))
+            .commands(Property.ofValue(List.of("dbt build --select zipcode")))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());

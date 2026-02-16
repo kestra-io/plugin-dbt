@@ -53,6 +53,8 @@ public class RunResult {
                     return State.Type.FAILED;
                 case "warn":
                     return State.Type.WARNING;
+                case "skipped":
+                    return State.Type.SKIPPED;
                 case "success":
                 case "pass":
                     return State.Type.SUCCESS;
@@ -75,4 +77,3 @@ public class RunResult {
         Instant completedAt;
     }
 }
-
