@@ -1,0 +1,116 @@
+id: dbt_cli_assets_kv_test
+namespace: company.team
+
+inputs:
+  - id: kv_namespace
+    type: STRING
+    defaults: "{{ flow.namespace }}"
+  - id: kv_key
+    type: STRING
+    defaults: "manifest.json"
+
+tasks:
+  - id: wd
+    type: io.kestra.plugin.core.flow.WorkingDirectory
+    tasks:
+      # 1) Create a minimal dbt project in the working directory
+      - id: create_project
+        type: io.kestra.plugin.core.storage.LocalFiles
+        inputs:
+          dbt_project.yml: |
+            name: 'my_dbt_project'
+            version: '1.0.0'
+            config-version: 2
+
+            profile: 'my_dbt_project'
+
+            model-paths: ["models"]
+            analysis-paths: ["analyses"]
+            test-paths: ["tests"]
+            seed-paths: ["seeds"]
+            macro-paths: ["macros"]
+            snapshot-paths: ["snapshots"]
+
+            target-path: "target"
+            clean-targets:
+              - "target"
+              - "dbt_packages"
+
+            models:
+              my_dbt_project:
+                +materialized: table
+          packages.yml: |
+            packages: []
+          models/example.sql: |
+            select 1 as id
+          models/example_two.sql: |
+            select 2 as id
+          models/example_three.sql: |
+            select 3 as id
+
+      # 2) Run #1: dbt deps + dbt build (generates manifest + run_results)
+      #    and store the manifest in the KV store
+      - id: dbt_build_and_store_manifest
+        type: io.kestra.plugin.dbt.cli.DbtCLI
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+          delete: true
+        containerImage: ghcr.io/kestra-io/dbt-duckdb:latest
+
+        # IMPORTANT: this test creates the manifest, parses it (with assets), and pushes it to KV
+        storeManifest:
+          namespace: "{{ inputs.kv_namespace }}"
+          key: "{{ inputs.kv_key }}"
+
+        commands:
+          - dbt deps
+          - dbt build --no-partial-parse
+
+        profiles: |
+          my_dbt_project:
+            outputs:
+              dev:
+                type: duckdb
+                path: ":memory:"
+                threads: 4
+            target: dev
+
+      # 3) Run #2: simulate a "defer/state" run (or just a run) by reloading
+      #    the manifest from KV before running dbt again
+      - id: dbt_build_with_loaded_manifest
+        type: io.kestra.plugin.dbt.cli.DbtCLI
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+          delete: true
+        containerImage: ghcr.io/kestra-io/dbt-duckdb:latest
+
+        loadManifest:
+          namespace: "{{ inputs.kv_namespace }}"
+          key: "{{ inputs.kv_key }}"
+
+        # (optional) shows it works with flags too; adapt as needed
+        commands:
+          - dbt build --no-partial-parse
+
+        profiles: |
+          my_dbt_project:
+            outputs:
+              dev:
+                type: duckdb
+                path: ":memory:"
+                threads: 4
+            target: dev
+
+outputs:
+  - id: first_manifest_uri
+    type: STRING
+    value: "{{ outputs.dbt_build_and_store_manifest.outputFiles['manifest.json'] }}"
+  - id: first_run_results_uri
+    type: STRING
+    value: "{{ outputs.dbt_build_and_store_manifest.outputFiles['run_results.json'] }}"
+  - id: second_manifest_uri
+    type: STRING
+    value: "{{ outputs.dbt_build_with_loaded_manifest.outputFiles['manifest.json'] }}"
+  - id: second_run_results_uri
+    type: STRING
+    value: "{{ outputs.dbt_build_with_loaded_manifest.outputFiles['run_results.json'] }}"
