@@ -16,6 +16,7 @@ import io.micronaut.http.annotation.Post;
 import io.micronaut.runtime.server.EmbeddedServer;
 import jakarta.inject.Inject;
 import org.apache.commons.io.IOUtils;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -46,7 +47,13 @@ class SerializationTest {
     @BeforeEach
     protected void init() throws IOException, URISyntaxException {
         repositoryLoader.load(Objects.requireNonNull(SerializationTest.class.getClassLoader().getResource("flows")));
+        this.runner.setSchedulerEnabled(false);
         this.runner.run();
+    }
+
+    @AfterEach
+    protected void destroy() throws Exception {
+        this.runner.close();
     }
 
     @Test
