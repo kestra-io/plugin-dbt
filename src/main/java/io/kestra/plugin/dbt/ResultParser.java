@@ -149,11 +149,7 @@ public abstract class ResultParser {
             return null;
         }
 
-        List<AssetIdentifier> inputs = modelAsset.dependsOn().stream()
-            .map(modelAssets::get)
-            .filter(Objects::nonNull)
-            .map(dep -> new AssetIdentifier(null, null, dep.assetId(), TABLE_ASSET_TYPE))
-            .toList();
+        List<AssetIdentifier> inputs = inputIdentifiers(modelAsset, modelAssets);
 
         return new AssetsInOut(
             inputs,
@@ -171,9 +167,10 @@ public abstract class ResultParser {
         runContext.logger().info("dbt assets extracted from manifest: {}", modelAssets.size());
 
         for (ModelAsset asset : modelAssets.values()) {
+            List<AssetIdentifier> inputs = inputIdentifiers(asset, modelAssets);
             try {
                 runContext.assets().emit(new AssetEmit(
-                    List.of(),
+                    inputs,
                     List.of(Custom.builder()
                         .id(asset.assetId())
                         .type(TABLE_ASSET_TYPE)
@@ -187,6 +184,18 @@ public abstract class ResultParser {
                 runContext.logger().warn("Unable to emit dbt asset '{}'", asset.assetId(), e);
             }
         }
+    }
+
+    private static List<AssetIdentifier> inputIdentifiers(ModelAsset modelAsset, Map<String, ModelAsset> modelAssets) {
+        if (modelAsset.dependsOn() == null || modelAsset.dependsOn().isEmpty()) {
+            return List.of();
+        }
+
+        return modelAsset.dependsOn().stream()
+            .map(modelAssets::get)
+            .filter(Objects::nonNull)
+            .map(dep -> new AssetIdentifier(null, null, dep.assetId(), TABLE_ASSET_TYPE))
+            .toList();
     }
 
     private static Map<String, ModelAsset> extractModelAssets(Manifest manifest) {
