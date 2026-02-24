@@ -1,6 +1,5 @@
 package io.kestra.plugin.dbt.cli;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.exceptions.ResourceExpiredException;
 import io.kestra.core.models.annotations.Example;
@@ -20,7 +19,6 @@ import io.kestra.core.storages.kv.KVStore;
 import io.kestra.core.storages.kv.KVValue;
 import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.plugin.dbt.ResultParser;
-import io.kestra.plugin.dbt.RunContextUtils;
 import io.kestra.plugin.dbt.models.Manifest;
 import io.kestra.plugin.scripts.exec.AbstractExecScript;
 import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
@@ -401,7 +399,6 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        RunContextUtils.ensureSecretKey(runContext);
         var logger = runContext.logger();
 
         KVStore storeManifestKvStore = null;
@@ -417,7 +414,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         }
 
         CommandsWrapper commandsWrapper = this.commands(runContext)
-            .withEnableOutputDirectory(true)
+            .withEnableOutputDirectory(true) // force the output dir, so we can get the run_results.json and manifest.json files on each task runners
             .withLogConsumer(new AbstractLogConsumer() {
                 @Override
                 public void accept(String line, Boolean isStdErr, Instant instant) {

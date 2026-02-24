@@ -1,11 +1,8 @@
 package io.kestra.plugin.dbt.cli;
 
-import io.kestra.core.models.executions.Execution;
-import io.kestra.core.models.executions.TaskRun;
-import io.kestra.core.models.flows.Flow;
+import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
-import io.kestra.core.models.tasks.Task;
 import io.kestra.core.models.tasks.RunnableTaskException;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
@@ -15,7 +12,6 @@ import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
 import io.kestra.plugin.core.runner.Process;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
-import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
@@ -31,7 +27,6 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.stream.Stream;
 
 import static io.kestra.core.utils.Rethrow.throwConsumer;
@@ -45,26 +40,26 @@ class DbtCLITest {
     @Inject
     private RunContextFactory runContextFactory;
 
-    private static final String NAMESPACE_ID = "io.kestra.plugin.dbt.cli.dbtclitest";
+    private static final String FLOW_NAMESPACE = "{{ flow.namespace }}";
 
     private static final String MANIFEST_KEY = "manifest.json";
 
     private static final String PROFILES = """
-                    unit-kestra:
-                      outputs:
-                        dev:
-                          dataset: kestra_unit_test_us
-                          fixed_retries: 1
-                          location: US
-                          method: service-account
-                          priority: interactive
-                          project: kestra-unit-test
-                          threads: 1
-                          timeout_seconds: 300
-                          type: bigquery
-                          keyfile: sa.json
-                      target: dev
-                    """;
+        unit-kestra:
+          outputs:
+            dev:
+              dataset: kestra_unit_test_us
+              fixed_retries: 1
+              location: US
+              method: service-account
+              priority: interactive
+              project: kestra-unit-test
+              threads: 1
+              timeout_seconds: 300
+              type: bigquery
+              keyfile: sa.json
+          target: dev
+        """;
 
     public void copyFolder(Path src, Path dest) throws IOException {
         try (Stream<Path> stream = Files.walk(src)) {
@@ -86,11 +81,11 @@ class DbtCLITest {
             .profiles(Property.ofValue(PROFILES)
             )
             .logFormat(Property.ofValue(logFormat))
-            .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
+            .containerImage(Property.ofValue("ghcr.io/kestra-io/dbt-bigquery:latest"))
             .commands(Property.ofValue(List.of("dbt build --select zipcode")))
             .build();
 
-        RunContext runContext = mockRunContext(execute, Map.of());
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
 
         Path workingDir = runContext.workingDir().path(true);
         copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), workingDir);
@@ -108,17 +103,17 @@ class DbtCLITest {
             .type(DbtCLI.class.getName())
             .profiles(Property.ofValue(PROFILES)
             )
-            .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
+            .containerImage(Property.ofValue("ghcr.io/kestra-io/dbt-bigquery:latest"))
             .commands(Property.ofValue(List.of("dbt build")))
             .storeManifest(
                 DbtCLI.KvStoreManifest.builder()
                     .key(Property.ofValue(MANIFEST_KEY))
-                    .namespace(Property.ofValue(NAMESPACE_ID))
+                    .namespace(new Property<>(FLOW_NAMESPACE))
                     .build()
             )
             .build();
 
-        RunContext runContext = mockRunContext(execute, Map.of());
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
 
         Path workingDir = runContext.workingDir().path(true);
         copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), workingDir);
@@ -127,7 +122,8 @@ class DbtCLITest {
         ScriptOutput runOutput = execute.run(runContext);
 
         assertThat(runOutput.getExitCode(), is(0));
-        KVStore kvStore = runContext.namespaceKv(NAMESPACE_ID);
+        var namespace = runContext.render(FLOW_NAMESPACE);
+        KVStore kvStore = runContext.namespaceKv(namespace);
         assertThat(kvStore.get(MANIFEST_KEY).isPresent(), is(true));
         Map<String, Object> manifestValue = (Map<String, Object>) kvStore.getValue(MANIFEST_KEY).get().value();
         assertThat(((Map<String, Object>) manifestValue.get("metadata")).get("project_name"), is("unit_kestra"));
@@ -140,26 +136,27 @@ class DbtCLITest {
             .type(DbtCLI.class.getName())
             .profiles(Property.ofValue(PROFILES))
             .projectDir(Property.ofValue("unit-kestra"))
-            .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
+            .containerImage(Property.ofValue("ghcr.io/kestra-io/dbt-bigquery:latest"))
             .commands(Property.ofValue(List.of("dbt build --project-dir unit-kestra")))
             .loadManifest(
                 DbtCLI.KvStoreManifest.builder()
                     .key(Property.ofValue(MANIFEST_KEY))
-                    .namespace(Property.ofValue(NAMESPACE_ID))
+                    .namespace(new Property<>(FLOW_NAMESPACE))
                     .build()
             )
             .build();
 
-        RunContext runContextLoad = mockRunContext(loadManifest, Map.of());
+        RunContext runContextLoad = TestsUtils.mockRunContext(runContextFactory, loadManifest, Map.of());
 
         Path workingDir = runContextLoad.workingDir().path(true);
         copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()),
-            Path.of(runContextLoad.workingDir().path().toString(),"unit-kestra"));
+            Path.of(runContextLoad.workingDir().path().toString(), "unit-kestra"));
         createSaFile(workingDir);
         String manifestValue = Files.readString(Path.of(
-            Objects.requireNonNull(this.getClass().getClassLoader().getResource("manifest/manifest.json")).getPath())
+                Objects.requireNonNull(this.getClass().getClassLoader().getResource("manifest/manifest.json")).getPath())
             , StandardCharsets.UTF_8);
-        runContextLoad.namespaceKv(NAMESPACE_ID).put(MANIFEST_KEY, new KVValueAndMetadata(null, manifestValue));
+        var namespace = runContextLoad.render(FLOW_NAMESPACE);
+        runContextLoad.namespaceKv(namespace).put(MANIFEST_KEY, new KVValueAndMetadata(null, manifestValue));
 
         ScriptOutput runOutputLoad = loadManifest.run(runContextLoad);
 
@@ -179,7 +176,7 @@ class DbtCLITest {
             .loadManifest(
                 DbtCLI.KvStoreManifest.builder()
                     .key(Property.ofValue(MANIFEST_KEY))
-                    .namespace(Property.ofValue(NAMESPACE_ID))
+                    .namespace(new Property<>(FLOW_NAMESPACE))
                     .build()
             )
             .build();
@@ -189,7 +186,8 @@ class DbtCLITest {
             Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("manifest/manifest.json")).getPath()),
             StandardCharsets.UTF_8
         );
-        runContext.namespaceKv(NAMESPACE_ID).put(MANIFEST_KEY, new KVValueAndMetadata(null, manifest));
+        var namespace = runContext.render(FLOW_NAMESPACE);
+        runContext.namespaceKv(namespace).put(MANIFEST_KEY, new KVValueAndMetadata(null, manifest));
 
         var runOutput = task.run(runContext);
 
@@ -202,14 +200,14 @@ class DbtCLITest {
             .id(IdUtils.create())
             .type(DbtCLI.class.getName())
             .profiles(Property.ofValue(PROFILES))
-            .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
+            .containerImage(Property.ofValue("ghcr.io/kestra-io/dbt-bigquery:latest"))
             .commands(Property.ofValue(List.of(
                 "dbt deps",
                 "dbt run-operation emit_warning_log"
             )))
             .build();
 
-        RunContext runContext = mockRunContext(execute, Map.of());
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
 
         Path workingDir = runContext.workingDir().path(true);
         copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), workingDir);
@@ -249,7 +247,7 @@ class DbtCLITest {
             .id(IdUtils.create())
             .type(DbtCLI.class.getName())
             .profiles(Property.ofValue(PROFILES))
-            .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
+            .containerImage(Property.ofValue("ghcr.io/kestra-io/dbt-bigquery:latest"))
             .commands(Property.ofValue(List.of(
                 "dbt deps",
                 "mkdir -p models",
@@ -258,7 +256,7 @@ class DbtCLITest {
             )))
             .build();
 
-        RunContext runContext = mockRunContext(execute, Map.of());
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
 
         Path workingDir = runContext.workingDir().path(true);
         copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), workingDir);
@@ -286,7 +284,7 @@ class DbtCLITest {
             .commands(Property.ofValue(List.of("dbt --version")))
             .build();
 
-        RunContext runContext = mockRunContext(execute, Map.of());
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
         ScriptOutput runOutput = execute.run(runContext);
 
         assertThat(runOutput.getExitCode(), is(0));
@@ -303,7 +301,7 @@ class DbtCLITest {
             .profiles(Property.ofValue(PROFILES))
             .build();
 
-        var runContext = mockRunContext(task, Map.of());
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
 
         Path workingDir = runContext.workingDir().path(true);
         Path projectDir = workingDir.resolve("unit-kestra");
@@ -316,61 +314,5 @@ class DbtCLITest {
         var runOutput = task.run(runContext);
 
         assertThat(runOutput.getExitCode(), is(0));
-    }
-
-    private RunContext mockRunContext(Task task, Map<String, Object> inputs) {
-        ensureFactorySecretKey();
-        Flow flow = TestsUtils.mockFlow();
-        Execution execution = TestsUtils.mockExecution(flow, inputs, null);
-        TaskRun taskRun = TestsUtils.mockTaskRun(execution, task);
-        RunContext runContext = runContextFactory.of(flow, task, execution, taskRun, false);
-        ensureSecretKey(runContext);
-        return runContext;
-    }
-
-    private void ensureFactorySecretKey() {
-        try {
-            Class<?> type = runContextFactory.getClass();
-            java.lang.reflect.Field field = null;
-            while (type != null && field == null) {
-                try {
-                    field = type.getDeclaredField("secretKey");
-                } catch (NoSuchFieldException e) {
-                    type = type.getSuperclass();
-                }
-            }
-            if (field == null) {
-                return;
-            }
-            field.setAccessible(true);
-            if (field.get(runContextFactory) == null) {
-                field.set(runContextFactory, Optional.empty());
-            }
-        } catch (IllegalAccessException e) {
-            throw new IllegalStateException("Failed to initialize run context factory secret key", e);
-        }
-    }
-
-    private void ensureSecretKey(RunContext runContext) {
-        try {
-            Class<?> type = runContext.getClass();
-            java.lang.reflect.Field field = null;
-            while (type != null && field == null) {
-                try {
-                    field = type.getDeclaredField("secretKey");
-                } catch (NoSuchFieldException e) {
-                    type = type.getSuperclass();
-                }
-            }
-            if (field == null) {
-                return;
-            }
-            field.setAccessible(true);
-            if (field.get(runContext) == null) {
-                field.set(runContext, Optional.empty());
-            }
-        } catch (IllegalAccessException e) {
-            throw new IllegalStateException("Failed to initialize run context secret key", e);
-        }
     }
 }

@@ -13,7 +13,6 @@ import io.kestra.core.models.tasks.runners.PluginUtilsService;
 import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
-import io.kestra.plugin.dbt.RunContextUtils;
 import io.kestra.plugin.scripts.exec.AbstractExecScript;
 import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
@@ -164,7 +163,6 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
 
     @Override
     public ScriptOutput run(RunContext runContext) throws Exception {
-        RunContextUtils.ensureSecretKey(runContext);
         CommandsWrapper commandsWrapper = this.commands(runContext);
         Path workingDirectory = commandsWrapper.getWorkingDirectory();
 
