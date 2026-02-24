@@ -527,11 +527,15 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
             runContext.logger().warn("Property `loadManifest` has been used but no manifest has been found in the KV Store.");
             return;
         }
+        var value = manifestValue.get().value();
+        var manifestContent = value instanceof String manifestAsString
+            ? manifestAsString
+            : JacksonMapper.ofJson().writeValueAsString(value);
+
         var manifestFile = new File(projectWorkingDirectory.toString(), "target/manifest.json");
         FileUtils.writeStringToFile(
             manifestFile,
-            JacksonMapper.ofJson()
-                .writeValueAsString(manifestValue.get().value()),
+            manifestContent,
             StandardCharsets.UTF_8
         );
     }

@@ -9,6 +9,7 @@ import io.kestra.core.storages.kv.KVStore;
 import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
+import io.kestra.plugin.core.runner.Process;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
@@ -155,6 +156,36 @@ class DbtCLITest {
         ScriptOutput runOutputLoad = loadManifest.run(runContextLoad);
 
         assertThat(runOutputLoad.getExitCode(), is(0));
+    }
+
+    @Test
+    void run_withLoadManifestString_shouldWriteJsonObjectManifest() throws Exception {
+        var task = DbtCLI.builder()
+            .id(IdUtils.create())
+            .type(DbtCLI.class.getName())
+            .taskRunner(Process.instance())
+            .projectDir(Property.ofValue("unit-kestra"))
+            .commands(Property.ofValue(List.of(
+                "head -c 1 unit-kestra/target/manifest.json | grep -qx '{'"
+            )))
+            .loadManifest(
+                DbtCLI.KvStoreManifest.builder()
+                    .key(Property.ofValue(MANIFEST_KEY))
+                    .namespace(Property.ofValue(NAMESPACE_ID))
+                    .build()
+            )
+            .build();
+
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        var manifest = Files.readString(
+            Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("manifest/manifest.json")).getPath()),
+            StandardCharsets.UTF_8
+        );
+        runContext.namespaceKv(NAMESPACE_ID).put(MANIFEST_KEY, new KVValueAndMetadata(null, manifest));
+
+        var runOutput = task.run(runContext);
+
+        assertThat(runOutput.getExitCode(), is(0));
     }
 
     @Test
