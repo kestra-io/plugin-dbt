@@ -1,5 +1,6 @@
 package io.kestra.plugin.dbt.cli;
 
+import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTaskException;
@@ -11,16 +12,18 @@ import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
 import io.kestra.plugin.core.runner.Process;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
-import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -37,26 +40,26 @@ class DbtCLITest {
     @Inject
     private RunContextFactory runContextFactory;
 
-    private static final String NAMESPACE_ID = "io.kestra.plugin.dbt.cli.dbtclitest";
+    private static final String FLOW_NAMESPACE = "{{ flow.namespace }}";
 
     private static final String MANIFEST_KEY = "manifest.json";
 
     private static final String PROFILES = """
-                    unit-kestra:
-                      outputs:
-                        dev:
-                          dataset: kestra_unit_test_us
-                          fixed_retries: 1
-                          location: US
-                          method: service-account
-                          priority: interactive
-                          project: kestra-unit-test
-                          threads: 1
-                          timeout_seconds: 300
-                          type: bigquery
-                          keyfile: sa.json
-                      target: dev
-                    """;
+        unit-kestra:
+          outputs:
+            dev:
+              dataset: kestra_unit_test_us
+              fixed_retries: 1
+              location: US
+              method: service-account
+              priority: interactive
+              project: kestra-unit-test
+              threads: 1
+              timeout_seconds: 300
+              type: bigquery
+              keyfile: sa.json
+          target: dev
+        """;
 
     public void copyFolder(Path src, Path dest) throws IOException {
         try (Stream<Path> stream = Files.walk(src)) {
@@ -78,7 +81,7 @@ class DbtCLITest {
             .profiles(Property.ofValue(PROFILES)
             )
             .logFormat(Property.ofValue(logFormat))
-            .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
+            .containerImage(Property.ofValue("ghcr.io/kestra-io/dbt-bigquery:latest"))
             .commands(Property.ofValue(List.of("dbt build --select zipcode")))
             .build();
 
@@ -100,12 +103,12 @@ class DbtCLITest {
             .type(DbtCLI.class.getName())
             .profiles(Property.ofValue(PROFILES)
             )
-            .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
+            .containerImage(Property.ofValue("ghcr.io/kestra-io/dbt-bigquery:latest"))
             .commands(Property.ofValue(List.of("dbt build")))
             .storeManifest(
                 DbtCLI.KvStoreManifest.builder()
                     .key(Property.ofValue(MANIFEST_KEY))
-                    .namespace(Property.ofValue(NAMESPACE_ID))
+                    .namespace(new Property<>(FLOW_NAMESPACE))
                     .build()
             )
             .build();
@@ -119,7 +122,8 @@ class DbtCLITest {
         ScriptOutput runOutput = execute.run(runContext);
 
         assertThat(runOutput.getExitCode(), is(0));
-        KVStore kvStore = runContext.namespaceKv(NAMESPACE_ID);
+        var namespace = runContext.render(FLOW_NAMESPACE);
+        KVStore kvStore = runContext.namespaceKv(namespace);
         assertThat(kvStore.get(MANIFEST_KEY).isPresent(), is(true));
         Map<String, Object> manifestValue = (Map<String, Object>) kvStore.getValue(MANIFEST_KEY).get().value();
         assertThat(((Map<String, Object>) manifestValue.get("metadata")).get("project_name"), is("unit_kestra"));
@@ -132,12 +136,12 @@ class DbtCLITest {
             .type(DbtCLI.class.getName())
             .profiles(Property.ofValue(PROFILES))
             .projectDir(Property.ofValue("unit-kestra"))
-            .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
+            .containerImage(Property.ofValue("ghcr.io/kestra-io/dbt-bigquery:latest"))
             .commands(Property.ofValue(List.of("dbt build --project-dir unit-kestra")))
             .loadManifest(
                 DbtCLI.KvStoreManifest.builder()
                     .key(Property.ofValue(MANIFEST_KEY))
-                    .namespace(Property.ofValue(NAMESPACE_ID))
+                    .namespace(new Property<>(FLOW_NAMESPACE))
                     .build()
             )
             .build();
@@ -146,12 +150,13 @@ class DbtCLITest {
 
         Path workingDir = runContextLoad.workingDir().path(true);
         copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()),
-            Path.of(runContextLoad.workingDir().path().toString(),"unit-kestra"));
+            Path.of(runContextLoad.workingDir().path().toString(), "unit-kestra"));
         createSaFile(workingDir);
         String manifestValue = Files.readString(Path.of(
-            Objects.requireNonNull(this.getClass().getClassLoader().getResource("manifest/manifest.json")).getPath())
+                Objects.requireNonNull(this.getClass().getClassLoader().getResource("manifest/manifest.json")).getPath())
             , StandardCharsets.UTF_8);
-        runContextLoad.namespaceKv(NAMESPACE_ID).put(MANIFEST_KEY, new KVValueAndMetadata(null, manifestValue));
+        var namespace = runContextLoad.render(FLOW_NAMESPACE);
+        runContextLoad.namespaceKv(namespace).put(MANIFEST_KEY, new KVValueAndMetadata(null, manifestValue));
 
         ScriptOutput runOutputLoad = loadManifest.run(runContextLoad);
 
@@ -171,7 +176,7 @@ class DbtCLITest {
             .loadManifest(
                 DbtCLI.KvStoreManifest.builder()
                     .key(Property.ofValue(MANIFEST_KEY))
-                    .namespace(Property.ofValue(NAMESPACE_ID))
+                    .namespace(new Property<>(FLOW_NAMESPACE))
                     .build()
             )
             .build();
@@ -181,7 +186,8 @@ class DbtCLITest {
             Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("manifest/manifest.json")).getPath()),
             StandardCharsets.UTF_8
         );
-        runContext.namespaceKv(NAMESPACE_ID).put(MANIFEST_KEY, new KVValueAndMetadata(null, manifest));
+        var namespace = runContext.render(FLOW_NAMESPACE);
+        runContext.namespaceKv(namespace).put(MANIFEST_KEY, new KVValueAndMetadata(null, manifest));
 
         var runOutput = task.run(runContext);
 
@@ -194,7 +200,7 @@ class DbtCLITest {
             .id(IdUtils.create())
             .type(DbtCLI.class.getName())
             .profiles(Property.ofValue(PROFILES))
-            .containerImage(new Property<>("ghcr.io/kestra-io/dbt-bigquery:latest"))
+            .containerImage(Property.ofValue("ghcr.io/kestra-io/dbt-bigquery:latest"))
             .commands(Property.ofValue(List.of(
                 "dbt deps",
                 "dbt run-operation emit_warning_log"
@@ -216,9 +222,23 @@ class DbtCLITest {
     }
 
     private void createSaFile(Path workingDir) throws IOException {
-        Path existingSa = Path.of(System.getenv("GOOGLE_APPLICATION_CREDENTIALS"));
+        String credentialsPath = System.getenv("GOOGLE_APPLICATION_CREDENTIALS");
+        String encodedServiceAccount = System.getenv("GOOGLE_SERVICE_ACCOUNT");
+        Assumptions.assumeTrue(
+            (credentialsPath != null && !credentialsPath.isBlank()) ||
+                (encodedServiceAccount != null && !encodedServiceAccount.isBlank()),
+            "GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_SERVICE_ACCOUNT must be set"
+        );
+
         Path workingDirSa = workingDir.resolve("sa.json");
-        Files.copy(existingSa, workingDirSa);
+        if (credentialsPath != null && !credentialsPath.isBlank()) {
+            Files.copy(Path.of(credentialsPath), workingDirSa);
+            return;
+        }
+
+        try (var inputStream = new ByteArrayInputStream(Base64.getDecoder().decode(encodedServiceAccount.getBytes()))) {
+            Files.copy(inputStream, workingDirSa);
+        }
     }
 
     @Test
@@ -227,6 +247,7 @@ class DbtCLITest {
             .id(IdUtils.create())
             .type(DbtCLI.class.getName())
             .profiles(Property.ofValue(PROFILES))
+            .containerImage(Property.ofValue("ghcr.io/kestra-io/dbt-bigquery:latest"))
             .commands(Property.ofValue(List.of(
                 "dbt deps",
                 "mkdir -p models",
