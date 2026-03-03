@@ -104,7 +104,7 @@ class DbtCLITest {
             .profiles(Property.ofValue(PROFILES)
             )
             .containerImage(Property.ofValue("ghcr.io/kestra-io/dbt-bigquery:latest"))
-            .commands(Property.ofValue(List.of("dbt build")))
+            .commands(Property.ofValue(List.of("dbt build --select zipcode")))
             .storeManifest(
                 DbtCLI.KvStoreManifest.builder()
                     .key(Property.ofValue(MANIFEST_KEY))
@@ -137,7 +137,7 @@ class DbtCLITest {
             .profiles(Property.ofValue(PROFILES))
             .projectDir(Property.ofValue("unit-kestra"))
             .containerImage(Property.ofValue("ghcr.io/kestra-io/dbt-bigquery:latest"))
-            .commands(Property.ofValue(List.of("dbt build --project-dir unit-kestra")))
+            .commands(Property.ofValue(List.of("dbt build --select zipcode --project-dir unit-kestra")))
             .loadManifest(
                 DbtCLI.KvStoreManifest.builder()
                     .key(Property.ofValue(MANIFEST_KEY))
