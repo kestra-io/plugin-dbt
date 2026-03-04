@@ -226,9 +226,15 @@ public abstract class ResultParser {
             if (hasValue(node.getSchema())) metadata.put("schema", node.getSchema());
             if (hasValue(name)) metadata.put("name", name);
 
-            List<String> dependsOn = List.of();
-            if (node.getDependsOn() != null) {
+            // Use parent_map from manifest (the canonical DAG) when available,
+            // falling back to node-level depends_on for older manifests.
+            List<String> dependsOn;
+            if (manifest.getParentMap() != null && manifest.getParentMap().containsKey(uniqueId)) {
+                dependsOn = manifest.getParentMap().get(uniqueId);
+            } else if (node.getDependsOn() != null) {
                 dependsOn = node.getDependsOn().getOrDefault("nodes", List.of());
+            } else {
+                dependsOn = List.of();
             }
 
             modelAssets.put(uniqueId, new ModelAsset(assetId, metadata, dependsOn));

@@ -56,6 +56,12 @@ class ResultParserTest {
                     ]
                   }
                 }
+              },
+              "parent_map": {
+                "model.analytics.stg_orders": [],
+                "model.analytics.fct_orders": [
+                  "model.analytics.stg_orders"
+                ]
               }
             }
             """);
@@ -115,6 +121,12 @@ class ResultParserTest {
                     ]
                   }
                 }
+              },
+              "parent_map": {
+                "model.analytics.my_first_dbt_model": [],
+                "model.analytics.my_second_dbt_model": [
+                  "model.analytics.my_first_dbt_model"
+                ]
               }
             }
             """);
@@ -133,6 +145,81 @@ class ResultParserTest {
         var secondModelEmit = emittedByOutputId.get("analytics.marts.my_second_dbt_model");
         assertThat(secondModelEmit.inputs(), hasSize(1));
         assertThat(secondModelEmit.inputs().getFirst().id(), is("analytics.marts.my_first_dbt_model"));
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldUseParentMapForLineage() throws Exception {
+        // Simulate a case where depends_on.nodes includes transitive deps
+        // but parent_map only has the direct edges (the real DAG).
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        Files.writeString(manifestFile, """
+            {
+              "metadata": {
+                "adapter_type": "duckdb"
+              },
+              "nodes": {
+                "model.project.stg_orders": {
+                  "resource_type": "model",
+                  "database": "dev",
+                  "schema": "staging",
+                  "name": "stg_orders",
+                  "unique_id": "model.project.stg_orders",
+                  "depends_on": {
+                    "nodes": ["source.project.raw.orders"]
+                  }
+                },
+                "model.project.int_orders": {
+                  "resource_type": "model",
+                  "database": "dev",
+                  "schema": "intermediate",
+                  "name": "int_orders",
+                  "unique_id": "model.project.int_orders",
+                  "depends_on": {
+                    "nodes": ["model.project.stg_orders"]
+                  }
+                },
+                "model.project.fct_orders": {
+                  "resource_type": "model",
+                  "database": "dev",
+                  "schema": "marts",
+                  "name": "fct_orders",
+                  "unique_id": "model.project.fct_orders",
+                  "depends_on": {
+                    "nodes": ["model.project.stg_orders", "model.project.int_orders"]
+                  }
+                }
+              },
+              "parent_map": {
+                "model.project.stg_orders": ["source.project.raw.orders"],
+                "model.project.int_orders": ["model.project.stg_orders"],
+                "model.project.fct_orders": ["model.project.int_orders"]
+              }
+            }
+            """);
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile());
+
+        var emittedByOutputId = runContext.assets().emitted().stream()
+            .collect(toMap(
+                assetEmit -> assetEmit.outputs().getFirst().getId(),
+                assetEmit -> assetEmit
+            ));
+
+        // fct_orders should only depend on int_orders (from parent_map),
+        // NOT on both stg_orders and int_orders (from depends_on.nodes)
+        var fctOrdersEmit = emittedByOutputId.get("dev.marts.fct_orders");
+        assertThat(fctOrdersEmit.inputs(), hasSize(1));
+        assertThat(fctOrdersEmit.inputs().getFirst().id(), is("dev.intermediate.int_orders"));
+
+        // int_orders should depend on stg_orders
+        var intOrdersEmit = emittedByOutputId.get("dev.intermediate.int_orders");
+        assertThat(intOrdersEmit.inputs(), hasSize(1));
+        assertThat(intOrdersEmit.inputs().getFirst().id(), is("dev.staging.stg_orders"));
+
+        // stg_orders has no model dependencies (source is filtered out)
+        var stgOrdersEmit = emittedByOutputId.get("dev.staging.stg_orders");
+        assertThat(stgOrdersEmit.inputs(), hasSize(0));
     }
 
     private RunContext mockRunContext() {
