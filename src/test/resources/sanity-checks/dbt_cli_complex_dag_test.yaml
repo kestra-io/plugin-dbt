@@ -1,0 +1,189 @@
+id: dbt_cli_complex_dag_test
+namespace: company.team
+
+tasks:
+  - id: wd
+    type: io.kestra.plugin.core.flow.WorkingDirectory
+    tasks:
+      - id: create_project
+        type: io.kestra.plugin.core.storage.LocalFiles
+        inputs:
+          dbt_project.yml: |
+            name: 'my_dbt_project'
+            version: '1.0.0'
+            config-version: 2
+
+            profile: 'my_dbt_project'
+
+            model-paths: ["models"]
+            analysis-paths: ["analyses"]
+            test-paths: ["tests"]
+            seed-paths: ["seeds"]
+            macro-paths: ["macros"]
+            snapshot-paths: ["snapshots"]
+
+            target-path: "target"
+            clean-targets:
+              - "target"
+              - "dbt_packages"
+
+            models:
+              my_dbt_project:
+                staging:
+                  +materialized: table
+                intermediate:
+                  +materialized: view
+                marts:
+                  +materialized: table
+          packages.yml: |
+            packages: []
+
+          models/staging/stg_customers.sql: |
+            with customers as (
+                select 1 as customer_id, 'Alice' as first_name, 'Anderson' as last_name, '2024-01-10' as signup_date union all
+                select 2, 'Bob', 'Baker', '2024-02-15' union all
+                select 3, 'Charlie', 'Clark', '2024-03-20' union all
+                select 4, 'Diana', 'Davis', '2024-04-05' union all
+                select 5, 'Eve', 'Evans', '2024-05-12'
+            )
+            select
+                customer_id,
+                first_name,
+                last_name,
+                cast(signup_date as date) as signup_date
+            from customers
+
+          models/staging/stg_orders.sql: |
+            with orders as (
+                select 101 as order_id, 1 as customer_id, '2024-03-01' as order_date, 'completed' as status union all
+                select 102, 2, '2024-03-05', 'completed' union all
+                select 103, 1, '2024-03-10', 'completed' union all
+                select 104, 3, '2024-04-01', 'returned' union all
+                select 105, 2, '2024-04-15', 'completed' union all
+                select 106, 4, '2024-05-01', 'completed' union all
+                select 107, 1, '2024-05-20', 'completed' union all
+                select 108, 5, '2024-06-01', 'completed' union all
+                select 109, 3, '2024-06-15', 'completed' union all
+                select 110, 4, '2024-07-01', 'returned'
+            )
+            select
+                order_id,
+                customer_id,
+                cast(order_date as date) as order_date,
+                status
+            from orders
+
+          models/staging/stg_payments.sql: |
+            with payments as (
+                select 1001 as payment_id, 101 as order_id, 50.00 as amount, 'credit_card' as payment_method union all
+                select 1002, 102, 75.50, 'bank_transfer' union all
+                select 1003, 103, 30.00, 'credit_card' union all
+                select 1004, 104, 120.00, 'credit_card' union all
+                select 1005, 105, 45.00, 'paypal' union all
+                select 1006, 106, 200.00, 'bank_transfer' union all
+                select 1007, 107, 15.00, 'credit_card' union all
+                select 1008, 108, 90.00, 'paypal' union all
+                select 1009, 109, 60.00, 'credit_card' union all
+                select 1010, 110, 35.00, 'bank_transfer'
+            )
+            select
+                payment_id,
+                order_id,
+                amount,
+                payment_method
+            from payments
+
+          models/intermediate/int_customer_orders.sql: |
+            select
+                c.customer_id,
+                c.first_name,
+                c.last_name,
+                c.signup_date,
+                o.order_id,
+                o.order_date,
+                o.status
+            from {{ "{{ ref('stg_customers') }}" }} c
+            inner join {{ "{{ ref('stg_orders') }}" }} o
+                on c.customer_id = o.customer_id
+
+          models/intermediate/int_daily_revenue.sql: |
+            select
+                o.order_date,
+                count(distinct o.order_id) as total_orders,
+                sum(p.amount) as daily_revenue,
+                count(distinct o.customer_id) as unique_customers
+            from {{ "{{ ref('stg_orders') }}" }} o
+            inner join {{ "{{ ref('stg_payments') }}" }} p
+                on o.order_id = p.order_id
+            where o.status = 'completed'
+            group by o.order_date
+
+          models/intermediate/int_order_payments.sql: |
+            select
+                o.order_id,
+                o.customer_id,
+                o.order_date,
+                o.status,
+                p.payment_id,
+                p.amount,
+                p.payment_method
+            from {{ "{{ ref('stg_orders') }}" }} o
+            inner join {{ "{{ ref('stg_payments') }}" }} p
+                on o.order_id = p.order_id
+
+          models/marts/fct_customer_summary.sql: |
+            select
+                co.customer_id,
+                co.first_name,
+                co.last_name,
+                co.signup_date,
+                count(distinct co.order_id) as total_orders,
+                sum(case when co.status = 'completed' then 1 else 0 end) as completed_orders,
+                sum(case when co.status = 'returned' then 1 else 0 end) as returned_orders,
+                coalesce(sum(op.amount), 0) as total_spent,
+                min(co.order_date) as first_order_date,
+                max(co.order_date) as last_order_date
+            from {{ "{{ ref('int_customer_orders') }}" }} co
+            left join {{ "{{ ref('int_order_payments') }}" }} op
+                on co.order_id = op.order_id
+            group by
+                co.customer_id,
+                co.first_name,
+                co.last_name,
+                co.signup_date
+
+          models/marts/fct_revenue_by_customer.sql: |
+            select
+                cs.customer_id,
+                cs.first_name,
+                cs.last_name,
+                cs.total_orders,
+                cs.total_spent,
+                cs.total_spent / nullif(cs.completed_orders, 0) as avg_order_value,
+                dr.total_revenue_on_last_order_day
+            from {{ "{{ ref('fct_customer_summary') }}" }} cs
+            left join (
+                select
+                    order_date,
+                    daily_revenue as total_revenue_on_last_order_day
+                from {{ "{{ ref('int_daily_revenue') }}" }}
+            ) dr
+                on cs.last_order_date = dr.order_date
+
+      - id: dbt_run
+        type: io.kestra.plugin.dbt.cli.DbtCLI
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+          delete: true
+        containerImage: ghcr.io/kestra-io/dbt-duckdb:latest
+        commands:
+          - dbt deps
+          - dbt run
+        profiles: |
+          my_dbt_project:
+            outputs:
+              dev:
+                type: duckdb
+                path: ":memory:"
+                threads: 4
+            target: dev

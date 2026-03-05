@@ -15,6 +15,9 @@ public class Manifest {
     Map<String, Object> metadata;
     Map<String, Node> nodes;
 
+    @JsonProperty("parent_map")
+    Map<String, List<String>> parentMap;
+
     @Value
     @Jacksonized
     @SuperBuilder

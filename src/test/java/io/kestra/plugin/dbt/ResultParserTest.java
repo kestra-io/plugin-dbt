@@ -10,12 +10,12 @@ import io.kestra.plugin.dbt.cli.DbtCLI;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
+import io.kestra.core.runners.AssetEmit;
+
 import java.nio.file.Files;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static java.util.stream.Collectors.toMap;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
@@ -56,6 +56,12 @@ class ResultParserTest {
                     ]
                   }
                 }
+              },
+              "parent_map": {
+                "model.analytics.stg_orders": [],
+                "model.analytics.fct_orders": [
+                  "model.analytics.stg_orders"
+                ]
               }
             }
             """);
@@ -65,22 +71,23 @@ class ResultParserTest {
         assertThat(manifestResult.manifest(), is(notNullValue()));
         assertThat(runContext.assets().emitted(), hasSize(2));
 
-        var outputAssets = runContext.assets().emitted().stream()
-            .flatMap(assetEmit -> assetEmit.outputs().stream())
-            .toList();
+        // stg_orders has no inputs and 1 output (fct_orders, its child)
+        // fct_orders has 1 input (stg_orders) and no outputs (leaf node)
+        var stgOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.fct_orders");
+        assertThat("stg_orders emission should exist", stgOrdersEmit, is(notNullValue()));
+        assertThat(stgOrdersEmit.inputs(), hasSize(0));
+        assertThat(stgOrdersEmit.outputs(), hasSize(1));
 
-        assertThat(outputAssets, hasSize(2));
-        var byId = new HashMap<String, io.kestra.core.models.assets.Asset>();
-        outputAssets.forEach(asset -> byId.put(asset.getId(), asset));
+        var fctOrdersOutput = stgOrdersEmit.outputs().getFirst();
+        assertThat(fctOrdersOutput.getMetadata().get("system"), is("postgres"));
+        assertThat(fctOrdersOutput.getMetadata().get("database"), is("analytics"));
+        assertThat(fctOrdersOutput.getMetadata().get("schema"), is("marts"));
+        assertThat(fctOrdersOutput.getMetadata().get("name"), is("fct_orders"));
 
-        assertThat(byId.containsKey("analytics.staging.stg_orders"), is(true));
-        assertThat(byId.containsKey("analytics.marts.fct_orders"), is(true));
-
-        var stgOrders = byId.get("analytics.staging.stg_orders");
-        assertThat(stgOrders.getMetadata().get("system"), is("postgres"));
-        assertThat(stgOrders.getMetadata().get("database"), is("analytics"));
-        assertThat(stgOrders.getMetadata().get("schema"), is("staging"));
-        assertThat(stgOrders.getMetadata().get("name"), is("stg_orders"));
+        var fctOrdersEmit = findEmitWithInput(runContext.assets().emitted(), "analytics.staging.stg_orders");
+        assertThat("fct_orders emission should exist", fctOrdersEmit, is(notNullValue()));
+        assertThat(fctOrdersEmit.inputs(), hasSize(1));
+        assertThat(fctOrdersEmit.outputs(), hasSize(0));
     }
 
     @Test
@@ -115,24 +122,136 @@ class ResultParserTest {
                     ]
                   }
                 }
+              },
+              "parent_map": {
+                "model.analytics.my_first_dbt_model": [],
+                "model.analytics.my_second_dbt_model": [
+                  "model.analytics.my_first_dbt_model"
+                ]
               }
             }
             """);
 
         ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile());
 
-        var emittedByOutputId = runContext.assets().emitted().stream()
-            .collect(toMap(
-                assetEmit -> assetEmit.outputs().getFirst().getId(),
-                assetEmit -> assetEmit
-            ));
+        assertThat(runContext.assets().emitted(), hasSize(2));
 
-        assertThat(emittedByOutputId, hasKey("analytics.marts.my_first_dbt_model"));
-        assertThat(emittedByOutputId, hasKey("analytics.marts.my_second_dbt_model"));
+        // my_first_dbt_model: no inputs, 1 output (my_second_dbt_model)
+        var firstModelEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.my_second_dbt_model");
+        assertThat(firstModelEmit, is(notNullValue()));
+        assertThat(firstModelEmit.inputs(), hasSize(0));
+        assertThat(firstModelEmit.outputs(), hasSize(1));
 
-        var secondModelEmit = emittedByOutputId.get("analytics.marts.my_second_dbt_model");
+        // my_second_dbt_model: 1 input (my_first_dbt_model), no outputs (leaf)
+        var secondModelEmit = findEmitWithInput(runContext.assets().emitted(), "analytics.marts.my_first_dbt_model");
+        assertThat(secondModelEmit, is(notNullValue()));
         assertThat(secondModelEmit.inputs(), hasSize(1));
         assertThat(secondModelEmit.inputs().getFirst().id(), is("analytics.marts.my_first_dbt_model"));
+        assertThat(secondModelEmit.outputs(), hasSize(0));
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldUseParentMapForLineage() throws Exception {
+        // Simulate a case where depends_on.nodes includes transitive deps
+        // but parent_map only has the direct edges (the real DAG).
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        Files.writeString(manifestFile, """
+            {
+              "metadata": {
+                "adapter_type": "duckdb"
+              },
+              "nodes": {
+                "model.project.stg_orders": {
+                  "resource_type": "model",
+                  "database": "dev",
+                  "schema": "staging",
+                  "name": "stg_orders",
+                  "unique_id": "model.project.stg_orders",
+                  "depends_on": {
+                    "nodes": ["source.project.raw.orders"]
+                  }
+                },
+                "model.project.int_orders": {
+                  "resource_type": "model",
+                  "database": "dev",
+                  "schema": "intermediate",
+                  "name": "int_orders",
+                  "unique_id": "model.project.int_orders",
+                  "depends_on": {
+                    "nodes": ["model.project.stg_orders"]
+                  }
+                },
+                "model.project.fct_orders": {
+                  "resource_type": "model",
+                  "database": "dev",
+                  "schema": "marts",
+                  "name": "fct_orders",
+                  "unique_id": "model.project.fct_orders",
+                  "depends_on": {
+                    "nodes": ["model.project.stg_orders", "model.project.int_orders"]
+                  }
+                }
+              },
+              "parent_map": {
+                "model.project.stg_orders": ["source.project.raw.orders"],
+                "model.project.int_orders": ["model.project.stg_orders"],
+                "model.project.fct_orders": ["model.project.int_orders"]
+              }
+            }
+            """);
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile());
+
+        assertThat(runContext.assets().emitted(), hasSize(3));
+
+        // DAG: stg_orders → int_orders → fct_orders (parent_map, no transitive edges)
+        // Inputs = upstream deps, Outputs = downstream children
+
+        // stg_orders: no model inputs (source filtered out), 1 output (int_orders)
+        var stgOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "dev.intermediate.int_orders");
+        assertThat(stgOrdersEmit, is(notNullValue()));
+        assertThat(stgOrdersEmit.inputs(), hasSize(0));
+        assertThat(stgOrdersEmit.outputs(), hasSize(1));
+
+        // int_orders: 1 input (stg_orders), 1 output (fct_orders)
+        var intOrdersEmit = findEmitWithInputAndOutput(runContext.assets().emitted(),
+            "dev.staging.stg_orders", "dev.marts.fct_orders");
+        assertThat(intOrdersEmit, is(notNullValue()));
+        assertThat(intOrdersEmit.inputs(), hasSize(1));
+        assertThat(intOrdersEmit.inputs().getFirst().id(), is("dev.staging.stg_orders"));
+        assertThat(intOrdersEmit.outputs(), hasSize(1));
+        assertThat(intOrdersEmit.outputs().getFirst().getId(), is("dev.marts.fct_orders"));
+
+        // fct_orders: 1 input (int_orders only, from parent_map), no outputs (leaf)
+        var fctOrdersEmit = findEmitWithInput(runContext.assets().emitted(), "dev.intermediate.int_orders");
+        assertThat(fctOrdersEmit, is(notNullValue()));
+        assertThat(fctOrdersEmit.inputs(), hasSize(1));
+        assertThat(fctOrdersEmit.inputs().getFirst().id(), is("dev.intermediate.int_orders"));
+        assertThat(fctOrdersEmit.outputs(), hasSize(0));
+    }
+
+    private static AssetEmit findEmitWithOutput(List<AssetEmit> emitted, String outputId) {
+        return emitted.stream()
+            .filter(e -> e.outputs().stream().anyMatch(o -> o.getId().equals(outputId)))
+            .findFirst()
+            .orElse(null);
+    }
+
+    private static AssetEmit findEmitWithInput(List<AssetEmit> emitted, String inputId) {
+        return emitted.stream()
+            .filter(e -> e.inputs().stream().anyMatch(i -> i.id().equals(inputId)))
+            .filter(e -> e.outputs().isEmpty())
+            .findFirst()
+            .orElse(null);
+    }
+
+    private static AssetEmit findEmitWithInputAndOutput(List<AssetEmit> emitted, String inputId, String outputId) {
+        return emitted.stream()
+            .filter(e -> e.inputs().stream().anyMatch(i -> i.id().equals(inputId)))
+            .filter(e -> e.outputs().stream().anyMatch(o -> o.getId().equals(outputId)))
+            .findFirst()
+            .orElse(null);
     }
 
     private RunContext mockRunContext() {

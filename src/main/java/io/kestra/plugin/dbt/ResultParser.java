@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.assets.AssetIdentifier;
 import io.kestra.core.models.assets.AssetsInOut;
+import io.kestra.core.models.assets.Asset;
 import io.kestra.core.models.assets.Custom;
 import io.kestra.core.models.executions.TaskRun;
 import io.kestra.core.models.executions.TaskRunAttempt;
@@ -150,16 +151,9 @@ public abstract class ResultParser {
         }
 
         List<AssetIdentifier> inputs = inputIdentifiers(modelAsset, modelAssets);
+        List<Asset> outputs = outputAssets(modelAsset, modelAssets);
 
-        return new AssetsInOut(
-            inputs,
-            List.of(Custom.builder()
-                .id(modelAsset.assetId())
-                .type(TABLE_ASSET_TYPE)
-                .metadata(modelAsset.metadata())
-                .build()
-            )
-        );
+        return new AssetsInOut(inputs, outputs);
     }
 
     private static void emitAssets(RunContext runContext, Manifest manifest) throws IllegalVariableEvaluationException {
@@ -168,22 +162,30 @@ public abstract class ResultParser {
 
         for (ModelAsset asset : modelAssets.values()) {
             List<AssetIdentifier> inputs = inputIdentifiers(asset, modelAssets);
+            List<Asset> outputs = outputAssets(asset, modelAssets);
             try {
-                runContext.assets().emit(new AssetEmit(
-                    inputs,
-                    List.of(Custom.builder()
-                        .id(asset.assetId())
-                        .type(TABLE_ASSET_TYPE)
-                        .metadata(asset.metadata())
-                        .build()
-                    )
-                )
-                );
+                runContext.assets().emit(new AssetEmit(inputs, outputs));
             } catch (UnsupportedOperationException | QueueException e) {
                 // UnsupportedOperationException for OSS or tests where EE is not configured (assets are EE only)
                 runContext.logger().warn("Unable to emit dbt asset '{}'", asset.assetId(), e);
             }
         }
+    }
+
+    private static List<Asset> outputAssets(ModelAsset modelAsset, Map<String, ModelAsset> modelAssets) {
+        if (modelAsset.children() == null || modelAsset.children().isEmpty()) {
+            return List.of();
+        }
+
+        return modelAsset.children().stream()
+            .map(modelAssets::get)
+            .filter(Objects::nonNull)
+            .<Asset>map(child -> Custom.builder()
+                .id(child.assetId())
+                .type(TABLE_ASSET_TYPE)
+                .metadata(child.metadata())
+                .build())
+            .toList();
     }
 
     private static List<AssetIdentifier> inputIdentifiers(ModelAsset modelAsset, Map<String, ModelAsset> modelAssets) {
@@ -226,12 +228,18 @@ public abstract class ResultParser {
             if (hasValue(node.getSchema())) metadata.put("schema", node.getSchema());
             if (hasValue(name)) metadata.put("name", name);
 
-            List<String> dependsOn = List.of();
-            if (node.getDependsOn() != null) {
+            // Use parent_map from manifest (the canonical DAG) when available,
+            // falling back to node-level depends_on for older manifests.
+            List<String> dependsOn;
+            if (manifest.getParentMap() != null && manifest.getParentMap().containsKey(uniqueId)) {
+                dependsOn = manifest.getParentMap().get(uniqueId);
+            } else if (node.getDependsOn() != null) {
                 dependsOn = node.getDependsOn().getOrDefault("nodes", List.of());
+            } else {
+                dependsOn = List.of();
             }
 
-            modelAssets.put(uniqueId, new ModelAsset(assetId, metadata, dependsOn));
+            modelAssets.put(uniqueId, new ModelAsset(assetId, metadata, dependsOn, List.of()));
         }
 
         Map<String, ModelAsset> filtered = new HashMap<>(modelAssets.size());
@@ -240,10 +248,26 @@ public abstract class ResultParser {
             List<String> deps = a.dependsOn() == null ? List.of() : a.dependsOn().stream()
                 .filter(modelAssets::containsKey)
                 .toList();
-            filtered.put(e.getKey(), new ModelAsset(a.assetId(), a.metadata(), deps));
+            filtered.put(e.getKey(), new ModelAsset(a.assetId(), a.metadata(), deps, List.of()));
         }
 
-        return filtered;
+        // Compute reverse dependencies (children: models that depend on this one)
+        Map<String, List<String>> childrenMap = new HashMap<>();
+        for (Map.Entry<String, ModelAsset> e : filtered.entrySet()) {
+            for (String dep : e.getValue().dependsOn()) {
+                childrenMap.computeIfAbsent(dep, k -> new ArrayList<>()).add(e.getKey());
+            }
+        }
+
+        // Rebuild with children populated
+        Map<String, ModelAsset> result = new HashMap<>(filtered.size());
+        for (Map.Entry<String, ModelAsset> e : filtered.entrySet()) {
+            ModelAsset a = e.getValue();
+            List<String> children = childrenMap.getOrDefault(e.getKey(), List.of());
+            result.put(e.getKey(), new ModelAsset(a.assetId(), a.metadata(), a.dependsOn(), children));
+        }
+
+        return result;
     }
 
     private static String adapterType(Manifest manifest) {
@@ -287,6 +311,6 @@ public abstract class ResultParser {
         return value != null && !value.trim().isEmpty();
     }
 
-    private record ModelAsset(String assetId, Map<String, Object> metadata, List<String> dependsOn) {
+    private record ModelAsset(String assetId, Map<String, Object> metadata, List<String> dependsOn, List<String> children) {
     }
 }

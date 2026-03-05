@@ -7,27 +7,45 @@ import io.micronaut.context.annotation.Replaces;
 import jakarta.inject.Singleton;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 @Singleton
 @Replaces(AssetManagerFactory.class)
-class TestAssetManagerFactory extends AssetManagerFactory {
+public class TestAssetManagerFactory extends AssetManagerFactory {
+    private final List<AssetEmit> allEmitted = Collections.synchronizedList(new ArrayList<>());
+
     @Override
     public AssetEmitter of(boolean enable) {
-        return new InMemoryAssetEmitter();
+        return new TrackingAssetEmitter(allEmitted);
     }
 
-    private static final class InMemoryAssetEmitter implements AssetEmitter {
-        private final List<AssetEmit> assets = new ArrayList<>();
+    /** All assets emitted across all RunContexts (for runner/integration tests). */
+    public List<AssetEmit> allEmitted() {
+        return List.copyOf(allEmitted);
+    }
+
+    public void clear() {
+        allEmitted.clear();
+    }
+
+    private static final class TrackingAssetEmitter implements AssetEmitter {
+        private final List<AssetEmit> shared;
+        private final List<AssetEmit> local = new ArrayList<>();
+
+        TrackingAssetEmitter(List<AssetEmit> shared) {
+            this.shared = shared;
+        }
 
         @Override
         public void emit(AssetEmit assetEmit) {
-            assets.add(assetEmit);
+            local.add(assetEmit);
+            shared.add(assetEmit);
         }
 
         @Override
         public List<AssetEmit> emitted() {
-            return List.copyOf(assets);
+            return List.copyOf(local);
         }
     }
 }
