@@ -72,7 +72,5 @@ docker build \
 ```
 
 GitHub Actions
-- `packages.yml` (runs on Dockerfile changes) now supports `workflow_dispatch` with an optional `dbt_version` input; this is passed as the build arg and the image will be tagged using the dbt version (for example: `ghcr.io/kestra-io/dbt-duckdb:1.9.1`).
-- `packages-scheduled-update.yml` accepts `image_tag` and a new optional `dbt_version` input. When `dbt_version` is provided, an additional tag `dbt-<version>` is added for each image.
-
-Note: Some Dockerfiles use external installer scripts (like `dbt-fusion.Dockerfile`) and may require a different approach to pinning the dbt version; check the installer script for a supported `--version` argument and adapt the Dockerfile if needed.
+- `packages.yml` (runs on Dockerfile changes) supports `workflow_dispatch` with an optional `dbt_version` input; this is passed as the build arg and the image will be tagged `dbt-<version>` (e.g. `ghcr.io/kestra-io/dbt-duckdb:dbt-1.9.1`). Without `dbt_version`, images are tagged `latest`.
+- `packages-scheduled-update.yml` is manual (`workflow_dispatch`). It accepts a required `image_tag` and an optional `dbt_version` input. When `dbt_version` is provided, an additional `dbt-<version>` tag is added for each image.

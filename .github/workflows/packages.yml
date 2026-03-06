@@ -5,6 +5,7 @@ on:
     paths:
       - dockerfiles/*
     branches:
+      - main
       - master
   workflow_dispatch:
     inputs:
