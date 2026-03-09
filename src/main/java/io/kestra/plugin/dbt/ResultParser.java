@@ -165,8 +165,11 @@ public abstract class ResultParser {
             List<Asset> outputs = outputAssets(asset, modelAssets);
             try {
                 runContext.assets().emit(new AssetEmit(inputs, outputs));
-            } catch (UnsupportedOperationException | QueueException e) {
-                // UnsupportedOperationException for OSS or tests where EE is not configured (assets are EE only)
+            } catch (UnsupportedOperationException e) {
+                // OSS edition or tests where EE assets are not available — silently skip.
+                runContext.logger().debug("Asset emission is not supported in this edition, skipping.");
+                break;
+            } catch (QueueException e) {
                 runContext.logger().warn("Unable to emit dbt asset '{}'", asset.assetId(), e);
             }
         }
