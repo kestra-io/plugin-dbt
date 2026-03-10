@@ -1,5 +1,13 @@
 package io.kestra.plugin.dbt.cloud;
 
+import java.net.URI;
+import java.time.Duration;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import org.slf4j.Logger;
+
 import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.HttpResponse;
 import io.kestra.core.models.annotations.Example;
@@ -8,6 +16,7 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.dbt.cloud.models.RunResponse;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
@@ -16,13 +25,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
-import org.slf4j.Logger;
-
-import java.net.URI;
-import java.time.Duration;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 
 @SuperBuilder
 @ToString
@@ -130,8 +132,8 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     Property<Boolean> wait = Property.ofValue(Boolean.TRUE);
 
     @Schema(
-            title = "Poll frequency",
-            description = "Interval between status checks when waiting. Default 5s."
+        title = "Poll frequency",
+        description = "Interval between status checks when waiting. Default 5s."
     )
     @Builder.Default
     Property<Duration> pollFrequency = Property.ofValue(Duration.ofSeconds(5));
@@ -172,12 +174,18 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         }
 
         HttpRequest.HttpRequestBuilder requestBuilder = HttpRequest.builder()
-            .uri(URI.create(runContext.render(this.baseUrl).as(String.class).orElseThrow() + "/api/v2/accounts/" + runContext.render(this.accountId).as(String.class).orElseThrow() +
-                "/jobs/" + runContext.render(this.jobId).as(String.class).orElseThrow() + "/run/"))
+            .uri(
+                URI.create(
+                    runContext.render(this.baseUrl).as(String.class).orElseThrow() + "/api/v2/accounts/" + runContext.render(this.accountId).as(String.class).orElseThrow() +
+                        "/jobs/" + runContext.render(this.jobId).as(String.class).orElseThrow() + "/run/"
+                )
+            )
             .method("POST")
-            .body(HttpRequest.JsonRequestBody.builder()
-                .content(body)
-                .build());
+            .body(
+                HttpRequest.JsonRequestBody.builder()
+                    .content(body)
+                    .build()
+            );
 
         HttpResponse<RunResponse> triggerResponse = this.request(runContext, requestBuilder, RunResponse.class);
 

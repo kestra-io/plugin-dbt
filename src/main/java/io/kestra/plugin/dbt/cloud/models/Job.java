@@ -1,13 +1,14 @@
 package io.kestra.plugin.dbt.cloud.models;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import com.fasterxml.jackson.annotation.JsonProperty;
+
+import jakarta.validation.Valid;
 import lombok.Value;
 import lombok.experimental.SuperBuilder;
 import lombok.extern.jackson.Jacksonized;
-
-import java.util.ArrayList;
-import java.util.List;
-import jakarta.validation.Valid;
 
 @Value
 @Jacksonized

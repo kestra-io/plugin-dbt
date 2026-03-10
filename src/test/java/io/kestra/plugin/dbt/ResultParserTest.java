@@ -1,20 +1,21 @@
 package io.kestra.plugin.dbt;
 
+import java.nio.file.Files;
+import java.util.List;
+import java.util.Map;
+
+import org.junit.jupiter.api.Test;
+
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.runners.AssetEmit;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
 import io.kestra.plugin.dbt.cli.DbtCLI;
+
 import jakarta.inject.Inject;
-import org.junit.jupiter.api.Test;
-
-import io.kestra.core.runners.AssetEmit;
-
-import java.nio.file.Files;
-import java.util.List;
-import java.util.Map;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
@@ -215,8 +216,10 @@ class ResultParserTest {
         assertThat(stgOrdersEmit.outputs(), hasSize(1));
 
         // int_orders: 1 input (stg_orders), 1 output (fct_orders)
-        var intOrdersEmit = findEmitWithInputAndOutput(runContext.assets().emitted(),
-            "dev.staging.stg_orders", "dev.marts.fct_orders");
+        var intOrdersEmit = findEmitWithInputAndOutput(
+            runContext.assets().emitted(),
+            "dev.staging.stg_orders", "dev.marts.fct_orders"
+        );
         assertThat(intOrdersEmit, is(notNullValue()));
         assertThat(intOrdersEmit.inputs(), hasSize(1));
         assertThat(intOrdersEmit.inputs().getFirst().id(), is("dev.staging.stg_orders"));

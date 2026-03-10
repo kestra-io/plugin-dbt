@@ -1,19 +1,7 @@
 package io.kestra.plugin.dbt.cli;
 
-import io.kestra.core.junit.annotations.KestraTest;
-import io.kestra.core.models.property.Property;
-import io.kestra.core.runners.RunContext;
-import io.kestra.core.runners.RunContextFactory;
-import io.kestra.core.utils.IdUtils;
-import io.kestra.core.utils.TestsUtils;
-import io.kestra.plugin.core.runner.Process;
-import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
-import jakarta.inject.Inject;
-import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.Test;
-
-import java.io.ByteArrayInputStream;
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -24,6 +12,20 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.List;
 import java.util.stream.Stream;
+
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Test;
+
+import io.kestra.core.junit.annotations.KestraTest;
+import io.kestra.core.models.property.Property;
+import io.kestra.core.runners.RunContext;
+import io.kestra.core.runners.RunContextFactory;
+import io.kestra.core.utils.IdUtils;
+import io.kestra.core.utils.TestsUtils;
+import io.kestra.plugin.core.runner.Process;
+import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
+
+import jakarta.inject.Inject;
 
 import static io.kestra.core.utils.Rethrow.throwConsumer;
 import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
@@ -56,11 +58,15 @@ class BuildTest {
     public void copyFolder(Path src, Path dest) throws IOException {
         try (Stream<Path> stream = Files.walk(src)) {
             stream
-                .forEach(throwConsumer(source -> Files.copy(
-                    source,
-                    dest.resolve(src.relativize(source)),
-                    REPLACE_EXISTING
-                )));
+                .forEach(
+                    throwConsumer(
+                        source -> Files.copy(
+                            source,
+                            dest.resolve(src.relativize(source)),
+                            REPLACE_EXISTING
+                        )
+                    )
+                );
         }
     }
 
@@ -77,10 +83,14 @@ class BuildTest {
             .taskRunner(Process.instance())
             .pythonPath(pythonPath)
             .profiles(Property.ofValue(PROFILES))
-            .requirements(Property.ofValue(List.of(
-                "dbt-bigquery==1.8.3",
-                "click\\<8.1"
-            )))
+            .requirements(
+                Property.ofValue(
+                    List.of(
+                        "dbt-bigquery==1.8.3",
+                        "click\\<8.1"
+                    )
+                )
+            )
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, setup, Map.of());

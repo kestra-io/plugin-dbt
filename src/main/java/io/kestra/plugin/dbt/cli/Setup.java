@@ -1,8 +1,18 @@
 package io.kestra.plugin.dbt.cli;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.util.*;
+import java.util.List;
+
+import org.apache.commons.io.FileUtils;
+
 import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
@@ -18,20 +28,13 @@ import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.plugin.scripts.exec.scripts.runners.CommandsWrapper;
 import io.kestra.plugin.scripts.runner.docker.Docker;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
-import org.apache.commons.io.FileUtils;
-
-import java.io.File;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
-import java.util.*;
-import java.util.List;
 
 @SuperBuilder
 @ToString
@@ -188,10 +191,12 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
         );
 
         return commandsWrapper
-            .addEnv(Map.of(
-                "PYTHONUNBUFFERED", "true",
-                "PIP_ROOT_USER_ACTION", "ignore"
-            ))
+            .addEnv(
+                Map.of(
+                    "PYTHONUNBUFFERED", "true",
+                    "PIP_ROOT_USER_ACTION", "ignore"
+                )
+            )
             .withInterpreter(this.interpreter)
             .withBeforeCommands(this.beforeCommands)
             .withBeforeCommandsWithOptions(true)
@@ -205,9 +210,12 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
         renderer.add(runContext.render(this.pythonPath) + " -m venv --system-site-packages " + workingDirectory + " > /dev/null");
 
         if (requirements != null) {
-            renderer.addAll(Arrays.asList(
-                "./bin/pip install pip --upgrade > /dev/null",
-                "./bin/pip install " + runContext.render(String.join(" ", requirements) + " > /dev/null")));
+            renderer.addAll(
+                Arrays.asList(
+                    "./bin/pip install pip --upgrade > /dev/null",
+                    "./bin/pip install " + runContext.render(String.join(" ", requirements) + " > /dev/null")
+                )
+            );
         }
 
         return renderer;
@@ -217,17 +225,15 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
         if (profiles instanceof String content) {
             return content;
         }
-        if(profiles instanceof Map contentMap) {
+        if (profiles instanceof Map contentMap) {
             return MAPPER.writeValueAsString(runContext.render(contentMap));
         }
         throw new IllegalArgumentException("The `profiles` attribute must be a String or a Map");
     }
 
     private Map<String, String> finalInputFiles(RunContext runContext) throws IOException, IllegalVariableEvaluationException {
-        return runContext.render(this.inputFiles).as(Object.class).isPresent() ?
-            new HashMap<>(PluginUtilsService.transformInputFiles(runContext, runContext.render(this.inputFiles).as(Object.class).orElseThrow())) :
-            new HashMap<>();
+        return runContext.render(this.inputFiles).as(Object.class).isPresent()
+            ? new HashMap<>(PluginUtilsService.transformInputFiles(runContext, runContext.render(this.inputFiles).as(Object.class).orElseThrow()))
+            : new HashMap<>();
     }
 }
-
-

@@ -1,19 +1,19 @@
 package io.kestra.plugin.dbt.cloud;
 
-import com.github.tomakehurst.wiremock.WireMockServer;
+import java.time.Duration;
+import java.util.Map;
+
+import org.junit.jupiter.api.Test;
+
 import com.github.tomakehurst.wiremock.junit5.WireMockTest;
+
+import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
-import io.kestra.core.junit.annotations.KestraTest;
-import jakarta.inject.Inject;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 
-import java.time.Duration;
-import java.util.Map;
+import jakarta.inject.Inject;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -29,22 +29,26 @@ class CheckStatusTest {
     @Test
     void run() throws Exception {
 
-        stubFor(post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
-            .willReturn(okJson("""
-                { "data": { "id": 9999 } }
-            """)));
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(okJson("""
+                        { "data": { "id": 9999 } }
+                    """))
+        );
 
-        stubFor(get(urlMatching("/api/v2/accounts/123/runs/9999/.*"))
-            .willReturn(okJson("""
-                {
-                  "data": {
-                    "id": 9999,
-                    "status_humanized": "Success",
-                    "duration_humanized": "0s",
-                    "run_steps": []
-                  }
-                }
-            """)));
+        stubFor(
+            get(urlMatching("/api/v2/accounts/123/runs/9999/.*"))
+                .willReturn(okJson("""
+                        {
+                          "data": {
+                            "id": 9999,
+                            "status_humanized": "Success",
+                            "duration_humanized": "0s",
+                            "run_steps": []
+                          }
+                        }
+                    """))
+        );
 
         RunContext runContext = runContextFactory.of(Map.of());
 
