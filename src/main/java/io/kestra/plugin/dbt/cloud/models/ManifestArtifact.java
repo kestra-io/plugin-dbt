@@ -1,12 +1,13 @@
 package io.kestra.plugin.dbt.cloud.models;
 
+import java.util.List;
+import java.util.Map;
+
 import com.fasterxml.jackson.annotation.JsonProperty;
+
 import lombok.Value;
 import lombok.experimental.SuperBuilder;
 import lombok.extern.jackson.Jacksonized;
-
-import java.util.Map;
-import java.util.List;
 
 @Value
 @Jacksonized

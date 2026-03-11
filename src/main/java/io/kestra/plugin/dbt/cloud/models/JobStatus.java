@@ -2,6 +2,7 @@ package io.kestra.plugin.dbt.cloud.models;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
+
 import io.kestra.core.models.flows.State;
 
 public enum JobStatus {

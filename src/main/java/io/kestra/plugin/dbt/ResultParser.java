@@ -1,11 +1,18 @@
 package io.kestra.plugin.dbt;
 
+import java.io.File;
+import java.io.IOException;
+import java.net.URI;
+import java.time.Instant;
+import java.util.*;
+
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
+import io.kestra.core.models.assets.Asset;
 import io.kestra.core.models.assets.AssetIdentifier;
 import io.kestra.core.models.assets.AssetsInOut;
-import io.kestra.core.models.assets.Asset;
 import io.kestra.core.models.assets.Custom;
 import io.kestra.core.models.executions.TaskRun;
 import io.kestra.core.models.executions.TaskRunAttempt;
@@ -19,12 +26,6 @@ import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.dbt.models.Manifest;
 import io.kestra.plugin.dbt.models.RunResult;
-
-import java.io.File;
-import java.io.IOException;
-import java.net.URI;
-import java.time.Instant;
-import java.util.*;
 
 import static io.kestra.core.utils.Rethrow.throwFunction;
 
@@ -55,7 +56,8 @@ public abstract class ResultParser {
         java.util.List<WorkerTaskResult> workerTaskResults = result
             .getResults()
             .stream()
-            .map(throwFunction(r -> {
+            .map(throwFunction(r ->
+            {
                 ArrayList<State.History> histories = new ArrayList<>();
 
                 // List of status are not safe and can be not present on api calls
@@ -63,11 +65,14 @@ public abstract class ResultParser {
                     .stream()
                     .mapToLong(timing -> timing.getStartedAt().toEpochMilli())
                     .min()
-                    .ifPresent(value -> {
-                        histories.add(new State.History(
-                            State.Type.CREATED,
-                            Instant.ofEpochMilli(value)
-                        ));
+                    .ifPresent(value ->
+                    {
+                        histories.add(
+                            new State.History(
+                                State.Type.CREATED,
+                                Instant.ofEpochMilli(value)
+                            )
+                        );
                     });
 
                 r.getTiming()
@@ -75,22 +80,28 @@ public abstract class ResultParser {
                     .filter(timing -> timing.getName().equals("execute"))
                     .mapToLong(timing -> timing.getStartedAt().toEpochMilli())
                     .min()
-                    .ifPresent(value -> {
-                        histories.add(new State.History(
-                            State.Type.RUNNING,
-                            Instant.ofEpochMilli(value)
-                        ));
+                    .ifPresent(value ->
+                    {
+                        histories.add(
+                            new State.History(
+                                State.Type.RUNNING,
+                                Instant.ofEpochMilli(value)
+                            )
+                        );
                     });
 
                 r.getTiming()
                     .stream()
                     .mapToLong(timing -> timing.getCompletedAt().toEpochMilli())
                     .max()
-                    .ifPresent(value -> {
-                        histories.add(new State.History(
-                            r.state(),
-                            Instant.ofEpochMilli(value)
-                        ));
+                    .ifPresent(value ->
+                    {
+                        histories.add(
+                            new State.History(
+                                r.state(),
+                                Instant.ofEpochMilli(value)
+                            )
+                        );
                     });
 
                 State state = State.of(
@@ -101,7 +112,8 @@ public abstract class ResultParser {
                 r.getAdapterResponse()
                     .entrySet()
                     .stream()
-                    .map(e -> {
+                    .map(e ->
+                    {
                         return switch (e.getKey()) {
                             case "rows_affected" -> Counter.of("rows.affected", Double.valueOf(e.getValue()));
                             case "bytes_processed" -> Counter.of("bytes.processed", Double.valueOf(e.getValue()));
@@ -121,10 +133,13 @@ public abstract class ResultParser {
                     .executionId(runContext.render("{{ execution.id }}"))
                     .parentTaskRunId(runContext.render("{{ taskrun.id }}"))
                     .state(state)
-                    .attempts(List.of(TaskRunAttempt.builder()
-                        .state(state)
-                        .build()
-                    ));
+                    .attempts(
+                        List.of(
+                            TaskRunAttempt.builder()
+                                .state(state)
+                                .build()
+                        )
+                    );
                 if (assets != null) {
                     taskRunBuilder.assets(assets);
                 }
@@ -165,8 +180,11 @@ public abstract class ResultParser {
             List<Asset> outputs = outputAssets(asset, modelAssets);
             try {
                 runContext.assets().emit(new AssetEmit(inputs, outputs));
-            } catch (UnsupportedOperationException | QueueException e) {
-                // UnsupportedOperationException for OSS or tests where EE is not configured (assets are EE only)
+            } catch (UnsupportedOperationException e) {
+                // OSS edition or tests where EE assets are not available — silently skip.
+                runContext.logger().debug("Asset emission is not supported in this edition, skipping.");
+                break;
+            } catch (QueueException e) {
                 runContext.logger().warn("Unable to emit dbt asset '{}'", asset.assetId(), e);
             }
         }
@@ -180,11 +198,13 @@ public abstract class ResultParser {
         return modelAsset.children().stream()
             .map(modelAssets::get)
             .filter(Objects::nonNull)
-            .<Asset>map(child -> Custom.builder()
-                .id(child.assetId())
-                .type(TABLE_ASSET_TYPE)
-                .metadata(child.metadata())
-                .build())
+            .<Asset> map(
+                child -> Custom.builder()
+                    .id(child.assetId())
+                    .type(TABLE_ASSET_TYPE)
+                    .metadata(child.metadata())
+                    .build()
+            )
             .toList();
     }
 
@@ -223,10 +243,14 @@ public abstract class ResultParser {
             String assetId = assetIdFor(node.getDatabase(), node.getSchema(), name, uniqueId);
 
             Map<String, Object> metadata = new HashMap<>();
-            if (hasValue(system)) metadata.put("system", system);
-            if (hasValue(node.getDatabase())) metadata.put("database", node.getDatabase());
-            if (hasValue(node.getSchema())) metadata.put("schema", node.getSchema());
-            if (hasValue(name)) metadata.put("name", name);
+            if (hasValue(system))
+                metadata.put("system", system);
+            if (hasValue(node.getDatabase()))
+                metadata.put("database", node.getDatabase());
+            if (hasValue(node.getSchema()))
+                metadata.put("schema", node.getSchema());
+            if (hasValue(name))
+                metadata.put("name", name);
 
             // Use parent_map from manifest (the canonical DAG) when available,
             // falling back to node-level depends_on for older manifests.
@@ -245,9 +269,10 @@ public abstract class ResultParser {
         Map<String, ModelAsset> filtered = new HashMap<>(modelAssets.size());
         for (Map.Entry<String, ModelAsset> e : modelAssets.entrySet()) {
             ModelAsset a = e.getValue();
-            List<String> deps = a.dependsOn() == null ? List.of() : a.dependsOn().stream()
-                .filter(modelAssets::containsKey)
-                .toList();
+            List<String> deps = a.dependsOn() == null ? List.of()
+                : a.dependsOn().stream()
+                    .filter(modelAssets::containsKey)
+                    .toList();
             filtered.put(e.getKey(), new ModelAsset(a.assetId(), a.metadata(), deps, List.of()));
         }
 

@@ -1,7 +1,8 @@
 package io.kestra.plugin.dbt.models;
 
-import io.kestra.core.models.flows.State;
 import org.junit.jupiter.api.Test;
+
+import io.kestra.core.models.flows.State;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;

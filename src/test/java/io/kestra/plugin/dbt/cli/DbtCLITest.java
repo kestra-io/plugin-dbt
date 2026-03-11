@@ -1,5 +1,21 @@
 package io.kestra.plugin.dbt.cli;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Stream;
+
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
@@ -12,22 +28,8 @@ import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
 import io.kestra.plugin.core.runner.Process;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
-import jakarta.inject.Inject;
-import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Base64;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.stream.Stream;
+import jakarta.inject.Inject;
 
 import static io.kestra.core.utils.Rethrow.throwConsumer;
 import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
@@ -64,11 +66,15 @@ class DbtCLITest {
     public void copyFolder(Path src, Path dest) throws IOException {
         try (Stream<Path> stream = Files.walk(src)) {
             stream
-                .forEach(throwConsumer(source -> Files.copy(
-                    source,
-                    dest.resolve(src.relativize(source)),
-                    REPLACE_EXISTING
-                )));
+                .forEach(
+                    throwConsumer(
+                        source -> Files.copy(
+                            source,
+                            dest.resolve(src.relativize(source)),
+                            REPLACE_EXISTING
+                        )
+                    )
+                );
         }
     }
 
@@ -78,7 +84,8 @@ class DbtCLITest {
         DbtCLI execute = DbtCLI.builder()
             .id(IdUtils.create())
             .type(DbtCLI.class.getName())
-            .profiles(Property.ofValue(PROFILES)
+            .profiles(
+                Property.ofValue(PROFILES)
             )
             .logFormat(Property.ofValue(logFormat))
             .containerImage(Property.ofValue("ghcr.io/kestra-io/dbt-bigquery:latest"))
@@ -101,7 +108,8 @@ class DbtCLITest {
         DbtCLI execute = DbtCLI.builder()
             .id(IdUtils.create())
             .type(DbtCLI.class.getName())
-            .profiles(Property.ofValue(PROFILES)
+            .profiles(
+                Property.ofValue(PROFILES)
             )
             .containerImage(Property.ofValue("ghcr.io/kestra-io/dbt-bigquery:latest"))
             .commands(Property.ofValue(List.of("dbt build --select zipcode")))
@@ -149,12 +157,16 @@ class DbtCLITest {
         RunContext runContextLoad = TestsUtils.mockRunContext(runContextFactory, loadManifest, Map.of());
 
         Path workingDir = runContextLoad.workingDir().path(true);
-        copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()),
-            Path.of(runContextLoad.workingDir().path().toString(), "unit-kestra"));
+        copyFolder(
+            Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()),
+            Path.of(runContextLoad.workingDir().path().toString(), "unit-kestra")
+        );
         createSaFile(workingDir);
-        String manifestValue = Files.readString(Path.of(
-                Objects.requireNonNull(this.getClass().getClassLoader().getResource("manifest/manifest.json")).getPath())
-            , StandardCharsets.UTF_8);
+        String manifestValue = Files.readString(
+            Path.of(
+                Objects.requireNonNull(this.getClass().getClassLoader().getResource("manifest/manifest.json")).getPath()
+            ), StandardCharsets.UTF_8
+        );
         var namespace = runContextLoad.render(FLOW_NAMESPACE);
         runContextLoad.namespaceKv(namespace).put(MANIFEST_KEY, new KVValueAndMetadata(null, manifestValue));
 
@@ -170,9 +182,13 @@ class DbtCLITest {
             .type(DbtCLI.class.getName())
             .taskRunner(Process.instance())
             .projectDir(Property.ofValue("unit-kestra"))
-            .commands(Property.ofValue(List.of(
-                "head -c 1 unit-kestra/target/manifest.json | grep -qx '{'"
-            )))
+            .commands(
+                Property.ofValue(
+                    List.of(
+                        "head -c 1 unit-kestra/target/manifest.json | grep -qx '{'"
+                    )
+                )
+            )
             .loadManifest(
                 DbtCLI.KvStoreManifest.builder()
                     .key(Property.ofValue(MANIFEST_KEY))
@@ -201,10 +217,14 @@ class DbtCLITest {
             .type(DbtCLI.class.getName())
             .profiles(Property.ofValue(PROFILES))
             .containerImage(Property.ofValue("ghcr.io/kestra-io/dbt-bigquery:latest"))
-            .commands(Property.ofValue(List.of(
-                "dbt deps",
-                "dbt run-operation emit_warning_log"
-            )))
+            .commands(
+                Property.ofValue(
+                    List.of(
+                        "dbt deps",
+                        "dbt run-operation emit_warning_log"
+                    )
+                )
+            )
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
@@ -257,12 +277,16 @@ class DbtCLITest {
             .type(DbtCLI.class.getName())
             .profiles(Property.ofValue(PROFILES))
             .containerImage(Property.ofValue("ghcr.io/kestra-io/dbt-bigquery:latest"))
-            .commands(Property.ofValue(List.of(
-                "dbt deps",
-                "mkdir -p models",
-                "echo 'SELECT * FROM definitely_non_existent_table_12345' > models/failing_test_model.sql",
-                "dbt run --models failing_test_model"
-            )))
+            .commands(
+                Property.ofValue(
+                    List.of(
+                        "dbt deps",
+                        "mkdir -p models",
+                        "echo 'SELECT * FROM definitely_non_existent_table_12345' > models/failing_test_model.sql",
+                        "dbt run --models failing_test_model"
+                    )
+                )
+            )
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
@@ -271,7 +295,8 @@ class DbtCLITest {
         copyFolder(Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("project")).getPath()), workingDir);
         createSaFile(workingDir);
 
-        RunnableTaskException exception = assertThrows(RunnableTaskException.class, () -> {
+        RunnableTaskException exception = assertThrows(RunnableTaskException.class, () ->
+        {
             execute.run(runContext);
         });
 
@@ -279,8 +304,10 @@ class DbtCLITest {
 
         assertThat(output.getExitCode(), is(not(0)));
         assertThat(output.getOutputFiles(), is(notNullValue()));
-        assertThat("run_results.json should be captured on failure",
-            output.getOutputFiles(), hasKey("run_results.json"));
+        assertThat(
+            "run_results.json should be captured on failure",
+            output.getOutputFiles(), hasKey("run_results.json")
+        );
     }
 
     @Test
