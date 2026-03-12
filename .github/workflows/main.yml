@@ -33,6 +33,10 @@ on:
         type: string
         default: ''
 
+concurrency:
+  group: plugin-dbt-bigquery-tests
+  cancel-in-progress: false
+
 permissions:
   contents: write
   checks: write
