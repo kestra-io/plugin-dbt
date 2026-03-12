@@ -17,3 +17,5 @@ src/test/resources/application-test.yml
 src/test/resources/project/logs/
 src/test/resources/project/state/
 src/test/resources/project/.profile
+.factorypath
+bin/
