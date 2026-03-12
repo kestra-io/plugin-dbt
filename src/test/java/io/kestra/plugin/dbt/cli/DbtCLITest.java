@@ -244,19 +244,28 @@ class DbtCLITest {
     private void createSaFile(Path workingDir) throws IOException {
         String credentialsPath = System.getenv("GOOGLE_APPLICATION_CREDENTIALS");
         String encodedServiceAccount = System.getenv("GOOGLE_SERVICE_ACCOUNT");
-        Assumptions.assumeTrue(
-            (credentialsPath != null && !credentialsPath.isBlank()) ||
-                (encodedServiceAccount != null && !encodedServiceAccount.isBlank()),
-            "GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_SERVICE_ACCOUNT must be set"
-        );
 
         Path workingDirSa = workingDir.resolve("sa.json");
+
         if (credentialsPath != null && !credentialsPath.isBlank()) {
-            Files.copy(Path.of(credentialsPath), workingDirSa);
+            Path credFile = Path.of(credentialsPath);
+            Assumptions.assumeTrue(Files.exists(credFile) && Files.size(credFile) > 0,
+                "GOOGLE_APPLICATION_CREDENTIALS file does not exist or is empty");
+            Files.copy(credFile, workingDirSa);
             return;
         }
 
-        try (var inputStream = new ByteArrayInputStream(Base64.getDecoder().decode(encodedServiceAccount.getBytes()))) {
+        Assumptions.assumeTrue(encodedServiceAccount != null && !encodedServiceAccount.isBlank(),
+            "GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_SERVICE_ACCOUNT must be set");
+
+        byte[] decoded;
+        try {
+            decoded = Base64.getDecoder().decode(encodedServiceAccount.getBytes());
+        } catch (IllegalArgumentException e) {
+            Assumptions.abort("GOOGLE_SERVICE_ACCOUNT is not valid Base64: " + e.getMessage());
+            return;
+        }
+        try (var inputStream = new ByteArrayInputStream(decoded)) {
             Files.copy(inputStream, workingDirSa);
         }
     }
