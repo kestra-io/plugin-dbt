@@ -1,12 +1,13 @@
 package io.kestra.plugin.dbt.cloud.models;
 
+import java.time.ZonedDateTime;
+
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
+
 import lombok.Value;
 import lombok.experimental.SuperBuilder;
 import lombok.extern.jackson.Jacksonized;
-
-import java.time.ZonedDateTime;
 
 @Value
 @Jacksonized

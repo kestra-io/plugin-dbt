@@ -1,5 +1,19 @@
 package io.kestra.plugin.dbt.cli;
 
+import java.io.File;
+import java.io.IOException;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.*;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang3.StringUtils;
+
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.exceptions.ResourceExpiredException;
 import io.kestra.core.models.annotations.Example;
@@ -25,24 +39,12 @@ import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.plugin.scripts.exec.scripts.runners.CommandsWrapper;
 import io.kestra.plugin.scripts.runner.docker.Docker;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
-import org.apache.commons.io.FileUtils;
-import org.apache.commons.lang3.StringUtils;
-
-import java.io.File;
-import java.io.IOException;
-import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.Instant;
-import java.util.*;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 @SuperBuilder
 @ToString
@@ -471,39 +473,44 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         ScriptOutput runResults;
         try {
             runResults = commandsWrapper
-                .addEnv(Map.of(
-                    "PYTHONUNBUFFERED", "true",
-                    "PIP_ROOT_USER_ACTION", "ignore"
-                ))
+                .addEnv(
+                    Map.of(
+                        "PYTHONUNBUFFERED", "true",
+                        "PIP_ROOT_USER_ACTION", "ignore"
+                    )
+                )
                 .withInterpreter(this.interpreter)
                 .withBeforeCommands(this.beforeCommands)
                 .withBeforeCommandsWithOptions(true)
-                .withCommands(Property.ofValue(
-                    rCommands.stream()
-                        .map(command -> {
-                            if (!command.startsWith("dbt")) {
+                .withCommands(
+                    Property.ofValue(
+                        rCommands.stream()
+                            .map(command ->
+                            {
+                                if (!command.startsWith("dbt")) {
+                                    return command;
+                                }
+
+                                if (rProjectDir.orElse(null) != null && !command.contains("--project-dir")) {
+                                    command = command.concat(" --project-dir " + rProjectDir.get());
+                                }
+
+                                if (!LogFormat.NONE.equals(rLogFormat) && !command.contains("--log-format")) {
+                                    command = command.concat(" --log-format " + rLogFormat.toString().toLowerCase());
+                                }
+
+                                if (finalSupportsTargetPath && !command.contains("--target-path")) {
+                                    command = command.concat(targetPathArg);
+                                }
+
+                                if (!command.contains("--log-path")) {
+                                    command = command.concat(logPathArg);
+                                }
+
                                 return command;
-                            }
-
-                            if (rProjectDir.orElse(null) != null && !command.contains("--project-dir")) {
-                                command = command.concat(" --project-dir " + rProjectDir.get());
-                            }
-
-                            if (!LogFormat.NONE.equals(rLogFormat) && !command.contains("--log-format")) {
-                                command = command.concat(" --log-format " + rLogFormat.toString().toLowerCase());
-                            }
-
-                            if (finalSupportsTargetPath && !command.contains("--target-path")) {
-                                command = command.concat(targetPathArg);
-                            }
-
-                            if (!command.contains("--log-path")) {
-                                command = command.concat(logPathArg);
-                            }
-
-                            return command;
-                        })
-                        .toList())
+                            })
+                            .toList()
+                    )
                 )
                 .run();
         } catch (Exception e) {
@@ -544,7 +551,8 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
             }
 
             ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestFile);
-            runContext.logger().info("Manifest parse done. uri={}, metadata={}, nodes={}",
+            runContext.logger().info(
+                "Manifest parse done. uri={}, metadata={}, nodes={}",
                 manifestResult.uri(),
                 manifestResult.manifest() != null ? manifestResult.manifest().getMetadata().size() : -1,
                 manifestResult.manifest() != null ? manifestResult.manifest().getNodes().size() : -1
@@ -559,7 +567,8 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         }
     }
 
-    private void fetchAndStoreManifestIfExists(RunContext runContext, KVStore loadManifestKvStore, Path projectWorkingDirectory) throws IOException, ResourceExpiredException, IllegalVariableEvaluationException {
+    private void fetchAndStoreManifestIfExists(RunContext runContext, KVStore loadManifestKvStore, Path projectWorkingDirectory)
+        throws IOException, ResourceExpiredException, IllegalVariableEvaluationException {
         Optional<KVValue> manifestValue = loadManifestKvStore.getValue(runContext.render(this.getLoadManifest().getKey()).as(String.class).get());
 
         if (manifestValue.isEmpty() || manifestValue.get().value() == null || StringUtils.isBlank(manifestValue.get().value().toString())) {

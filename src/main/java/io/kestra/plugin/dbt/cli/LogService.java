@@ -1,14 +1,16 @@
 package io.kestra.plugin.dbt.cli;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
 import io.kestra.core.models.executions.metrics.Counter;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean; 
 class LogService {
     static final protected ObjectMapper MAPPER = JacksonMapper.ofJson()
         .setSerializationInclusion(JsonInclude.Include.NON_NULL);
@@ -59,7 +61,7 @@ class LogService {
             additional.remove("extra");
 
             String format = "[Date: {}] [Thread: {}] [Type: {}] {}{}";
-            String[] args = new String[]{
+            String[] args = new String[] {
                 ts,
                 thread,
                 type,
@@ -71,7 +73,7 @@ class LogService {
                 Map<String, Object> data = (Map<String, Object>) jsonLog.get("data");
 
                 if (data.containsKey("stats")) {
-                    Map<String, Integer> stats  = (Map<String, Integer>) data.get("stats");
+                    Map<String, Integer> stats = (Map<String, Integer>) data.get("stats");
 
                     stats.forEach((s, integer) -> runContext.metric(Counter.of(s, integer)));
                 }

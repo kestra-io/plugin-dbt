@@ -1,14 +1,16 @@
 package io.kestra.plugin.dbt.models;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
-import io.kestra.core.models.flows.State;
-import lombok.Value;
-import lombok.experimental.SuperBuilder;
-import lombok.extern.jackson.Jacksonized;
-
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+import io.kestra.core.models.flows.State;
+
+import lombok.Value;
+import lombok.experimental.SuperBuilder;
+import lombok.extern.jackson.Jacksonized;
 
 @Value
 @Jacksonized

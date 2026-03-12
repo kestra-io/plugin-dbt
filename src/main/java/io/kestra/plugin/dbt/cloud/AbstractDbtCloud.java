@@ -1,8 +1,12 @@
 package io.kestra.plugin.dbt.cloud;
 
+import java.io.IOException;
+import java.time.Duration;
+
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.HttpResponse;
@@ -15,13 +19,11 @@ import io.kestra.core.models.tasks.Task;
 import io.kestra.core.models.tasks.retrys.Exponential;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.utils.RetryUtils;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
-
-import java.io.IOException;
-import java.time.Duration;
 
 @SuperBuilder
 @ToString
@@ -66,8 +68,7 @@ public abstract class AbstractDbtCloud extends Task {
     protected <RES> HttpResponse<RES> request(
         RunContext runContext,
         HttpRequest.HttpRequestBuilder requestBuilder,
-        Class<RES> responseType
-    ) throws HttpClientException, IllegalVariableEvaluationException, IOException {
+        Class<RES> responseType) throws HttpClientException, IllegalVariableEvaluationException, IOException {
 
         var request = requestBuilder
             .addHeader("Authorization", "Bearer " + runContext.render(this.token).as(String.class).orElseThrow())
@@ -78,7 +79,7 @@ public abstract class AbstractDbtCloud extends Task {
         var rInitialDelay = runContext.render(this.initialDelayMs).as(Long.class).orElse(1000L);
 
         try (var client = new HttpClient(runContext, options)) {
-            return RetryUtils.<HttpResponse<RES>, HttpClientException>of(
+            return RetryUtils.<HttpResponse<RES>, HttpClientException> of(
                 Exponential.builder()
                     .delayFactor(2.0)
                     .interval(Duration.ofMillis(rInitialDelay))
@@ -90,10 +91,11 @@ public abstract class AbstractDbtCloud extends Task {
                     (ex.getResponse().getStatus().getCode() == 502 ||
                         ex.getResponse().getStatus().getCode() == 503 ||
                         ex.getResponse().getStatus().getCode() == 504),
-                () -> {
+                () ->
+                {
                     var response = client.request(request, String.class);
                     var parsedResponse = MAPPER.readValue(response.getBody(), responseType);
-                    return HttpResponse.<RES>builder()
+                    return HttpResponse.<RES> builder()
                         .request(request)
                         .body(parsedResponse)
                         .headers(response.getHeaders())

@@ -1,6 +1,20 @@
 package io.kestra.plugin.dbt.cli;
 
+import java.io.File;
+import java.io.IOException;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.*;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import org.apache.commons.io.FileUtils;
+
 import com.fasterxml.jackson.annotation.JsonSetter;
+
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
@@ -16,22 +30,11 @@ import io.kestra.plugin.scripts.exec.scripts.models.RunnerType;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.plugin.scripts.exec.scripts.runners.CommandsWrapper;
 import io.kestra.plugin.scripts.runner.docker.Docker;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
-import org.apache.commons.io.FileUtils;
-
-import java.io.File;
-import java.io.IOException;
-import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.Instant;
-import java.util.*;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 @SuperBuilder
 @ToString
@@ -183,14 +186,20 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
         }
 
         ScriptOutput run = commandsWrapper
-            .addEnv(Map.of(
-                "PYTHONUNBUFFERED", "true",
-                "PIP_ROOT_USER_ACTION", "ignore"
-            ))
+            .addEnv(
+                Map.of(
+                    "PYTHONUNBUFFERED", "true",
+                    "PIP_ROOT_USER_ACTION", "ignore"
+                )
+            )
             .withInterpreter(Property.ofValue(List.of("/bin/sh", "-c")))
-            .withCommands(new Property<>(JacksonMapper.ofJson().writeValueAsString(
-                List.of(createDbtCommand(runContext)))
-            ))
+            .withCommands(
+                new Property<>(
+                    JacksonMapper.ofJson().writeValueAsString(
+                        List.of(createDbtCommand(runContext))
+                    )
+                )
+            )
             .run();
 
         parseResults(runContext, workingDirectory, run);
@@ -199,10 +208,12 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     }
 
     private String createDbtCommand(RunContext runContext) throws IllegalVariableEvaluationException {
-        List<String> commands = new ArrayList<>(List.of(
-            runContext.render(this.dbtPath).as(String.class).orElseThrow(),
-            "--log-format json"
-        ));
+        List<String> commands = new ArrayList<>(
+            List.of(
+                runContext.render(this.dbtPath).as(String.class).orElseThrow(),
+                "--log-format json"
+            )
+        );
 
         if (runContext.render(this.debug).as(Boolean.class).orElse(false)) {
             commands.add("--debug");

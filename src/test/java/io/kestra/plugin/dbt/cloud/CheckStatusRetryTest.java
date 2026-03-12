@@ -1,5 +1,11 @@
 package io.kestra.plugin.dbt.cloud;
 
+import java.net.URI;
+import java.util.Map;
+
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+
 import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.HttpResponse;
 import io.kestra.core.http.client.HttpClient;
@@ -9,12 +15,8 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.RetryUtils;
-import jakarta.inject.Inject;
-import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 
-import java.net.URI;
-import java.util.Map;
+import jakarta.inject.Inject;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -33,24 +35,34 @@ class CheckStatusRetryTest {
         var requestBuilder = HttpRequest.builder()
             .uri(new URI("https://fake.api/dbt"));
 
-        try (var mocked = Mockito.mockConstruction(HttpClient.class,
-            (mockClient, context) -> when(mockClient.request(any(HttpRequest.class), eq(String.class)))
-                .thenThrow(new HttpClientResponseException(
-                    "Bad Gateway",
-                    HttpResponse.<String>builder()
-                        .status(HttpResponse.Status.builder().code(502).build())
-                        .build()
-                ))
-                .thenThrow(new HttpClientResponseException(
-                    "Service Unavailable",
-                    HttpResponse.<String>builder()
-                        .status(HttpResponse.Status.builder().code(503).build())
-                        .build()
-                ))
-                .thenReturn(HttpResponse.<String>builder()
-                    .status(HttpResponse.Status.builder().code(200).build())
-                    .body("{\"status\":\"ok\"}")
-                    .build()))) {
+        try (
+            var mocked = Mockito.mockConstruction(
+                HttpClient.class,
+                (mockClient, context) -> when(mockClient.request(any(HttpRequest.class), eq(String.class)))
+                    .thenThrow(
+                        new HttpClientResponseException(
+                            "Bad Gateway",
+                            HttpResponse.<String> builder()
+                                .status(HttpResponse.Status.builder().code(502).build())
+                                .build()
+                        )
+                    )
+                    .thenThrow(
+                        new HttpClientResponseException(
+                            "Service Unavailable",
+                            HttpResponse.<String> builder()
+                                .status(HttpResponse.Status.builder().code(503).build())
+                                .build()
+                        )
+                    )
+                    .thenReturn(
+                        HttpResponse.<String> builder()
+                            .status(HttpResponse.Status.builder().code(200).build())
+                            .body("{\"status\":\"ok\"}")
+                            .build()
+                    )
+            )
+        ) {
 
             var task = CheckStatus.builder()
                 .id(IdUtils.create())
@@ -78,20 +90,28 @@ class CheckStatusRetryTest {
         var requestBuilder = HttpRequest.builder()
             .uri(new URI("https://fake.api/dbt"));
 
-        try (var mocked = Mockito.mockConstruction(HttpClient.class,
-            (mockClient, context) -> when(mockClient.request(any(HttpRequest.class), eq(String.class)))
-                .thenThrow(new HttpClientResponseException(
-                    "Bad Gateway",
-                    HttpResponse.<String>builder()
-                        .status(HttpResponse.Status.builder().code(502).build())
-                        .build()
-                ))
-                .thenThrow(new HttpClientResponseException(
-                    "Bad Gateway",
-                    HttpResponse.<String>builder()
-                        .status(HttpResponse.Status.builder().code(502).build())
-                        .build()
-                )))) {
+        try (
+            var mocked = Mockito.mockConstruction(
+                HttpClient.class,
+                (mockClient, context) -> when(mockClient.request(any(HttpRequest.class), eq(String.class)))
+                    .thenThrow(
+                        new HttpClientResponseException(
+                            "Bad Gateway",
+                            HttpResponse.<String> builder()
+                                .status(HttpResponse.Status.builder().code(502).build())
+                                .build()
+                        )
+                    )
+                    .thenThrow(
+                        new HttpClientResponseException(
+                            "Bad Gateway",
+                            HttpResponse.<String> builder()
+                                .status(HttpResponse.Status.builder().code(502).build())
+                                .build()
+                        )
+                    )
+            )
+        ) {
 
             var task = CheckStatus.builder()
                 .id(IdUtils.create())
@@ -103,7 +123,8 @@ class CheckStatusRetryTest {
                 .initialDelayMs(Property.ofValue(100L))
                 .build();
 
-            var ex = assertThrows(RetryUtils.RetryFailed.class,
+            var ex = assertThrows(
+                RetryUtils.RetryFailed.class,
                 () -> task.request(runContext, requestBuilder, Map.class)
             );
 
