@@ -116,7 +116,7 @@ class DbtCLITest {
             .storeManifest(
                 DbtCLI.KvStoreManifest.builder()
                     .key(Property.ofValue(MANIFEST_KEY))
-                    .namespace(new Property<>(FLOW_NAMESPACE))
+                    .namespace(Property.ofValue(FLOW_NAMESPACE))
                     .build()
             )
             .build();
@@ -149,7 +149,7 @@ class DbtCLITest {
             .loadManifest(
                 DbtCLI.KvStoreManifest.builder()
                     .key(Property.ofValue(MANIFEST_KEY))
-                    .namespace(new Property<>(FLOW_NAMESPACE))
+                    .namespace(Property.ofValue(FLOW_NAMESPACE))
                     .build()
             )
             .build();
@@ -192,7 +192,7 @@ class DbtCLITest {
             .loadManifest(
                 DbtCLI.KvStoreManifest.builder()
                     .key(Property.ofValue(MANIFEST_KEY))
-                    .namespace(new Property<>(FLOW_NAMESPACE))
+                    .namespace(Property.ofValue(FLOW_NAMESPACE))
                     .build()
             )
             .build();
