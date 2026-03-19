@@ -195,9 +195,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             .withInterpreter(Property.ofValue(List.of("/bin/sh", "-c")))
             .withCommands(
                 Property.ofValue(
-                    JacksonMapper.ofJson().writeValueAsString(
-                        List.of(createDbtCommand(runContext))
-                    )
+                    List.of(createDbtCommand(runContext))
                 )
             )
             .run();
