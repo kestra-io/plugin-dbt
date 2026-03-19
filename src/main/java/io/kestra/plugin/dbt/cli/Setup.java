@@ -151,7 +151,6 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     @JsonSetter
     public void setDockerOptions(DockerOptions dockerOptions) {
         this.dockerOptions = Property.ofValue(dockerOptions);
-        this.docker = dockerOptions;
     }
 
     @Override
