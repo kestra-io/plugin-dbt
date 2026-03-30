@@ -457,18 +457,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
         LogFormat rLogFormat = runContext.render(this.logFormat).as(LogFormat.class).orElseThrow();
 
-        // Strict minimum: force dbt to write artifacts in ./target (and logs in ./logs) deterministically.
-        // Some dbt variants (e.g., fusion) don't support --target-path, so only append it when supported.
-        final String targetPathArg = " --target-path target";
         final String logPathArg = " --log-path logs";
-        boolean supportsTargetPath = runContext.render(this.engine)
-            .as(Engine.class)
-            .orElse(Engine.CORE) != Engine.FUSION;
-        String resolvedImage = runContext.render(this.containerImage).as(String.class).orElse(null);
-        if (resolvedImage != null && !resolvedImage.isBlank() && !CORE_IMAGE.equals(resolvedImage)) {
-            supportsTargetPath = false;
-        }
-        final boolean finalSupportsTargetPath = supportsTargetPath;
 
         ScriptOutput runResults;
         try {
@@ -497,10 +486,6 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
                                 if (!LogFormat.NONE.equals(rLogFormat) && !command.contains("--log-format")) {
                                     command = command.concat(" --log-format " + rLogFormat.toString().toLowerCase());
-                                }
-
-                                if (finalSupportsTargetPath && !command.contains("--target-path")) {
-                                    command = command.concat(targetPathArg);
                                 }
 
                                 if (!command.contains("--log-path")) {
