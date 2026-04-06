@@ -25,6 +25,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
+import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -150,6 +151,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         title = "Parse run results",
         description = "If true (default), parses dbt run results to expose node durations and warnings."
     )
+    @PluginProperty(group = "advanced")
     protected Property<Boolean> parseRunResults = Property.ofValue(Boolean.TRUE);
 
     @Override

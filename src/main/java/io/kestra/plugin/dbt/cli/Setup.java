@@ -104,7 +104,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     )
     @NotNull
     @NotEmpty
-    @PluginProperty(dynamic = true)
+    @PluginProperty(dynamic = true, group = "execution")
     private final String pythonPath = DEFAULT_IMAGE;
 
     @Schema(
@@ -112,6 +112,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
         description = "Python dependencies list to setup in the virtualenv, in the same format than requirements.txt. It must at least provides dbt."
     )
     @NotNull
+    @PluginProperty(group = "main")
     protected Property<List<String>> requirements;
 
     @Builder.Default
@@ -123,6 +124,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     )
     @NotNull
     @Deprecated(since = "0.16.0", forRemoval = true)
+    @PluginProperty(group = "deprecated")
     protected Property<Boolean> exitOnFailed = Property.ofValue(Boolean.TRUE);
 
     @Schema(
@@ -130,6 +132,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
         description = "You can define the files as map or a JSON string. " +
             "Each file can be defined inlined or can reference a file from Kestra's internal storage."
     )
+    @PluginProperty(group = "source")
     private Property<Object> inputFiles;
 
     @Schema(
@@ -137,15 +140,17 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
         description = "Task runners are provided by plugins, each have their own properties."
     )
     @Builder.Default
-    @PluginProperty
+    @PluginProperty(group = "execution")
     @Valid
     protected TaskRunner<?> taskRunner = Docker.instance();
 
     @Builder.Default
+    @PluginProperty(group = "execution")
     protected Property<String> containerImage = Property.ofValue(DEFAULT_IMAGE);
 
     @Schema(title = "Deprecated, use the `docker` property instead", deprecated = true)
     @Deprecated
+    @PluginProperty(group = "deprecated")
     private Property<DockerOptions> dockerOptions;
 
     @JsonSetter

@@ -312,18 +312,21 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         description = "Ordered CLI commands. Lines starting with `dbt` inherit `--project-dir` when `projectDir` is set and append `--log-format` unless `logFormat` is `NONE`."
     )
     @NotNull
+    @PluginProperty(group = "main")
     private Property<List<String>> commands;
 
     @Schema(
         title = "Inline dbt profiles.yml",
         description = "Content written to `profiles.yml` in the working directory, overriding any existing file."
     )
+    @PluginProperty(group = "source")
     private Property<String> profiles;
 
     @Schema(
         title = "dbt project directory",
         description = "Relative path to the project when it differs from the working directory. Added automatically to dbt commands as `--project-dir`."
     )
+    @PluginProperty(group = "connection")
     private Property<String> projectDir;
 
     @Builder.Default
@@ -331,13 +334,14 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         title = "Parse run results",
         description = "If true (default), reads `target/run_results.json` to expose durations and warnings in task outputs."
     )
+    @PluginProperty(group = "advanced")
     protected Property<Boolean> parseRunResults = Property.ofValue(Boolean.TRUE);
 
     @Schema(
         title = "Task runner",
         description = "Runner configuration for executing commands. Default is Docker with an empty entrypoint; adjust entrypoint when switching runners."
     )
-    @PluginProperty
+    @PluginProperty(group = "execution")
     @Builder.Default
     @Valid
     protected TaskRunner<?> taskRunner = Docker.builder()
@@ -346,18 +350,21 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         .build();
 
     @Builder.Default
+    @PluginProperty(group = "execution")
     protected Property<String> containerImage = Property.ofValue(CORE_IMAGE);
 
     @Schema(
         title = "Store manifest",
         description = "Persists `target/manifest.json` to the KV Store under the provided namespace/key after the run completes."
     )
+    @PluginProperty(group = "destination")
     protected KvStoreManifest storeManifest;
 
     @Schema(
         title = "Load manifest",
         description = "Fetches an existing `manifest.json` from the KV Store and writes it to `target/manifest.json` (under `projectDir` when set) before running commands; logs a warning if absent."
     )
+    @PluginProperty(group = "advanced")
     protected KvStoreManifest loadManifest;
 
     @Schema(
@@ -365,6 +372,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         description = "Adds `--log-format <value>` to dbt commands unless set to `NONE`. Default JSON; supports JSON, DEBUG, TEXT, or NONE."
     )
     @Builder.Default
+    @PluginProperty(group = "processing")
     private Property<LogFormat> logFormat = Property.ofValue(LogFormat.JSON);
 
     @Schema(
@@ -372,6 +380,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         description = "Selects the fallback image when none is set on the task or runner: CORE → `ghcr.io/kestra-io/dbt` (default), FUSION → `ghcr.io/kestra-io/dbt-fusion`."
     )
     @Builder.Default
+    @PluginProperty(group = "advanced")
     private Property<Engine> engine = Property.ofValue(Engine.CORE);
 
     @Override

@@ -36,6 +36,7 @@ import lombok.experimental.SuperBuilder;
 
 import static io.kestra.core.utils.Rethrow.throwSupplier;
 import static java.lang.Math.max;
+import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -97,6 +98,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         title = "Parse run results",
         description = "If true (default), parses `run_results.json` to expose node timings; otherwise uploads the artifact as-is."
     )
+    @PluginProperty(group = "advanced")
     protected Property<Boolean> parseRunResults = Property.ofValue(Boolean.TRUE);
 
     @Builder.Default
