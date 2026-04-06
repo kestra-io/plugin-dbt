@@ -90,7 +90,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             If you change from the default one, be careful to also configure the entrypoint to an empty list if needed."""
     )
     @Builder.Default
-    @PluginProperty
+    @PluginProperty(group = "execution")
     @Valid
     protected TaskRunner<?> taskRunner = Docker.builder()
         .type(Docker.class.getName())
@@ -99,6 +99,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
 
     @Schema(title = "The task runner container image, only used if the task runner is container-based.")
     @Builder.Default
+    @PluginProperty(group = "execution")
     protected Property<String> containerImage = Property.ofValue(DEFAULT_IMAGE);
 
     @Schema(
@@ -106,16 +107,19 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
         description = "Deprecated, use 'taskRunner' instead."
     )
     @Deprecated
+    @PluginProperty(group = "execution")
     protected Property<RunnerType> runner;
 
     @Schema(
         title = "Deprecated, use 'taskRunner' instead"
     )
     @Deprecated
+    @PluginProperty(group = "execution")
     private Property<DockerOptions> docker;
 
     @Schema(title = "Deprecated, use the `docker` property instead", deprecated = true)
     @Deprecated
+    @PluginProperty(group = "advanced")
     private Property<DockerOptions> dockerOptions;
 
     @JsonSetter
@@ -127,6 +131,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     @Schema(
         title = "Additional environment variables for the current process."
     )
+    @PluginProperty(group = "execution")
     protected Property<Map<String, String>> env;
 
     @Builder.Default
@@ -134,6 +139,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
         title = "Parse run result",
         description = "Parsing run result to display duration of each task inside dbt"
     )
+    @PluginProperty(group = "advanced")
     protected Property<Boolean> parseRunResults = Property.ofValue(Boolean.TRUE);
 
     private NamespaceFiles namespaceFiles;
