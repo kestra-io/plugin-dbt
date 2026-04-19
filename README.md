@@ -35,13 +35,18 @@
 </p>
 <p align="center" style="color:grey;"><i>Get started with Kestra in 4 minutes.</i></p>
 
-
 # Kestra dbt plugin
 
-Plugin to orchestrate dbt models and tests using [dbt core](https://github.com/dbt-labs/dbt-core) or [dbt Cloud](https://www.getdbt.com/).
+## Why
 
-![Kestra orchestrator](https://kestra.io/video.gif)
+- What user problem does this solve? Teams need to integrate dbt data transformations into Kestra orchestration pipelines from orchestrated workflows instead of relying on manual console work, ad hoc scripts, or disconnected schedulers.
+- Why would a team adopt this plugin in a workflow? It keeps DBT steps in the same Kestra flow as upstream preparation, approvals, retries, notifications, and downstream systems.
+- What operational/business outcome does it enable? It reduces manual handoffs and fragmented tooling while improving reliability, traceability, and delivery speed for processes that depend on DBT.
 
+## What
+
+- Provides plugin components under `io.kestra.plugin.dbt`.
+- Includes classes such as `ResultParser`, `RunResult`, `Manifest`, `Seed`.
 
 ## Documentation
 * Full documentation can be found under [kestra.io/docs](https://kestra.io/docs)
