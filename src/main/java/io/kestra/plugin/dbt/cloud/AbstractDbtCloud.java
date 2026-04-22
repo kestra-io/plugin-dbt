@@ -19,6 +19,7 @@ import io.kestra.core.models.tasks.Task;
 import io.kestra.core.models.tasks.retrys.Exponential;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.utils.RetryUtils;
+import io.kestra.core.models.annotations.PluginProperty;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
@@ -42,10 +43,12 @@ public abstract class AbstractDbtCloud extends Task {
 
     @Schema(title = "Numeric ID of the account.")
     @NotNull
+    @PluginProperty(group = "main")
     Property<String> accountId;
 
     @Schema(title = "API key.")
     @NotNull
+    @PluginProperty(group = "main", secret = true)
     Property<String> token;
 
     @Schema(title = "The HTTP client configuration.")
