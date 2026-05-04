@@ -6,7 +6,6 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Instant;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -25,7 +24,6 @@ import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.RunnableTaskException;
-import io.kestra.core.models.tasks.runners.AbstractLogConsumer;
 import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
@@ -426,17 +424,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
         CommandsWrapper commandsWrapper = this.commands(runContext)
             .withEnableOutputDirectory(true) // force the output dir, so we can get the run_results.json and manifest.json files on each task runners
-            .withLogConsumer(new AbstractLogConsumer() {
-                @Override
-                public void accept(String line, Boolean isStdErr, Instant instant) {
-                    LogService.parse(runContext, line, hasWarning);
-                }
-
-                @Override
-                public void accept(String line, Boolean isStdErr) {
-                    LogService.parse(runContext, line, hasWarning);
-                }
-            });
+            .withLogConsumer(new DbtLogConsumer(runContext, hasWarning));
 
         var rProjectDir = runContext.render(projectDir).as(String.class);
         Path projectWorkingDirectory = rProjectDir
@@ -529,6 +517,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
             .warningDetected(hasWarning.get())
             .outputFiles(runResults.getOutputFiles())
             .exitCode(runResults.getExitCode())
+            .vars(runResults.getVars())
             .build();
     }
 
