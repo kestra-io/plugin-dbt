@@ -6,10 +6,8 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Instant;
 import java.util.*;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.commons.io.FileUtils;
 
@@ -19,7 +17,6 @@ import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.*;
-import io.kestra.core.models.tasks.runners.AbstractLogConsumer;
 import io.kestra.core.models.tasks.runners.ScriptService;
 import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
@@ -164,17 +161,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             .withDockerOptions(runContext.render(this.getDocker()).as(DockerOptions.class).orElse(null))
             .withContainerImage(runContext.render(this.getContainerImage()).as(String.class).orElseThrow())
             .withTaskRunner(this.taskRunner)
-            .withLogConsumer(new AbstractLogConsumer() {
-                @Override
-                public void accept(String line, Boolean isStdErr, Instant instant) {
-                    LogService.parse(runContext, line, new AtomicBoolean(false));
-                }
-
-                @Override
-                public void accept(String line, Boolean isStdErr) {
-                    LogService.parse(runContext, line, new AtomicBoolean(false));
-                }
-            })
+            .withLogConsumer(new DbtLogConsumer(runContext))
             .withEnableOutputDirectory(true); //force output files on task runners
         Path workingDirectory = commandsWrapper.getWorkingDirectory();
 

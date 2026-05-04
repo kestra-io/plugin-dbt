@@ -327,6 +327,28 @@ class DbtCLITest {
     }
 
     @Test
+    void run_withOutputMarker_shouldPopulateVars() throws Exception {
+        DbtCLI task = DbtCLI.builder()
+            .id(IdUtils.create())
+            .type(DbtCLI.class.getName())
+            .taskRunner(Process.instance())
+            .commands(
+                Property.ofValue(
+                    List.of("echo '::{\"outputs\":{\"some_value\":\"hello\"}}::'")
+                )
+            )
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+
+        DbtCLI.Output output = task.run(runContext);
+
+        assertThat(output.getExitCode(), is(0));
+        assertThat(output.getVars(), is(notNullValue()));
+        assertThat(output.getVars(), hasEntry("some_value", "hello"));
+    }
+
+    @Test
     void run_withProjectDir_shouldInjectProjectDirFlag() throws Exception {
         DbtCLI task = DbtCLI.builder()
             .id(IdUtils.create())
