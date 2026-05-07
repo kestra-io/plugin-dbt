@@ -12,42 +12,39 @@ inputs:
 tasks:
   - id: wd
     type: io.kestra.plugin.core.flow.WorkingDirectory
+    inputFiles:
+      dbt_project.yml: |
+        name: 'my_dbt_project'
+        version: '1.0.0'
+        config-version: 2
+
+        profile: 'my_dbt_project'
+
+        model-paths: ["models"]
+        analysis-paths: ["analyses"]
+        test-paths: ["tests"]
+        seed-paths: ["seeds"]
+        macro-paths: ["macros"]
+        snapshot-paths: ["snapshots"]
+
+        target-path: "target"
+        clean-targets:
+          - "target"
+          - "dbt_packages"
+
+        models:
+          my_dbt_project:
+            +materialized: table
+      packages.yml: |
+        packages: []
+      models/example.sql: |
+        select 1 as id
+      models/example_two.sql: |
+        select 2 as id
+      models/example_three.sql: |
+        select 3 as id
+
     tasks:
-      # 1) Create a minimal dbt project in the working directory
-      - id: create_project
-        type: io.kestra.plugin.core.storage.LocalFiles
-        inputs:
-          dbt_project.yml: |
-            name: 'my_dbt_project'
-            version: '1.0.0'
-            config-version: 2
-
-            profile: 'my_dbt_project'
-
-            model-paths: ["models"]
-            analysis-paths: ["analyses"]
-            test-paths: ["tests"]
-            seed-paths: ["seeds"]
-            macro-paths: ["macros"]
-            snapshot-paths: ["snapshots"]
-
-            target-path: "target"
-            clean-targets:
-              - "target"
-              - "dbt_packages"
-
-            models:
-              my_dbt_project:
-                +materialized: table
-          packages.yml: |
-            packages: []
-          models/example.sql: |
-            select 1 as id
-          models/example_two.sql: |
-            select 2 as id
-          models/example_three.sql: |
-            select 3 as id
-
       # 2) Run #1: dbt deps + dbt build (generates manifest + run_results)
       #    and store the manifest in the KV store
       - id: dbt_build_and_store_manifest
