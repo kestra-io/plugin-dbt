@@ -283,7 +283,7 @@ class DbtCLITest {
                         "dbt deps",
                         "mkdir -p models",
                         "echo 'SELECT * FROM definitely_non_existent_table_12345' > models/failing_test_model.sql",
-                        "dbt run --models failing_test_model"
+                        "dbt run --select failing_test_model"
                     )
                 )
             )

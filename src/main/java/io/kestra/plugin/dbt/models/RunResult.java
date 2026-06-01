@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import io.kestra.core.models.flows.State;
@@ -15,6 +16,7 @@ import lombok.extern.jackson.Jacksonized;
 @Value
 @Jacksonized
 @SuperBuilder
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class RunResult {
     List<Result> results;
 
@@ -26,6 +28,7 @@ public class RunResult {
     @Value
     @Jacksonized
     @SuperBuilder
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Result {
         String status;
 
@@ -48,27 +51,21 @@ public class RunResult {
         String uniqueId;
 
         public State.Type state() {
-            switch (this.status) {
-                case "error":
-                case "fail":
-                case "runtime_error":
-                    return State.Type.FAILED;
-                case "warn":
-                    return State.Type.WARNING;
-                case "skipped":
-                    return State.Type.SKIPPED;
-                case "success":
-                case "pass":
-                    return State.Type.SUCCESS;
-            }
-
-            throw new IllegalStateException("No suitable status for '" + this.status + "'");
+            return switch (this.status) {
+                case "error", "fail", "runtime_error" -> State.Type.FAILED;
+                case "warn" -> State.Type.WARNING;
+                case "skipped" -> State.Type.SKIPPED;
+                // Fusion v2.0 emits "run" for a successfully executed model
+                case "success", "pass", "run" -> State.Type.SUCCESS;
+                default -> throw new IllegalStateException("No suitable status for '" + this.status + "'");
+            };
         }
     }
 
     @Value
     @Jacksonized
     @SuperBuilder
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Timing {
         String name;
 

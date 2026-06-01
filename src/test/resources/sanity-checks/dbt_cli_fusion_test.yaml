@@ -1,0 +1,56 @@
+id: dbt_cli_fusion_test
+namespace: company.team
+
+tasks:
+  - id: wd
+    type: io.kestra.plugin.core.flow.WorkingDirectory
+    tasks:
+      - id: create_project
+        type: io.kestra.plugin.core.storage.LocalFiles
+        inputs:
+          dbt_project.yml: |
+            name: 'my_dbt_project'
+            version: '1.0.0'
+            config-version: 2
+
+            profile: 'my_dbt_project'
+
+            model-paths: ["models"]
+            analysis-paths: ["analyses"]
+            test-paths: ["tests"]
+            seed-paths: ["seeds"]
+            macro-paths: ["macros"]
+            snapshot-paths: ["snapshots"]
+
+            target-path: "target"
+            clean-targets:
+              - "target"
+              - "dbt_packages"
+
+            models:
+              my_dbt_project:
+                +materialized: table
+          packages.yml: |
+            packages: []
+          models/example.sql: |
+            select 1 as id
+          models/example_two.sql: |
+            select 2 as id
+
+      - id: dbt_fusion_build
+        type: io.kestra.plugin.dbt.cli.DbtCLI
+        engine: FUSION
+        taskRunner:
+          type: io.kestra.plugin.scripts.runner.docker.Docker
+          delete: true
+        commands:
+          - dbt deps
+          - dbt build
+        profiles: |
+          my_dbt_project:
+            outputs:
+              dev:
+                type: duckdb
+                path: ":memory:"
+                threads: 4
+            target: dev
