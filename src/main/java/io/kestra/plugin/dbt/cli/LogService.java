@@ -48,6 +48,7 @@ class LogService {
                 thread = (String) jsonLog.get("thread_name");
                 type = (String) jsonLog.get("name");
                 msg = (String) jsonLog.get("message");
+                additional.putAll(jsonLog);
             } else {
                 // Legacy flat JSON log format
                 level = (String) jsonLog.get("level");
@@ -62,7 +63,6 @@ class LogService {
             additional.remove("invocation_id");
             additional.remove("level");
             additional.remove("log_version");
-            additional.remove("code");
             additional.remove("msg");
             additional.remove("message");
             additional.remove("thread");

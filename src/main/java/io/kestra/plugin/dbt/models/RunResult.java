@@ -51,6 +51,7 @@ public class RunResult {
         String uniqueId;
 
         public State.Type state() {
+            if (this.status == null) return State.Type.FAILED;
             return switch (this.status) {
                 case "error", "fail", "runtime_error" -> State.Type.FAILED;
                 case "warn" -> State.Type.WARNING;
