@@ -280,7 +280,7 @@ import lombok.experimental.SuperBuilder;
                 """
         ),
         @Example(
-            title = "Run dbt build using the Fusion engine (dbt Core v2.0). The `engine: FUSION` property selects the `ghcr.io/kestra-io/dbt-fusion` image automatically when no `containerImage` is set. Note that `--no-partial-parse` / `--partial-parse` flags are silently ignored by Fusion and should not be used.",
+            title = "Run dbt build using the Fusion engine (dbt Core v2.0). The `engine: FUSION` property selects the `ghcr.io/kestra-io/dbt-fusion` image automatically when no `containerImage` is set. Note that `--no-partial-parse` / `--partial-parse` flags are silently ignored by Fusion and should not be used. The `ghcr.io/kestra-io/dbt-fusion` image currently ships dbt-fusion 1.11.7; full Fusion v2.0 flag compatibility (e.g. `--resource-types` plural form) will apply once the image is updated to dbt-fusion v2.0 GA.",
             full = true,
             code = """
                 id: dbt_fusion_build
