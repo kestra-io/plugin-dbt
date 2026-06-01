@@ -257,6 +257,80 @@ class ResultParserTest {
             .orElse(null);
     }
 
+    @Test
+    void parseRunResult_withFusionRunStatus_shouldSucceed() throws Exception {
+        var runContext = mockRunContext();
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        // Fusion v2.0 emits "run" as the status for a successfully executed model
+        Files.writeString(runResultsFile, """
+            {
+              "metadata": {
+                "dbt_schema_version": "https://schemas.getdbt.com/dbt/run-results/v6/run-results.json",
+                "dbt_version": "2.0.0"
+              },
+              "results": [
+                {
+                  "status": "run",
+                  "unique_id": "model.my_project.my_model",
+                  "timing": [
+                    {
+                      "name": "compile",
+                      "started_at": "2024-01-01T00:00:00.000000Z",
+                      "completed_at": "2024-01-01T00:00:01.000000Z"
+                    },
+                    {
+                      "name": "execute",
+                      "started_at": "2024-01-01T00:00:01.000000Z",
+                      "completed_at": "2024-01-01T00:00:02.000000Z"
+                    }
+                  ],
+                  "thread_id": "Thread-1",
+                  "execution_time": 2.0,
+                  "adapter_response": {},
+                  "message": "OK",
+                  "failures": null
+                }
+              ],
+              "elapsed_time": 2.5
+            }
+            """);
+
+        var uri = ResultParser.parseRunResult(runContext, runResultsFile.toFile(), null);
+
+        assertThat(uri, is(notNullValue()));
+    }
+
+    @Test
+    void parseRunResult_withUnknownTopLevelFields_shouldNotFail() throws Exception {
+        var runContext = mockRunContext();
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        // Fusion may add unknown top-level fields; @JsonIgnoreProperties ensures stability
+        Files.writeString(runResultsFile, """
+            {
+              "metadata": {},
+              "results": [
+                {
+                  "status": "success",
+                  "unique_id": "model.my_project.stg_orders",
+                  "timing": [],
+                  "thread_id": "Thread-1",
+                  "execution_time": 1.0,
+                  "adapter_response": {},
+                  "message": null,
+                  "failures": null,
+                  "fusion_extra_field": "ignored"
+                }
+              ],
+              "elapsed_time": 1.0,
+              "fusion_run_id": "some-uuid-from-fusion"
+            }
+            """);
+
+        var uri = ResultParser.parseRunResult(runContext, runResultsFile.toFile(), null);
+
+        assertThat(uri, is(notNullValue()));
+    }
+
     private RunContext mockRunContext() {
         var task = DbtCLI.builder()
             .id(IdUtils.create())

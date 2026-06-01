@@ -74,7 +74,7 @@ public abstract class AbstractRun extends AbstractDbt {
         }
 
         if (runContext.render(this.selector).as(String.class).isPresent()) {
-            commands.add("--selector " + runContext.render(this.target).as(String.class).get());
+            commands.add("--selector " + runContext.render(this.selector).as(String.class).get());
         }
 
         if (!runContext.render(this.select).asList(String.class).isEmpty()) {
