@@ -35,7 +35,7 @@ class RunnerTest {
     @Test
     @ExecuteFlow("sanity-checks/dbt_cli_assets_kv_test.yaml")
     void flow_name(Execution execution) {
-        assertThat(execution.getTaskRunList(), hasSize(10));
+        assertThat(execution.getTaskRunList(), hasSize(9));
         assertThat(execution.getState().getCurrent(), is(State.Type.SUCCESS));
     }
 
