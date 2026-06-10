@@ -15,6 +15,7 @@ import org.slf4j.Logger;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.client.HttpClientException;
+import io.kestra.core.http.client.HttpClientResponseException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.property.Property;
@@ -23,6 +24,7 @@ import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.utils.Await;
 import io.kestra.plugin.dbt.ResultParser;
+import io.kestra.plugin.dbt.cloud.models.JobStatus;
 import io.kestra.plugin.dbt.cloud.models.JobStatusHumanizedEnum;
 import io.kestra.plugin.dbt.cloud.models.ManifestArtifact;
 import io.kestra.plugin.dbt.cloud.models.RunResponse;
@@ -66,10 +68,10 @@ import io.kestra.core.models.annotations.PluginProperty;
     }
 )
 public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckStatus.Output> {
-    private static final List<JobStatusHumanizedEnum> ENDED_STATUS = List.of(
-        JobStatusHumanizedEnum.ERROR,
-        JobStatusHumanizedEnum.CANCELLED,
-        JobStatusHumanizedEnum.SUCCESS
+    private static final Set<JobStatus> ENDED_STATUS = Set.of(
+        JobStatus.NUMBER_10,  // Success
+        JobStatus.NUMBER_20,  // Error
+        JobStatus.NUMBER_30   // Cancelled
     );
 
     @Schema(
@@ -139,9 +141,17 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                             .getData()
                             .getRunSteps().size();
 
-                    // ended
-                    if (ENDED_STATUS.contains(fetchRunResponse.get().getData().getStatusHumanized()) && allLogs) {
+                    var runStatus = fetchRunResponse.get().getData().getStatus();
+                    if (runStatus == null) {
+                        logger.warn("Received null status from dbt Cloud — skipping this poll cycle");
+                    } else if (ENDED_STATUS.contains(runStatus) && allLogs) {
                         return fetchRunResponse.get();
+                    } else if (!ENDED_STATUS.contains(runStatus)
+                            && runStatus != JobStatus.NUMBER_1
+                            && runStatus != JobStatus.NUMBER_2
+                            && runStatus != JobStatus.NUMBER_3) {
+                        // Unrecognized code: log and continue polling rather than stalling silently.
+                        logger.warn("Unrecognized dbt Cloud status {} — continuing to poll", runStatus);
                     }
                 }
 
@@ -154,19 +164,26 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         // final response
         logSteps(logger, finalRunResponse);
 
-        if (!finalRunResponse.getData().getStatusHumanized().equals(JobStatusHumanizedEnum.SUCCESS)) {
+        if (finalRunResponse.getData().getStatus() != JobStatus.NUMBER_10) {
             throw new Exception(
                 "Failed run with status '" + finalRunResponse.getData().getStatusHumanized() +
-                    "' after " + finalRunResponse.getData().getDurationHumanized() + ": " + finalRunResponse
+                    "' after " + finalRunResponse.getData().getDurationHumanized() +
+                    (finalRunResponse.getData().getStatusMessage() != null
+                        ? ": " + finalRunResponse.getData().getStatusMessage()
+                        : "") +
+                    ": " + finalRunResponse
             );
         }
 
+        // Artifacts are uploaded asynchronously by dbt Cloud and manifest.json is absent for some
+        // run shapes (e.g. dbt source freshness). Tolerate 404 so a legitimate success is not
+        // reported as a failure.
         Path runResultsArtifact = downloadArtifacts(runContext, runIdRendered, "run_results.json", RunResult.class);
         Path manifestArtifact = downloadArtifacts(runContext, runIdRendered, "manifest.json", ManifestArtifact.class);
 
         io.kestra.plugin.dbt.models.Manifest manifest = null;
         URI manifestUri = null;
-        if (manifestArtifact.toFile().exists()) {
+        if (manifestArtifact != null) {
             ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestArtifact.toFile());
             manifest = manifestResult.manifest();
             manifestUri = manifestResult.uri();
@@ -174,10 +191,10 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
         URI runResultsUri = null;
 
-        if (runContext.render(this.parseRunResults).as(Boolean.class).orElse(false)) {
-            runResultsUri = ResultParser.parseRunResult(runContext, runResultsArtifact.toFile(), manifest);
-        } else {
-            if (Files.exists(runResultsArtifact)) {
+        if (runResultsArtifact != null) {
+            if (runContext.render(this.parseRunResults).as(Boolean.class).orElse(false)) {
+                runResultsUri = ResultParser.parseRunResult(runContext, runResultsArtifact.toFile(), manifest);
+            } else {
                 runResultsUri = runContext.storage().putFile(runResultsArtifact.toFile());
             }
         }
@@ -229,9 +246,16 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         return Optional.ofNullable(this.request(runContext, requestBuilder, RunResponse.class).getBody());
     }
 
+    /**
+     * Downloads an artifact and writes it to a temp file. Returns null when the artifact is not
+     * found (404), which is a legitimate outcome for async uploads or run shapes that don't
+     * produce every artifact (e.g. manifest.json is absent for dbt source freshness runs).
+     * 5xx errors are still retried by {@link AbstractDbtCloud#request}; other unexpected errors
+     * still propagate.
+     */
     private <T> Path downloadArtifacts(RunContext runContext, Long runId, String path, Class<T> responseType)
         throws IllegalVariableEvaluationException, IOException, HttpClientException {
-        HttpRequest.HttpRequestBuilder requestBuilder = HttpRequest.builder()
+        var requestBuilder = HttpRequest.builder()
             .uri(
                 URI.create(
                     runContext.render(this.baseUrl).as(String.class).orElseThrow()
@@ -241,13 +265,20 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             )
             .method("GET");
 
-        T artifact = this.request(runContext, requestBuilder, responseType).getBody();
+        T artifact;
+        try {
+            artifact = this.request(runContext, requestBuilder, responseType).getBody();
+        } catch (HttpClientResponseException ex) {
+            if (ex.getResponse().getStatus().getCode() == 404) {
+                runContext.logger().debug("Artifact '{}' not found (404) — skipping", path);
+                return null;
+            }
+            throw ex;
+        }
 
-        String artifactJson = JacksonMapper.ofJson().writeValueAsString(artifact);
-
-        Path tempFile = runContext.workingDir().createTempFile(".json");
+        var artifactJson = JacksonMapper.ofJson().writeValueAsString(artifact);
+        var tempFile = runContext.workingDir().createTempFile(".json");
         Files.writeString(tempFile, artifactJson, StandardOpenOption.TRUNCATE_EXISTING);
-
         return tempFile;
     }
 
