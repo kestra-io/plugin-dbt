@@ -27,6 +27,7 @@ import io.kestra.plugin.dbt.ResultParser;
 import io.kestra.plugin.dbt.cloud.models.JobStatus;
 import io.kestra.plugin.dbt.cloud.models.JobStatusHumanizedEnum;
 import io.kestra.plugin.dbt.cloud.models.ManifestArtifact;
+import io.kestra.plugin.dbt.cloud.models.Run;
 import io.kestra.plugin.dbt.cloud.models.RunResponse;
 import io.kestra.plugin.dbt.cloud.models.Step;
 import io.kestra.plugin.dbt.models.RunResult;
@@ -131,27 +132,18 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                 if (fetchRunResponse.isPresent()) {
                     logSteps(logger, fetchRunResponse.get());
 
+                    var data = fetchRunResponse.get().getData();
+
                     // we rely on truncated logs to be sure
-                    boolean allLogs = fetchRunResponse.get()
-                        .getData()
-                        .getRunSteps()
+                    boolean allLogs = data.getRunSteps()
                         .stream()
                         .filter(step -> step.getTruncatedDebugLogs() != null)
-                        .count() == fetchRunResponse.get()
-                            .getData()
-                            .getRunSteps().size();
+                        .count() == data.getRunSteps().size();
 
-                    var runStatus = fetchRunResponse.get().getData().getStatus();
-                    if (runStatus == null) {
-                        logger.warn("Received null status from dbt Cloud — skipping this poll cycle");
-                    } else if (ENDED_STATUS.contains(runStatus) && allLogs) {
+                    if (data.getStatus() == null && data.getIsComplete() == null && data.getStatusHumanized() == null) {
+                        logger.warn("Received response with no status indicator from dbt Cloud — skipping this poll cycle");
+                    } else if (isEnded(data) && allLogs) {
                         return fetchRunResponse.get();
-                    } else if (!ENDED_STATUS.contains(runStatus)
-                            && runStatus != JobStatus.NUMBER_1
-                            && runStatus != JobStatus.NUMBER_2
-                            && runStatus != JobStatus.NUMBER_3) {
-                        // Unrecognized code: log and continue polling rather than stalling silently.
-                        logger.warn("Unrecognized dbt Cloud status {} — continuing to poll", runStatus);
                     }
                 }
 
@@ -164,7 +156,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         // final response
         logSteps(logger, finalRunResponse);
 
-        if (finalRunResponse.getData().getStatus() != JobStatus.NUMBER_10) {
+        if (!isSuccessful(finalRunResponse.getData())) {
             throw new Exception(
                 "Failed run with status '" + finalRunResponse.getData().getStatusHumanized() +
                     "' after " + finalRunResponse.getData().getDurationHumanized() +
@@ -203,6 +195,33 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             .runResults(runResultsUri)
             .manifest(manifestUri)
             .build();
+    }
+
+    // Precedence: integer status → is_complete → status_humanized
+    private boolean isEnded(Run data) {
+        if (data.getStatus() != null) {
+            return ENDED_STATUS.contains(data.getStatus());
+        }
+        if (data.getIsComplete() != null) {
+            return Boolean.TRUE.equals(data.getIsComplete());
+        }
+        if (data.getStatusHumanized() != null) {
+            return data.getStatusHumanized() == JobStatusHumanizedEnum.SUCCESS
+                || data.getStatusHumanized() == JobStatusHumanizedEnum.ERROR
+                || data.getStatusHumanized() == JobStatusHumanizedEnum.CANCELLED;
+        }
+        return false;
+    }
+
+    // Precedence: integer status → is_success/is_error → status_humanized
+    private boolean isSuccessful(Run data) {
+        if (data.getStatus() != null) {
+            return data.getStatus() == JobStatus.NUMBER_10;
+        }
+        if (data.getIsSuccess() != null) {
+            return Boolean.TRUE.equals(data.getIsSuccess()) && !Boolean.TRUE.equals(data.getIsError());
+        }
+        return JobStatusHumanizedEnum.SUCCESS.equals(data.getStatusHumanized());
     }
 
     private void logSteps(Logger logger, RunResponse runResponse) {

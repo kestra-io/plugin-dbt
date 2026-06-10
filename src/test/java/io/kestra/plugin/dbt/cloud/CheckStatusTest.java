@@ -231,6 +231,54 @@ class CheckStatusTest {
     }
 
     /**
+     * Regression lock: a response carrying only status_humanized (no integer status field) must
+     * still resolve the latch and succeed. This matches the stub shape used by testTriggerRunWithWait.
+     */
+    @Test
+    void shouldSucceedWhenOnlyStatusHumanizedPresent() throws Exception {
+        stubFor(
+            get(urlMatching("/api/v2/accounts/123/runs/4444/\\?.*"))
+                .willReturn(okJson("""
+                        {
+                          "data": {
+                            "id": 4444,
+                            "status_humanized": "Success",
+                            "duration_humanized": "1s",
+                            "run_steps": []
+                          }
+                        }
+                    """))
+        );
+
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/4444/artifacts/run_results.json"))
+                .willReturn(aResponse().withStatus(404).withBody("Not Found"))
+        );
+
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/4444/artifacts/manifest.json"))
+                .willReturn(aResponse().withStatus(404).withBody("Not Found"))
+        );
+
+        RunContext runContext = runContextFactory.of(Map.of());
+
+        CheckStatus checkStatus = CheckStatus.builder()
+            .id(IdUtils.create())
+            .type(CheckStatus.class.getName())
+            .baseUrl(Property.ofValue("http://localhost:8089"))
+            .runId(Property.ofValue("4444"))
+            .accountId(Property.ofValue("123"))
+            .token(Property.ofValue("fake-token"))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(5)))
+            .parseRunResults(Property.ofValue(false))
+            .build();
+
+        CheckStatus.Output output = checkStatus.run(runContext);
+
+        assertThat(output, is(notNullValue()));
+    }
+
+    /**
      * The latch and verdict must use the integer status field even when status_humanized carries an
      * unrecognized string. Integer 10 = Success regardless of the display label.
      */
