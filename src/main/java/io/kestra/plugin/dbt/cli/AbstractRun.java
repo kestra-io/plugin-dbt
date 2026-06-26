@@ -19,14 +19,14 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 public abstract class AbstractRun extends AbstractDbt {
     @Schema(
-        title = "Specify the number of threads to use while executing models."
+        title = "Specify the number of threads to use while executing models"
     )
     Property<Integer> thread;
 
     @Builder.Default
     @Schema(
         title = "Whether dbt will drop incremental models and fully-recalculate the incremental table " +
-            "from the model definition."
+            "from the model definition"
     )
     Property<Boolean> fullRefresh = Property.ofValue(Boolean.FALSE);
 
