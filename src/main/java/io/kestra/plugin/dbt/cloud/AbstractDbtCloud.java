@@ -36,22 +36,22 @@ public abstract class AbstractDbtCloud extends Task {
         .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
         .registerModule(new JavaTimeModule());
 
-    @Schema(title = "Base URL to select the tenant.")
+    @Schema(title = "Base URL to select the tenant")
     @NotNull
     @Builder.Default
     Property<String> baseUrl = Property.ofValue("https://cloud.getdbt.com");
 
-    @Schema(title = "Numeric ID of the account.")
+    @Schema(title = "Numeric ID of the account")
     @NotNull
     @PluginProperty(group = "main")
     Property<String> accountId;
 
-    @Schema(title = "API key.")
+    @Schema(title = "API key")
     @NotNull
     @PluginProperty(group = "main", secret = true)
     Property<String> token;
 
-    @Schema(title = "The HTTP client configuration.")
+    @Schema(title = "The HTTP client configuration")
     HttpConfiguration options;
 
     @Schema(

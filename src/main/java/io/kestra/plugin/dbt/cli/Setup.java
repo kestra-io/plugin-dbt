@@ -42,7 +42,7 @@ import lombok.experimental.SuperBuilder;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Setup dbt in a Python virtualenv (Deprecated).",
+    title = "Setup dbt in a Python virtualenv (Deprecated)",
     description = "This task is deprecated, please use the [io.kestra.plugin.dbt.cli.DbtCLI](https://kestra.io/plugins/tasks/io.kestra.plugin.dbt.cli.DbtCLI) task instead.",
     deprecated = true
 )
@@ -91,7 +91,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     private static final String DEFAULT_IMAGE = "python";
 
     @Schema(
-        title = "The `profiles.yml` file content. Can be an object (a map) or a string.",
+        title = "The `profiles.yml` file content. Can be an object (a map) or a string",
         anyOf = { Map.class, String.class }
     )
     @NotNull
@@ -99,7 +99,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
 
     @Builder.Default
     @Schema(
-        title = "The python interpreter to use.",
+        title = "The python interpreter to use",
         description = "Set the python interpreter path to use."
     )
     @NotNull
@@ -108,7 +108,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     private final String pythonPath = DEFAULT_IMAGE;
 
     @Schema(
-        title = "List of python dependencies to add to the python execution process.",
+        title = "List of python dependencies to add to the python execution process",
         description = "Python dependencies list to setup in the virtualenv, in the same format than requirements.txt. It must at least provides dbt."
     )
     @NotNull
@@ -117,7 +117,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
 
     @Builder.Default
     @Schema(
-        title = "Exit if any non true return value.",
+        title = "Exit if any non true return value",
         description = "This tells bash that it should exit the script if any statement returns a non-true return value. \n" +
             "The benefit of using -e is that it prevents errors snowballing into serious issues when they could " +
             "have been caught earlier. This option is deprecated. Use `failFast` instead."
@@ -128,7 +128,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     protected Property<Boolean> exitOnFailed = Property.ofValue(Boolean.TRUE);
 
     @Schema(
-        title = "Input files are extra files that will be available in the dbt working directory.",
+        title = "Input files are extra files that will be available in the dbt working directory",
         description = "You can define the files as map or a JSON string. " +
             "Each file can be defined inlined or can reference a file from Kestra's internal storage."
     )
@@ -136,7 +136,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
     private Property<Object> inputFiles;
 
     @Schema(
-        title = "The task runner to use.",
+        title = "The task runner to use",
         description = "Task runners are provided by plugins, each have their own properties."
     )
     @Builder.Default
