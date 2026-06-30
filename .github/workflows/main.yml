@@ -36,6 +36,7 @@ on:
 concurrency:
   group: plugin-dbt-bigquery-tests
   cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: write
