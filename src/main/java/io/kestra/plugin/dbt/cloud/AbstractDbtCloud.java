@@ -8,6 +8,7 @@ import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.HttpResponse;
 import io.kestra.core.http.client.HttpClient;
 import io.kestra.core.http.client.HttpClientException;
+import io.kestra.core.http.client.HttpClientRequestException;
 import io.kestra.core.http.client.HttpClientResponseException;
 import io.kestra.core.http.client.configurations.HttpConfiguration;
 import io.kestra.core.models.property.Property;
@@ -21,6 +22,7 @@ import lombok.*;
 import lombok.experimental.SuperBuilder;
 
 import java.io.IOException;
+import java.net.SocketTimeoutException;
 import java.time.Duration;
 
 @SuperBuilder
@@ -86,10 +88,7 @@ public abstract class AbstractDbtCloud extends Task {
                     .maxAttempts(rMaxRetries)
                     .build()
             ).run(
-                (res, throwable) -> throwable instanceof HttpClientResponseException ex &&
-                    (ex.getResponse().getStatus().getCode() == 502 ||
-                        ex.getResponse().getStatus().getCode() == 503 ||
-                        ex.getResponse().getStatus().getCode() == 504),
+                (res, throwable) -> isRetriableTransientError(throwable),
                 () -> {
                     var response = client.request(request, String.class);
                     var parsedResponse = MAPPER.readValue(response.getBody(), responseType);
@@ -102,5 +101,32 @@ public abstract class AbstractDbtCloud extends Task {
                 }
             );
         }
+    }
+
+    /**
+     * Whether an error raised while calling the dbt Cloud API is transient and worth retrying.
+     *
+     * <p>Covers server-side 5xx responses, connection-level failures (socket/SSL) and read/connect
+     * timeouts. The core HTTP client wraps a read timeout as {@code RuntimeException(SocketTimeoutException)},
+     * so it is matched through the cause. Without this, a single timed-out status poll would fail the whole
+     * task even though the dbt Cloud run is still healthy. Genuine client errors (e.g. 4xx) are not retried.
+     */
+    static boolean isRetriableTransientError(Throwable throwable) {
+        if (throwable == null) {
+            return false;
+        }
+
+        if (throwable instanceof HttpClientResponseException ex) {
+            int code = ex.getResponse().getStatus().getCode();
+            return code == 502 || code == 503 || code == 504;
+        }
+
+        // Socket and SSL handshake failures are surfaced by the core HTTP client as this type.
+        if (throwable instanceof HttpClientRequestException) {
+            return true;
+        }
+
+        return throwable instanceof SocketTimeoutException
+            || throwable.getCause() instanceof SocketTimeoutException;
     }
 }
