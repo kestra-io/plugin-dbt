@@ -20,6 +20,7 @@ import io.kestra.core.models.executions.metrics.Counter;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.queues.QueueException;
 import io.kestra.core.runners.AssetEmit;
+import io.kestra.core.runners.DynamicTaskRunLog;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.WorkerTaskResult;
 import io.kestra.core.serializers.JacksonMapper;
@@ -27,7 +28,9 @@ import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.dbt.models.Manifest;
 import io.kestra.plugin.dbt.models.RunResult;
 
-import static io.kestra.core.utils.Rethrow.throwFunction;
+import org.slf4j.event.Level;
+
+import static io.kestra.core.utils.Rethrow.throwConsumer;
 
 public abstract class ResultParser {
     static final protected ObjectMapper MAPPER = JacksonMapper.ofJson(false)
@@ -53,10 +56,13 @@ public abstract class ResultParser {
 
         Map<String, ModelAsset> modelAssets = manifest == null ? Map.of() : extractModelAssets(manifest);
 
-        java.util.List<WorkerTaskResult> workerTaskResults = result
+        // Emit one dynamic taskrun per dbt model (the UI timeline "bars"), attaching that model's
+        // own status/message/failures as logs riding with its taskrun so they render inline under
+        // its bar instead of all landing on the parent task root (issue #276).
+        result
             .getResults()
             .stream()
-            .map(throwFunction(r ->
+            .forEach(throwConsumer(r ->
             {
                 ArrayList<State.History> histories = new ArrayList<>();
 
@@ -129,7 +135,6 @@ public abstract class ResultParser {
                     .namespace(runContext.render("{{ flow.namespace }}"))
                     .flowId(runContext.render("{{ flow.id }}"))
                     .taskId(r.getUniqueId())
-                    .value(runContext.render("{{ taskrun.id }}"))
                     .executionId(runContext.render("{{ execution.id }}"))
                     .parentTaskRunId(runContext.render("{{ taskrun.id }}"))
                     .state(state)
@@ -144,15 +149,47 @@ public abstract class ResultParser {
                     taskRunBuilder.assets(assets);
                 }
 
-                return WorkerTaskResult.builder()
-                    .taskRun(taskRunBuilder.build())
-                    .build();
-            }))
-            .toList();
-
-        runContext.dynamicWorkerResult(workerTaskResults);
+                // Register the dynamic taskrun together with its log lines in one call: the run
+                // context builds the LogEntry, forcing execution/tenant/namespace/flow from itself,
+                // fixing the attempt to 0 and masking secrets (the plugin never builds a LogEntry).
+                runContext.dynamicWorkerResult(
+                    WorkerTaskResult.builder().taskRun(taskRunBuilder.build()).build(),
+                    modelLogs(r)
+                );
+            }));
 
         return runContext.storage().putFile(file);
+    }
+
+    /**
+     * Build the log lines for a single dbt model, to be attached to that model's dynamic taskrun.
+     * A concise summary line (`uniqueId => status`, execution time, and the failure count when any),
+     * followed by the model's own message when present (SQL/compile errors, dbt status messages).
+     * rows_affected / bytes_processed are intentionally left out — they are already emitted as metrics.
+     */
+    static List<DynamicTaskRunLog> modelLogs(RunResult.Result r) {
+        Level level = switch (r.state()) {
+            case FAILED -> Level.ERROR;
+            case WARNING -> Level.WARN;
+            default -> Level.INFO;
+        };
+
+        List<DynamicTaskRunLog> logs = new ArrayList<>();
+
+        StringBuilder summary = new StringBuilder(r.getUniqueId() + " => " + r.getStatus());
+        if (r.getExecutionTime() != null) {
+            summary.append(String.format(Locale.ROOT, " in %.2fs", r.getExecutionTime()));
+        }
+        if (r.getFailures() != null && r.getFailures() > 0) {
+            summary.append(" (").append(r.getFailures()).append(r.getFailures() == 1 ? " failure)" : " failures)");
+        }
+        logs.add(new DynamicTaskRunLog(level, summary.toString()));
+
+        if (r.getMessage() != null && !r.getMessage().isBlank()) {
+            logs.add(new DynamicTaskRunLog(level, r.getMessage()));
+        }
+
+        return logs;
     }
 
     private static AssetsInOut assetsFor(String uniqueId, Map<String, ModelAsset> modelAssets) {

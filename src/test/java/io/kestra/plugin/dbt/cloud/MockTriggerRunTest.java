@@ -12,6 +12,7 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
+import io.kestra.core.utils.TestsUtils;
 
 import jakarta.inject.Inject;
 
@@ -124,20 +125,7 @@ class MockTriggerRunTest {
             .wait(Property.ofValue(true))
             .build();
 
-        RunContext runContext = runContextFactory.of(
-            Map.of(
-                "flow", Map.of(
-                    "id", "my-flow",
-                    "namespace", "my.namespace"
-                ),
-                "execution", Map.of(
-                    "id", "exec-123"
-                ),
-                "taskrun", Map.of(
-                    "id", "taskrun-123"
-                )
-            )
-        );
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
         TriggerRun.Output output = task.run(runContext);
 
         assertThat(output, is(notNullValue()));

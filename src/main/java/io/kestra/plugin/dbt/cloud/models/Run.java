@@ -144,4 +144,16 @@ public class Run {
 
     @JsonProperty("created_at_humanized")
     String createdAtHumanized;
+
+    @JsonProperty("is_complete")
+    Boolean isComplete;
+
+    @JsonProperty("is_success")
+    Boolean isSuccess;
+
+    @JsonProperty("is_error")
+    Boolean isError;
+
+    @JsonProperty("is_cancelled")
+    Boolean isCancelled;
 }

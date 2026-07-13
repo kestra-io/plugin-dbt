@@ -43,13 +43,13 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
 
     @Builder.Default
     @Schema(
-        title = "Stop execution at the first failure."
+        title = "Stop execution at the first failure"
     )
     Property<Boolean> failFast = Property.ofValue(false);
 
     @Builder.Default
     @Schema(
-        title = "When dbt would normally warn, raise an exception.",
+        title = "When dbt would normally warn, raise an exception",
         description = "Examples include --models that selects nothing, deprecations, configurations with no " +
             "associated models, invalid test configurations, and missing sources/refs in tests."
     )
@@ -57,13 +57,13 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
 
     @Builder.Default
     @Schema(
-        title = "Display debug logging during dbt execution.",
+        title = "Display debug logging during dbt execution",
         description = "Useful for debugging and making bug reports."
     )
     Property<Boolean> debug = Property.ofValue(false);
 
     @Schema(
-        title = "Which directory to look in for the dbt_project.yml file.",
+        title = "Which directory to look in for the dbt_project.yml file",
         description = "Default is the current working directory and its parents."
     )
     Property<String> projectDir;
@@ -81,7 +81,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     Property<String> profiles;
 
     @Schema(
-        title = "The task runner to use.",
+        title = "The task runner to use",
         description = """
             Task runners are provided by plugins, each have their own properties.
             If you change from the default one, be careful to also configure the entrypoint to an empty list if needed."""
@@ -94,13 +94,13 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
         .entryPoint(new ArrayList<>())
         .build();
 
-    @Schema(title = "The task runner container image, only used if the task runner is container-based.")
+    @Schema(title = "The task runner container image, only used if the task runner is container-based")
     @Builder.Default
     @PluginProperty(group = "execution")
     protected Property<String> containerImage = Property.ofValue(DEFAULT_IMAGE);
 
     @Schema(
-        title = "The runner type.",
+        title = "The runner type",
         description = "Deprecated, use 'taskRunner' instead."
     )
     @Deprecated
@@ -126,7 +126,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     }
 
     @Schema(
-        title = "Additional environment variables for the current process."
+        title = "Additional environment variables for the current process"
     )
     @PluginProperty(group = "execution")
     protected Property<Map<String, String>> env;
