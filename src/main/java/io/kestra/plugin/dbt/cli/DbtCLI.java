@@ -230,10 +230,10 @@ import lombok.experimental.SuperBuilder;
                   - id: dbt_command
                     type: SELECT
                     allowCustomValue: true
-                    defaults: dbt build --project-dir dbt --target prod --no-partial-parse
+                    defaults: dbt build --project-dir dbt --target prod
                     values:
-                      - dbt build --target prod --no-partial-parse
-                      - dbt build --target prod --no-partial-parse --select state:modified+ --defer --state ./target
+                      - dbt build --target prod
+                      - dbt build --target prod --select state:modified+ --defer --state ./target
 
                 tasks:
                   - id: dbt
@@ -276,6 +276,39 @@ import lombok.experimental.SuperBuilder;
                                 fixed_retries: 1
                                 threads: 16
                                 timeout_seconds: 300
+                            target: dev
+                """
+        ),
+        @Example(
+            title = "Run dbt build using the Fusion engine (dbt Core v2.0). The `engine: FUSION` property selects the `ghcr.io/kestra-io/dbt-fusion` image automatically when no `containerImage` is set. Note that `--no-partial-parse` / `--partial-parse` flags are silently ignored by Fusion and should not be used. The `ghcr.io/kestra-io/dbt-fusion` image currently ships dbt-fusion 1.11.7; full Fusion v2.0 flag compatibility (e.g. `--resource-types` plural form) will apply once the image is updated to dbt-fusion v2.0 GA.",
+            full = true,
+            code = """
+                id: dbt_fusion_build
+                namespace: company.team
+
+                tasks:
+                  - id: dbt
+                    type: io.kestra.plugin.core.flow.WorkingDirectory
+                    tasks:
+                      - id: clone_repository
+                        type: io.kestra.plugin.git.Clone
+                        url: https://github.com/kestra-io/dbt-example
+                        branch: main
+
+                      - id: dbt_build
+                        type: io.kestra.plugin.dbt.cli.DbtCLI
+                        engine: FUSION
+                        taskRunner:
+                          type: io.kestra.plugin.scripts.runner.docker.Docker
+                        commands:
+                          - dbt deps
+                          - dbt build
+                        profiles: |
+                          my_dbt_project:
+                            outputs:
+                              dev:
+                                type: duckdb
+                                path: ":memory:"
                             target: dev
                 """
         )
@@ -375,7 +408,11 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
     @Schema(
         title = "dbt engine",
-        description = "Selects the fallback image when none is set on the task or runner: CORE → `ghcr.io/kestra-io/dbt` (default), FUSION → `ghcr.io/kestra-io/dbt-fusion`."
+        description = """
+            Selects the fallback image when none is set on the task or runner: \
+            CORE → `ghcr.io/kestra-io/dbt` (default), FUSION → `ghcr.io/kestra-io/dbt-fusion`.
+            When using FUSION (dbt Core v2.0), the `--no-partial-parse` and `--partial-parse` \
+            flags are silently ignored and should be omitted from commands."""
     )
     @Builder.Default
     @PluginProperty(group = "advanced")

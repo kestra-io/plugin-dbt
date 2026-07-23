@@ -64,7 +64,7 @@ tasks:
 
         commands:
           - dbt deps
-          - dbt build --no-partial-parse
+          - dbt build
 
         profiles: |
           my_dbt_project:
@@ -90,7 +90,7 @@ tasks:
 
         # (optional) shows it works with flags too; adapt as needed
         commands:
-          - dbt build --no-partial-parse
+          - dbt build
 
         profiles: |
           my_dbt_project:

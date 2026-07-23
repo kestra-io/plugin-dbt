@@ -40,6 +40,12 @@ class RunnerTest {
     }
 
     @Test
+    @ExecuteFlow("sanity-checks/dbt_cli_fusion_test.yaml")
+    void fusionEngine(Execution execution) {
+        assertThat(execution.getState().getCurrent(), is(State.Type.SUCCESS));
+    }
+
+    @Test
     @ExecuteFlow("sanity-checks/dbt_cli_complex_dag_test.yaml")
     void complexDagLineage(Execution execution) {
         assertThat(execution.getState().getCurrent(), is(State.Type.SUCCESS));

@@ -3,6 +3,7 @@ package io.kestra.plugin.dbt.models;
 import java.util.List;
 import java.util.Map;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import lombok.Value;
@@ -12,6 +13,7 @@ import lombok.extern.jackson.Jacksonized;
 @Value
 @Jacksonized
 @SuperBuilder
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Manifest {
     Map<String, Object> metadata;
     Map<String, Node> nodes;
@@ -22,6 +24,7 @@ public class Manifest {
     @Value
     @Jacksonized
     @SuperBuilder
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Node {
         @JsonProperty("compiled_sql")
         String compiledSql;
