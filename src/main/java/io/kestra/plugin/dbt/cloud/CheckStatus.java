@@ -134,15 +134,9 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
                     var data = fetchRunResponse.get().getData();
 
-                    // we rely on truncated logs to be sure
-                    boolean allLogs = data.getRunSteps()
-                        .stream()
-                        .filter(step -> step.getTruncatedDebugLogs() != null)
-                        .count() == data.getRunSteps().size();
-
                     if (data.getStatus() == null && data.getIsComplete() == null && data.getStatusHumanized() == null) {
                         logger.warn("Received response with no status indicator from dbt Cloud — skipping this poll cycle");
-                    } else if (isEnded(data) && allLogs) {
+                    } else if (isEnded(data)) {
                         return fetchRunResponse.get();
                     }
                 }
@@ -152,6 +146,17 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             runContext.render(this.pollFrequency).as(Duration.class).orElseThrow(),
             runContext.render(this.maxDuration).as(Duration.class).orElseThrow()
         );
+
+        // Best-effort debug=true fetch for fuller step logs; truncated_debug_logs population timing
+        // isn't part of dbt Cloud's terminal-run contract, so a failure here must not fail the run.
+        try {
+            var debugRunResponse = fetchRunResponse(runContext, runIdRendered, true);
+            if (debugRunResponse.isPresent()) {
+                finalRunResponse = debugRunResponse.get();
+            }
+        } catch (IllegalVariableEvaluationException | HttpClientException | IOException e) {
+            logger.debug("Unable to fetch final debug logs for run '{}' — falling back to logs collected during polling", runIdRendered, e);
+        }
 
         // final response
         logSteps(logger, finalRunResponse);
