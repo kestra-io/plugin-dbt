@@ -1,19 +1,27 @@
 package io.kestra.plugin.dbt.cloud;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.junit.jupiter.api.Test;
 
 import com.github.tomakehurst.wiremock.junit5.WireMockTest;
 
 import io.kestra.core.junit.annotations.KestraTest;
+import io.kestra.core.models.executions.LogEntry;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.queues.QueueFactoryInterface;
+import io.kestra.core.queues.QueueInterface;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
+import io.kestra.core.utils.TestsUtils;
 
 import jakarta.inject.Inject;
+import jakarta.inject.Named;
+import reactor.core.publisher.Flux;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -28,6 +36,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class CheckStatusTest {
     @Inject
     private RunContextFactory runContextFactory;
+
+    @Inject
+    @Named(QueueFactoryInterface.WORKERTASKLOG_NAMED)
+    private QueueInterface<LogEntry> logQueue;
 
     @Test
     void run() throws Exception {
@@ -389,5 +401,158 @@ class CheckStatusTest {
         assertThat(output, is(notNullValue()));
         // Must complete well inside maxDuration (5s), not spin until the timeout.
         assertThat(elapsed < Duration.ofSeconds(5).toMillis(), is(true));
+    }
+
+    /**
+     * Regression test: the best-effort debug=true fetch done once the run is terminal must not fail
+     * the task when it errors out. The run must still succeed using the response already collected
+     * during polling.
+     */
+    @Test
+    void shouldFallBackToPolledResponseWhenFinalDebugFetchFails() throws Exception {
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/2222/"))
+                .withQueryParam("include_related", notContaining("debug_logs"))
+                .willReturn(okJson("""
+                        {
+                          "data": {
+                            "id": 2222,
+                            "status": 10,
+                            "status_humanized": "Success",
+                            "duration_humanized": "1s",
+                            "run_steps": [{ "id": 1, "name": "dbt run", "logs": "polled step output" }]
+                          }
+                        }
+                    """))
+        );
+
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/2222/"))
+                .withQueryParam("include_related", containing("debug_logs"))
+                .willReturn(aResponse().withStatus(400).withBody("Bad Request"))
+        );
+
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/2222/artifacts/run_results.json"))
+                .willReturn(aResponse().withStatus(404).withBody("Not Found"))
+        );
+
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/2222/artifacts/manifest.json"))
+                .willReturn(aResponse().withStatus(404).withBody("Not Found"))
+        );
+
+        CheckStatus checkStatus = CheckStatus.builder()
+            .id(IdUtils.create())
+            .type(CheckStatus.class.getName())
+            .baseUrl(Property.ofValue("http://localhost:8089"))
+            .runId(Property.ofValue("2222"))
+            .accountId(Property.ofValue("123"))
+            .token(Property.ofValue("fake-token"))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(5)))
+            .parseRunResults(Property.ofValue(false))
+            .build();
+
+        RunContext runContext = mockRunContext(checkStatus);
+
+        List<LogEntry> logs = new CopyOnWriteArrayList<>();
+        Flux<LogEntry> receive = TestsUtils.receive(logQueue, l -> logs.add(l.getLeft()));
+
+        // Must not throw despite the debug=true follow-up fetch failing with a 400.
+        CheckStatus.Output output = checkStatus.run(runContext);
+
+        TestsUtils.awaitLog(logs, l -> l.getMessage() != null && l.getMessage().contains("polled step output"));
+        receive.blockLast();
+
+        assertThat(output, is(notNullValue()));
+        assertThat(
+            logs.stream().anyMatch(l -> l.getMessage() != null && l.getMessage().contains("polled step output")),
+            is(true)
+        );
+    }
+
+    /**
+     * Happy path for the best-effort debug=true fetch: when it succeeds, its fuller step logs
+     * supersede the response collected during polling.
+     */
+    @Test
+    void shouldUseDebugResponseWhenFinalDebugFetchSucceeds() throws Exception {
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/1111/"))
+                .withQueryParam("include_related", notContaining("debug_logs"))
+                .willReturn(okJson("""
+                        {
+                          "data": {
+                            "id": 1111,
+                            "status": 10,
+                            "status_humanized": "Success",
+                            "duration_humanized": "1s",
+                            "run_steps": [{ "id": 1, "name": "dbt run", "logs": "short logs" }]
+                          }
+                        }
+                    """))
+        );
+
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/1111/"))
+                .withQueryParam("include_related", containing("debug_logs"))
+                .willReturn(okJson("""
+                        {
+                          "data": {
+                            "id": 1111,
+                            "status": 10,
+                            "status_humanized": "Success",
+                            "duration_humanized": "1s",
+                            "run_steps": [{ "id": 1, "name": "dbt run", "logs": "short logs\\nfuller debug tail" }]
+                          }
+                        }
+                    """))
+        );
+
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/1111/artifacts/run_results.json"))
+                .willReturn(aResponse().withStatus(404).withBody("Not Found"))
+        );
+
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/1111/artifacts/manifest.json"))
+                .willReturn(aResponse().withStatus(404).withBody("Not Found"))
+        );
+
+        CheckStatus checkStatus = CheckStatus.builder()
+            .id(IdUtils.create())
+            .type(CheckStatus.class.getName())
+            .baseUrl(Property.ofValue("http://localhost:8089"))
+            .runId(Property.ofValue("1111"))
+            .accountId(Property.ofValue("123"))
+            .token(Property.ofValue("fake-token"))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(5)))
+            .parseRunResults(Property.ofValue(false))
+            .build();
+
+        RunContext runContext = mockRunContext(checkStatus);
+
+        List<LogEntry> logs = new CopyOnWriteArrayList<>();
+        Flux<LogEntry> receive = TestsUtils.receive(logQueue, l -> logs.add(l.getLeft()));
+
+        CheckStatus.Output output = checkStatus.run(runContext);
+
+        TestsUtils.awaitLog(logs, l -> l.getMessage() != null && l.getMessage().contains("fuller debug tail"));
+        receive.blockLast();
+
+        assertThat(output, is(notNullValue()));
+        // The fuller content only exists in the debug=true response — its presence in logs proves
+        // it superseded the response collected during polling.
+        assertThat(
+            logs.stream().anyMatch(l -> l.getMessage() != null && l.getMessage().contains("fuller debug tail")),
+            is(true)
+        );
+    }
+
+    private RunContext mockRunContext(CheckStatus task) {
+        var flow = TestsUtils.mockFlow();
+        var execution = TestsUtils.mockExecution(flow, Map.of(), null);
+        var taskRun = TestsUtils.mockTaskRun(execution, task);
+        return runContextFactory.of(flow, task, execution, taskRun, false);
     }
 }

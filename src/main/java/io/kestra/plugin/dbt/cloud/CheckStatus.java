@@ -147,13 +147,10 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             runContext.render(this.maxDuration).as(Duration.class).orElseThrow()
         );
 
-        // Polling always requests debug=false to keep every intermediate poll lightweight. Now that the
-        // run has reached a terminal status, do one best-effort fetch with debug=true to pick up the
-        // fullest available step logs (e.g. truncated_debug_logs), whose population timing is not part
-        // of dbt Cloud's terminal-run contract. A failure here must not turn an otherwise successful run
-        // into a failure, so fall back to the response already collected while polling.
+        // Best-effort debug=true fetch for fuller step logs; truncated_debug_logs population timing
+        // isn't part of dbt Cloud's terminal-run contract, so a failure here must not fail the run.
         try {
-            Optional<RunResponse> debugRunResponse = fetchRunResponse(runContext, runIdRendered, true);
+            var debugRunResponse = fetchRunResponse(runContext, runIdRendered, true);
             if (debugRunResponse.isPresent()) {
                 finalRunResponse = debugRunResponse.get();
             }
