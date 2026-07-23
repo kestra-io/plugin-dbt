@@ -326,4 +326,68 @@ class CheckStatusTest {
         CheckStatus.Output output = checkStatus.run(runContext);
         assertThat(output, is(notNullValue()));
     }
+
+    /**
+     * Regression test: a run that reaches a terminal status on the very first poll must return
+     * immediately, even when a run step's truncated_debug_logs never populates. Before the fix, the
+     * loop's return condition was `isEnded(data) && allLogs`, so a run step whose
+     * truncated_debug_logs stays null would spin until maxDuration and throw a timeout instead of
+     * surfacing the already-known terminal status.
+     */
+    @Test
+    void shouldSucceedImmediatelyWhenTruncatedDebugLogsNeverPopulate() throws Exception {
+        stubFor(
+            get(urlMatching("/api/v2/accounts/123/runs/3333/\\?.*"))
+                .willReturn(okJson("""
+                        {
+                          "data": {
+                            "id": 3333,
+                            "status": 10,
+                            "status_humanized": "Success",
+                            "duration_humanized": "1s",
+                            "run_steps": [
+                              {
+                                "id": 1,
+                                "name": "dbt run",
+                                "logs": "some logs",
+                                "truncated_debug_logs": null
+                              }
+                            ]
+                          }
+                        }
+                    """))
+        );
+
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/3333/artifacts/run_results.json"))
+                .willReturn(aResponse().withStatus(404).withBody("Not Found"))
+        );
+
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/3333/artifacts/manifest.json"))
+                .willReturn(aResponse().withStatus(404).withBody("Not Found"))
+        );
+
+        RunContext runContext = runContextFactory.of(Map.of());
+
+        CheckStatus checkStatus = CheckStatus.builder()
+            .id(IdUtils.create())
+            .type(CheckStatus.class.getName())
+            .baseUrl(Property.ofValue("http://localhost:8089"))
+            .runId(Property.ofValue("3333"))
+            .accountId(Property.ofValue("123"))
+            .token(Property.ofValue("fake-token"))
+            .pollFrequency(Property.ofValue(Duration.ofMillis(100)))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(5)))
+            .parseRunResults(Property.ofValue(false))
+            .build();
+
+        long start = System.currentTimeMillis();
+        CheckStatus.Output output = checkStatus.run(runContext);
+        long elapsed = System.currentTimeMillis() - start;
+
+        assertThat(output, is(notNullValue()));
+        // Must complete well inside maxDuration (5s), not spin until the timeout.
+        assertThat(elapsed < Duration.ofSeconds(5).toMillis(), is(true));
+    }
 }

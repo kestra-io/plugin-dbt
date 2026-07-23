@@ -134,15 +134,9 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
                     var data = fetchRunResponse.get().getData();
 
-                    // we rely on truncated logs to be sure
-                    boolean allLogs = data.getRunSteps()
-                        .stream()
-                        .filter(step -> step.getTruncatedDebugLogs() != null)
-                        .count() == data.getRunSteps().size();
-
                     if (data.getStatus() == null && data.getIsComplete() == null && data.getStatusHumanized() == null) {
                         logger.warn("Received response with no status indicator from dbt Cloud — skipping this poll cycle");
-                    } else if (isEnded(data) && allLogs) {
+                    } else if (isEnded(data)) {
                         return fetchRunResponse.get();
                     }
                 }
@@ -152,6 +146,20 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             runContext.render(this.pollFrequency).as(Duration.class).orElseThrow(),
             runContext.render(this.maxDuration).as(Duration.class).orElseThrow()
         );
+
+        // Polling always requests debug=false to keep every intermediate poll lightweight. Now that the
+        // run has reached a terminal status, do one best-effort fetch with debug=true to pick up the
+        // fullest available step logs (e.g. truncated_debug_logs), whose population timing is not part
+        // of dbt Cloud's terminal-run contract. A failure here must not turn an otherwise successful run
+        // into a failure, so fall back to the response already collected while polling.
+        try {
+            Optional<RunResponse> debugRunResponse = fetchRunResponse(runContext, runIdRendered, true);
+            if (debugRunResponse.isPresent()) {
+                finalRunResponse = debugRunResponse.get();
+            }
+        } catch (IllegalVariableEvaluationException | HttpClientException | IOException e) {
+            logger.debug("Unable to fetch final debug logs for run '{}' — falling back to logs collected during polling", runIdRendered, e);
+        }
 
         // final response
         logSteps(logger, finalRunResponse);
