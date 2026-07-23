@@ -13,8 +13,7 @@ import org.slf4j.event.Level;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.executions.LogEntry;
 import io.kestra.core.models.property.Property;
-import io.kestra.core.queues.QueueFactoryInterface;
-import io.kestra.core.queues.QueueInterface;
+import io.kestra.core.queues.DispatchQueueInterface;
 import io.kestra.core.runners.AssetEmit;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
@@ -24,7 +23,6 @@ import io.kestra.plugin.dbt.cli.DbtCLI;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
-import reactor.core.publisher.Flux;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
@@ -35,8 +33,7 @@ class ResultParserTest {
     private RunContextFactory runContextFactory;
 
     @Inject
-    @Named(QueueFactoryInterface.WORKERTASKLOG_NAMED)
-    private QueueInterface<LogEntry> logQueue;
+    private DispatchQueueInterface<LogEntry> logQueue;
 
     @Test
     void parseManifestWithAssets_shouldEmitModelAssets() throws Exception {
@@ -289,7 +286,7 @@ class ResultParserTest {
             """);
 
         List<LogEntry> logs = new CopyOnWriteArrayList<>();
-        Flux<LogEntry> receive = TestsUtils.receive(logQueue, l -> logs.add(l.getLeft()));
+        logQueue.addListener(logs::add);
 
         ResultParser.parseRunResult(runContext, runResultsFile.toFile(), null);
 
@@ -302,7 +299,6 @@ class ResultParserTest {
         assertThat(modelTaskRunIds, not(hasItem(parentTaskRunId)));
 
         TestsUtils.awaitLog(logs, l -> l.getTaskRunId() != null && modelTaskRunIds.contains(l.getTaskRunId()));
-        receive.blockLast();
 
         List<LogEntry> modelLogs = List.copyOf(logs).stream()
             .filter(l -> l.getTaskRunId() != null && modelTaskRunIds.contains(l.getTaskRunId()))
