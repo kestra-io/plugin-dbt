@@ -104,7 +104,7 @@ class CheckStatusRetryTest {
 
     @Test
     void shouldRetryReadOnServerErrorAndEventuallySucceed() throws Exception {
-        // End-to-end wiring: a transient 500 during status polling (an idempotent GET) is retried
+        // End-to-end wiring: a transient 500 during status polling (a read-only GET) is retried
         // through RetryUtils instead of failing the task while the dbt Cloud run is still healthy.
         var runContext = runContextFactory.of(Map.of());
         var requestBuilder = HttpRequest.builder()
