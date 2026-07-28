@@ -22,8 +22,11 @@ import lombok.*;
 import lombok.experimental.SuperBuilder;
 
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.time.Duration;
+
+import javax.net.ssl.SSLHandshakeException;
 
 @SuperBuilder
 @ToString
@@ -88,7 +91,7 @@ public abstract class AbstractDbtCloud extends Task {
                     .maxAttempts(rMaxRetries)
                     .build()
             ).run(
-                (res, throwable) -> isRetriableTransientError(throwable),
+                (res, throwable) -> isRetriableTransientError(throwable, request.getMethod()),
                 () -> {
                     var response = client.request(request, String.class);
                     var parsedResponse = MAPPER.readValue(response.getBody(), responseType);
@@ -104,21 +107,47 @@ public abstract class AbstractDbtCloud extends Task {
     }
 
     /**
-     * Whether an error raised while calling the dbt Cloud API is transient and worth retrying.
+     * Whether an error calling the dbt Cloud API is transient and worth retrying.
      *
-     * <p>Covers server-side 5xx responses, connection-level failures (socket/SSL) and read/connect
-     * timeouts. The core HTTP client wraps a read timeout as {@code RuntimeException(SocketTimeoutException)},
-     * so it is matched through the cause. Without this, a single timed-out status poll would fail the whole
-     * task even though the dbt Cloud run is still healthy. Genuine client errors (e.g. 4xx) are not retried.
+     * <p>Read-only methods (GET/HEAD) retry any transient signal: all 5xx, connection failures and
+     * timeouts. Other methods retry only the 502/503/504 gateway errors plus transport failures that
+     * provably never reached dbt Cloud (TLS handshake, connection refused). A plain 500, a read timeout
+     * or a mid-flight connection drop is not retried for them, since the request may already have
+     * created the run and a retry could start the job twice. A 502 or 504 carries that same residual
+     * risk, but the narrow set is kept for backward compatibility. A 429 (rate limited) is retried for
+     * any method, since dbt Cloud rejects it before running the request. Other client errors (4xx) are
+     * never retried.
+     *
+     * <p>The core HTTP client wraps a read timeout as {@code RuntimeException(SocketTimeoutException)},
+     * so it is matched through the cause.
      */
-    static boolean isRetriableTransientError(Throwable throwable) {
+    static boolean isRetriableTransientError(Throwable throwable, String method) {
         if (throwable == null) {
             return false;
         }
 
+        boolean readOnly = isReadOnlyMethod(method);
+
         if (throwable instanceof HttpClientResponseException ex) {
             int code = ex.getResponse().getStatus().getCode();
+            // 429 (rate limited) is rejected before the request runs, so it is safe to retry for any method.
+            if (code == 429) {
+                return true;
+            }
+            if (readOnly) {
+                return code >= 500 && code <= 599;
+            }
             return code == 502 || code == 503 || code == 504;
+        }
+
+        // Transport-level failures. For read-only methods any of them is retriable. For write methods
+        // only those that provably never reached the app are safe: a TLS handshake failure happens
+        // before any request bytes are sent, and a refused connection is never established. A read
+        // timeout or a mid-flight connection drop stays ambiguous (the run may already exist), so it
+        // is not retried for writes.
+        if (!readOnly) {
+            return hasCause(throwable, SSLHandshakeException.class)
+                || hasCause(throwable, ConnectException.class);
         }
 
         // Socket and SSL handshake failures are surfaced by the core HTTP client as this type.
@@ -128,5 +157,22 @@ public abstract class AbstractDbtCloud extends Task {
 
         return throwable instanceof SocketTimeoutException
             || throwable.getCause() instanceof SocketTimeoutException;
+    }
+
+    // GET/HEAD only. Named for retry-safety, not RFC idempotency: PUT/DELETE are idempotent but are
+    // not safe to retry blindly here, so they are treated as write methods.
+    private static boolean isReadOnlyMethod(String method) {
+        return "GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method);
+    }
+
+    // Walks the cause chain (bounded, to tolerate a cyclic cause) looking for a given exception type.
+    private static boolean hasCause(Throwable throwable, Class<? extends Throwable> type) {
+        Throwable current = throwable;
+        for (int depth = 0; current != null && depth < 16; current = current.getCause(), depth++) {
+            if (type.isInstance(current)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
