@@ -23,6 +23,7 @@ import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.utils.Await;
+import io.kestra.core.utils.RetryUtils;
 import io.kestra.plugin.dbt.ResultParser;
 import io.kestra.plugin.dbt.cloud.models.JobStatus;
 import io.kestra.plugin.dbt.cloud.models.JobStatusHumanizedEnum;
@@ -123,11 +124,19 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         RunResponse finalRunResponse = Await.until(
             throwSupplier(() ->
             {
-                Optional<RunResponse> fetchRunResponse = fetchRunResponse(
-                    runContext,
-                    runIdRendered,
-                    false
-                );
+                Optional<RunResponse> fetchRunResponse;
+                try {
+                    fetchRunResponse = fetchRunResponse(runContext, runIdRendered, false);
+                } catch (Exception e) {
+                    // Failing to read the status is not a run failure: the run keeps executing on dbt
+                    // Cloud, so poll again on the next cycle (bounded by maxDuration). Non-transient
+                    // errors (e.g. 401/403/404, bad config) never resolve by waiting, so fail fast.
+                    if (isTransientReadFailure(e)) {
+                        logger.warn("Could not read run '{}' status, retrying on next poll: {}", runIdRendered, e.getMessage());
+                        return null;
+                    }
+                    throw e;
+                }
 
                 if (fetchRunResponse.isPresent()) {
                     logSteps(logger, fetchRunResponse.get());
@@ -227,6 +236,18 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             return Boolean.TRUE.equals(data.getIsSuccess()) && !Boolean.TRUE.equals(data.getIsError());
         }
         return JobStatusHumanizedEnum.SUCCESS.equals(data.getStatusHumanized());
+    }
+
+    /**
+     * Whether a failed status read is transient, meaning polling should continue rather than fail the
+     * task. The run keeps executing on dbt Cloud while we cannot read its status, so a transient read
+     * failure is not a run failure. Non-transient errors (e.g. 401/403/404, bad config) never resolve
+     * by waiting, so they propagate and the task fails fast.
+     */
+    static boolean isTransientReadFailure(Throwable e) {
+        // request() surfaces an exhausted retry as RetryFailed wrapping the last error, so unwrap it.
+        Throwable cause = e instanceof RetryUtils.RetryFailed && e.getCause() != null ? e.getCause() : e;
+        return isRetriableTransientError(cause, "GET");
     }
 
     private void logSteps(Logger logger, RunResponse runResponse) {
