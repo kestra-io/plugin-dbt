@@ -86,10 +86,193 @@ class CheckStatusRetryTest {
     }
 
     @Test
+    void shouldRetryOnServerErrorAndEventuallySucceed() throws Exception {
+        // A transient 500 during status polling (an idempotent GET) must be retried instead of
+        // failing the task while the dbt Cloud run is still healthy.
+        var runContext = runContextFactory.of(Map.of());
+        var requestBuilder = HttpRequest.builder()
+            .uri(new URI("https://fake.api/dbt"))
+            .method("GET");
+
+        try (
+            var mocked = Mockito.mockConstruction(
+                HttpClient.class,
+                (mockClient, context) -> when(mockClient.request(any(HttpRequest.class), eq(String.class)))
+                    .thenThrow(
+                        new HttpClientResponseException(
+                            "Internal Server Error",
+                            HttpResponse.<String> builder()
+                                .status(HttpResponse.Status.builder().code(500).build())
+                                .build()
+                        )
+                    )
+                    .thenReturn(
+                        HttpResponse.<String> builder()
+                            .status(HttpResponse.Status.builder().code(200).build())
+                            .body("{\"status\":\"ok\"}")
+                            .build()
+                    )
+            )
+        ) {
+
+            var task = CheckStatus.builder()
+                .id(IdUtils.create())
+                .type(CheckStatus.class.getName())
+                .runId(Property.ofValue("123"))
+                .token(Property.ofValue("fake-token"))
+                .accountId(Property.ofValue("fake-account"))
+                .maxRetries(Property.ofValue(3))
+                .initialDelayMs(Property.ofValue(100L))
+                .build();
+
+            var response = task.request(runContext, requestBuilder, Map.class);
+
+            assertEquals(200, response.getStatus().getCode());
+            assertEquals("ok", response.getBody().get("status"));
+
+            var mockClient = mocked.constructed().getFirst();
+            verify(mockClient, times(2)).request(any(HttpRequest.class), eq(String.class));
+        }
+    }
+
+    @Test
+    void shouldNotRetryPostOnServerError() throws Exception {
+        // A 500 on the non-idempotent POST /run/ trigger must fail fast, not retry: dbt Cloud may
+        // have created the run before failing to respond, so a retry could start a second job.
+        var runContext = runContextFactory.of(Map.of());
+        var requestBuilder = HttpRequest.builder()
+            .uri(new URI("https://fake.api/dbt"))
+            .method("POST");
+
+        try (
+            var mocked = Mockito.mockConstruction(
+                HttpClient.class,
+                (mockClient, context) -> when(mockClient.request(any(HttpRequest.class), eq(String.class)))
+                    .thenThrow(
+                        new HttpClientResponseException(
+                            "Internal Server Error",
+                            HttpResponse.<String> builder()
+                                .status(HttpResponse.Status.builder().code(500).build())
+                                .build()
+                        )
+                    )
+            )
+        ) {
+
+            var task = CheckStatus.builder()
+                .id(IdUtils.create())
+                .type(CheckStatus.class.getName())
+                .runId(Property.ofValue("123"))
+                .token(Property.ofValue("fake-token"))
+                .accountId(Property.ofValue("fake-account"))
+                .maxRetries(Property.ofValue(3))
+                .initialDelayMs(Property.ofValue(100L))
+                .build();
+
+            var ex = assertThrows(
+                HttpClientResponseException.class,
+                () -> task.request(runContext, requestBuilder, Map.class)
+            );
+            assertEquals(500, ex.getResponse().getStatus().getCode());
+
+            var mockClient = mocked.constructed().getFirst();
+            verify(mockClient, times(1)).request(any(HttpRequest.class), eq(String.class));
+        }
+    }
+
+    @Test
+    void shouldRetryPostOnBadGatewayAndEventuallySucceed() throws Exception {
+        // 502/503/504 mean the trigger never reached the app, so the non-idempotent POST /run/ is
+        // still safe to retry on those.
+        var runContext = runContextFactory.of(Map.of());
+        var requestBuilder = HttpRequest.builder()
+            .uri(new URI("https://fake.api/dbt"))
+            .method("POST");
+
+        try (
+            var mocked = Mockito.mockConstruction(
+                HttpClient.class,
+                (mockClient, context) -> when(mockClient.request(any(HttpRequest.class), eq(String.class)))
+                    .thenThrow(
+                        new HttpClientResponseException(
+                            "Bad Gateway",
+                            HttpResponse.<String> builder()
+                                .status(HttpResponse.Status.builder().code(502).build())
+                                .build()
+                        )
+                    )
+                    .thenReturn(
+                        HttpResponse.<String> builder()
+                            .status(HttpResponse.Status.builder().code(200).build())
+                            .body("{\"status\":\"ok\"}")
+                            .build()
+                    )
+            )
+        ) {
+
+            var task = CheckStatus.builder()
+                .id(IdUtils.create())
+                .type(CheckStatus.class.getName())
+                .runId(Property.ofValue("123"))
+                .token(Property.ofValue("fake-token"))
+                .accountId(Property.ofValue("fake-account"))
+                .maxRetries(Property.ofValue(3))
+                .initialDelayMs(Property.ofValue(100L))
+                .build();
+
+            var response = task.request(runContext, requestBuilder, Map.class);
+
+            assertEquals(200, response.getStatus().getCode());
+            assertEquals("ok", response.getBody().get("status"));
+
+            var mockClient = mocked.constructed().getFirst();
+            verify(mockClient, times(2)).request(any(HttpRequest.class), eq(String.class));
+        }
+    }
+
+    @Test
+    void shouldNotRetryPostOnReadTimeout() throws Exception {
+        // A read timeout on the non-idempotent POST /run/ is ambiguous — the run may already have been
+        // created — so it must fail fast rather than risk starting the job twice.
+        var runContext = runContextFactory.of(Map.of());
+        var requestBuilder = HttpRequest.builder()
+            .uri(new URI("https://fake.api/dbt"))
+            .method("POST");
+
+        try (
+            var mocked = Mockito.mockConstruction(
+                HttpClient.class,
+                (mockClient, context) -> when(mockClient.request(any(HttpRequest.class), eq(String.class)))
+                    .thenThrow(new RuntimeException(new SocketTimeoutException("Read timed out")))
+            )
+        ) {
+
+            var task = CheckStatus.builder()
+                .id(IdUtils.create())
+                .type(CheckStatus.class.getName())
+                .runId(Property.ofValue("123"))
+                .token(Property.ofValue("fake-token"))
+                .accountId(Property.ofValue("fake-account"))
+                .maxRetries(Property.ofValue(3))
+                .initialDelayMs(Property.ofValue(100L))
+                .build();
+
+            var ex = assertThrows(
+                RuntimeException.class,
+                () -> task.request(runContext, requestBuilder, Map.class)
+            );
+            assertInstanceOf(SocketTimeoutException.class, ex.getCause());
+
+            var mockClient = mocked.constructed().getFirst();
+            verify(mockClient, times(1)).request(any(HttpRequest.class), eq(String.class));
+        }
+    }
+
+    @Test
     void shouldRetryOnReadTimeoutAndEventuallySucceed() throws Exception {
-        // Reproduces the false-failure ticket: a transient read timeout during status polling
-        // is surfaced by the core HTTP client as RuntimeException(SocketTimeoutException) and must
-        // be retried instead of failing the task while the dbt Cloud run is still healthy.
+        // A transient read timeout during status polling is surfaced by the core HTTP client as
+        // RuntimeException(SocketTimeoutException) and must be retried instead of failing the task
+        // while the dbt Cloud run is still healthy.
         var runContext = runContextFactory.of(Map.of());
         var requestBuilder = HttpRequest.builder()
             .uri(new URI("https://fake.api/dbt"));

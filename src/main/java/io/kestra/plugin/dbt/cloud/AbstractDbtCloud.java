@@ -92,7 +92,7 @@ public abstract class AbstractDbtCloud extends Task {
                     .maxAttempts(rMaxRetries)
                     .build()
             ).run(
-                (res, throwable) -> isRetriableTransientError(throwable),
+                (res, throwable) -> isRetriableTransientError(throwable, request.getMethod()),
                 () ->
                 {
                     var response = client.request(request, String.class);
@@ -109,21 +109,35 @@ public abstract class AbstractDbtCloud extends Task {
     }
 
     /**
-     * Whether an error raised while calling the dbt Cloud API is transient and worth retrying.
+     * Whether an error calling the dbt Cloud API is transient and worth retrying.
      *
-     * <p>Covers server-side 5xx responses, connection-level failures (socket/SSL) and read/connect
-     * timeouts. The core HTTP client wraps a read timeout as {@code RuntimeException(SocketTimeoutException)},
-     * so it is matched through the cause. Without this, a single timed-out status poll would fail the whole
-     * task even though the dbt Cloud run is still healthy. Genuine client errors (e.g. 4xx) are not retried.
+     * <p>Idempotent reads (GET/HEAD) retry any transient signal: all 5xx, connection failures and
+     * timeouts. Non-idempotent methods retry only 502/503/504, which mean the request never reached the
+     * app; a 500, timeout or connection drop could mean the run was already created, so retrying could
+     * start the job twice. Client errors (4xx) are never retried.
+     *
+     * <p>The core HTTP client wraps a read timeout as {@code RuntimeException(SocketTimeoutException)},
+     * so it is matched through the cause.
      */
-    static boolean isRetriableTransientError(Throwable throwable) {
+    static boolean isRetriableTransientError(Throwable throwable, String method) {
         if (throwable == null) {
             return false;
         }
 
+        boolean idempotent = isIdempotent(method);
+
         if (throwable instanceof HttpClientResponseException ex) {
             int code = ex.getResponse().getStatus().getCode();
+            if (idempotent) {
+                return code >= 500 && code <= 599;
+            }
             return code == 502 || code == 503 || code == 504;
+        }
+
+        // Transport-level failures below are ambiguous for a non-idempotent request, so only retry
+        // them for idempotent reads.
+        if (!idempotent) {
+            return false;
         }
 
         // Socket and SSL handshake failures are surfaced by the core HTTP client as this type.
@@ -133,5 +147,9 @@ public abstract class AbstractDbtCloud extends Task {
 
         return throwable instanceof SocketTimeoutException
             || throwable.getCause() instanceof SocketTimeoutException;
+    }
+
+    private static boolean isIdempotent(String method) {
+        return "GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method);
     }
 }
