@@ -52,6 +52,14 @@ class CheckStatusRetryTest {
         );
     }
 
+    private static HttpClientRequestException connectionFailure(Throwable cause) {
+        return new HttpClientRequestException(
+            "connection failed",
+            HttpRequest.builder().uri(URI.create("https://fake.api/dbt")).build(),
+            cause
+        );
+    }
+
     static Stream<Arguments> retryCases() {
         return Stream.of(
             // Null throwable is never retried.
@@ -72,7 +80,7 @@ class CheckStatusRetryTest {
             arguments(status(400), "GET", false),
             arguments(status(404), "GET", false),
 
-            // Write methods retry only 502/503/504; a 500, timeout or connection failure fails fast.
+            // Write methods retry only 502/503/504; a 500, timeout or ambiguous connection drop fails fast.
             arguments(status(502), "POST", true),
             arguments(status(503), "POST", true),
             arguments(status(504), "POST", true),
@@ -80,6 +88,11 @@ class CheckStatusRetryTest {
             arguments(status(501), "POST", false),
             arguments(connectionFailure(), "POST", false),
             arguments(new RuntimeException(new SocketTimeoutException("read timed out")), "POST", false),
+
+            // Write methods still retry transport failures that provably never reached the app.
+            arguments(connectionFailure(new javax.net.ssl.SSLHandshakeException("tls")), "POST", true),
+            arguments(connectionFailure(new java.net.ConnectException("connection refused")), "POST", true),
+            arguments(connectionFailure(new java.net.SocketException("connection reset")), "POST", false),
 
             // PUT/DELETE are RFC-idempotent but treated as write methods here (not blindly retriable).
             arguments(status(503), "PUT", true),
