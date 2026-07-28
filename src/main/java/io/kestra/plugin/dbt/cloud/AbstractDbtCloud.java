@@ -111,10 +111,12 @@ public abstract class AbstractDbtCloud extends Task {
     /**
      * Whether an error calling the dbt Cloud API is transient and worth retrying.
      *
-     * <p>Idempotent reads (GET/HEAD) retry any transient signal: all 5xx, connection failures and
-     * timeouts. Non-idempotent methods retry only 502/503/504, which mean the request never reached the
-     * app; a 500, timeout or connection drop could mean the run was already created, so retrying could
-     * start the job twice. Client errors (4xx) are never retried.
+     * <p>Read-only methods (GET/HEAD) retry any transient signal: all 5xx, connection failures and
+     * timeouts. Other methods retry only the 502/503/504 gateway errors. A plain 500, a timeout or a
+     * connection drop is not retried for them, since the request may already have created the run and a
+     * retry could start the job twice. A 502 or 504 carries that same residual risk, but the narrow set
+     * is kept for backward compatibility. A 429 (rate limited) is retried for any method, since dbt
+     * Cloud rejects it before running the request. Other client errors (4xx) are never retried.
      *
      * <p>The core HTTP client wraps a read timeout as {@code RuntimeException(SocketTimeoutException)},
      * so it is matched through the cause.
@@ -124,19 +126,23 @@ public abstract class AbstractDbtCloud extends Task {
             return false;
         }
 
-        boolean idempotent = isIdempotent(method);
+        boolean readOnly = isReadOnlyMethod(method);
 
         if (throwable instanceof HttpClientResponseException ex) {
             int code = ex.getResponse().getStatus().getCode();
-            if (idempotent) {
+            // 429 (rate limited) is rejected before the request runs, so it is safe to retry for any method.
+            if (code == 429) {
+                return true;
+            }
+            if (readOnly) {
                 return code >= 500 && code <= 599;
             }
             return code == 502 || code == 503 || code == 504;
         }
 
-        // Transport-level failures below are ambiguous for a non-idempotent request, so only retry
-        // them for idempotent reads.
-        if (!idempotent) {
+        // Transport-level failures below are ambiguous for a write request: the run may already have
+        // been created. Retry them only for read-only methods.
+        if (!readOnly) {
             return false;
         }
 
@@ -149,7 +155,9 @@ public abstract class AbstractDbtCloud extends Task {
             || throwable.getCause() instanceof SocketTimeoutException;
     }
 
-    private static boolean isIdempotent(String method) {
+    // GET/HEAD only. Named for retry-safety, not RFC idempotency: PUT/DELETE are idempotent but are
+    // not safe to retry blindly here, so they are treated as write methods.
+    private static boolean isReadOnlyMethod(String method) {
         return "GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method);
     }
 }
