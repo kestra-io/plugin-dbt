@@ -1,6 +1,6 @@
 group: io.kestra.plugin.dbt
 name: "dbt"
-title: "DBT"
+title: "dbt"
 description: "Integrate dbt data transformations into Kestra orchestration pipelines."
 body: "Provides dbt integrations for both CLI-driven projects and dbt Cloud jobs so you can orchestrate runs alongside other Kestra tasks. Supply your dbt profiles or Cloud API credentials to execute, monitor, and collect manifests and run results for downstream automation."
 videos: []

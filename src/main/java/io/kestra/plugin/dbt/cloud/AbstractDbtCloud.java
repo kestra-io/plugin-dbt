@@ -46,12 +46,18 @@ public abstract class AbstractDbtCloud extends Task {
     @Builder.Default
     Property<String> baseUrl = Property.ofValue("https://cloud.getdbt.com");
 
-    @Schema(title = "Numeric ID of the account")
+    @Schema(
+        title = "Numeric ID of the account",
+        description = "The numeric dbt Cloud account ID, visible in the account settings and in the dbt Cloud URL."
+    )
     @NotNull
     @PluginProperty(group = "main")
     Property<String> accountId;
 
-    @Schema(title = "API key")
+    @Schema(
+        title = "API token",
+        description = "A dbt Cloud API token (a Service Account token or a Personal Access token); sent as a Bearer token."
+    )
     @NotNull
     @PluginProperty(group = "main", secret = true)
     Property<String> token;

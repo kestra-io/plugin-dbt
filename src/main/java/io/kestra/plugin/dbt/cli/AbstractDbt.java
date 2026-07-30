@@ -76,7 +76,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
 
     @Schema(
         title = "The `profiles.yml` file content",
-        description = "If a `profile.yml` file already exist in the current working directory, it will be overridden."
+        description = "If a `profiles.yml` file already exists in the current working directory, it will be overridden."
     )
     Property<String> profiles;
 
