@@ -47,9 +47,9 @@ import io.kestra.core.models.annotations.PluginProperty;
                 tasks:
                   - id: trigger_run
                     type: io.kestra.plugin.dbt.cloud.TriggerRun
-                    accountId: "dbt_account"
+                    accountId: "12345"
                     token: "{{ secret('DBT_TOKEN') }}"
-                    jobId: "job_id"
+                    jobId: "67890"
                 """
         )
     }

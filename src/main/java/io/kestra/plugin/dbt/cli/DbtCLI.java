@@ -285,19 +285,19 @@ import lombok.experimental.SuperBuilder;
             name = "log.stats.success",
             type = Counter.TYPE,
             unit = "records",
-            description = "The number of successful log entries parsed from DBT output."
+            description = "The number of successful log entries parsed from dbt output."
         ),
         @Metric(
             name = "log.stats.warn",
             type = Counter.TYPE,
             unit = "records",
-            description = "The number of warning log entries parsed from DBT output."
+            description = "The number of warning log entries parsed from dbt output."
         ),
         @Metric(
             name = "log.stats.error",
             type = Counter.TYPE,
             unit = "records",
-            description = "The number of error log entries parsed from DBT output."
+            description = "The number of error log entries parsed from dbt output."
         )
     }
 )
@@ -349,6 +349,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
     @Builder.Default
     @PluginProperty(group = "execution")
+    @Schema(title = "The task runner container image, only used if the task runner is container-based.")
     protected Property<String> containerImage = Property.ofValue(CORE_IMAGE);
 
     @Schema(

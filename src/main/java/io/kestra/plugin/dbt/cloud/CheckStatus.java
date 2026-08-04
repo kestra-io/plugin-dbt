@@ -62,9 +62,9 @@ import io.kestra.core.models.annotations.PluginProperty;
                 tasks:
                   - id: check_status
                     type: io.kestra.plugin.dbt.cloud.CheckStatus
-                    accountId: "dbt_account"
+                    accountId: "12345"
                     token: "{{ secret('DBT_TOKEN') }}"
-                    runId: "run_id"
+                    runId: "98765"
                 """
         )
     }
