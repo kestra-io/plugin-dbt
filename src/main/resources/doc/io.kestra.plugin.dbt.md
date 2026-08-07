@@ -16,4 +16,4 @@ All CLI tasks run in a container defined by `containerImage`. Use an image from 
 
 For dbt Cloud, use `TriggerRun` — it starts a job and waits for completion by default without requiring a container. Use `CheckStatus` to poll a run that was triggered outside of Kestra. Authenticate dbt Cloud tasks with `accountId` (your numeric dbt Cloud account ID) and `token` (a dbt Cloud API token, supplied via `{{ secret('NAME') }}`).
 
-When `wait` is true, `TriggerRun` persists the dbt Cloud run ID to the flow's namespace KV Store as a short-lived token (TTL of twice `maxDuration`). If the worker restarts while the run is in flight, `TriggerRun` reattaches to that run instead of triggering a duplicate. Set `reattachOnRestart: false` to opt out of this behavior.
+When `wait` is true, `TriggerRun` remembers the dbt Cloud run ID in the flow's namespace KV Store (a short-lived entry, TTL of twice `maxDuration`). If the worker restarts while the run is in flight, `TriggerRun` resumes that run instead of triggering a duplicate. Set `resumeOnRestart: false` to opt out of this behavior.

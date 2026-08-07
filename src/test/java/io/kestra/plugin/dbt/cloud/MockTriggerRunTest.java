@@ -213,7 +213,7 @@ class MockTriggerRunTest {
     }
 
     @Test
-    void reattachSkipsTrigger() throws Exception {
+    void resumeSkipsTrigger() throws Exception {
         TriggerRun task = TriggerRun.builder()
             .id(IdUtils.create())
             .type(TriggerRun.class.getName())
@@ -225,8 +225,8 @@ class MockTriggerRunTest {
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
-        String key = "dbt-cloud-reattach-" + runContext.render("{{ taskrun.id }}");
-        KVStore kv = runContext.namespaceKv(runContext.render("{{ flow.namespace }}"));
+        String key = "dbt_cloud_resume_" + runContext.taskRunInfo().taskRunId();
+        KVStore kv = runContext.namespaceKv(runContext.flowInfo().namespace());
         kv.put(key, new KVValueAndMetadata(null, "789"));
 
         stubSuccessfulRunAndArtifacts();
@@ -257,8 +257,8 @@ class MockTriggerRunTest {
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
-        String key = "dbt-cloud-reattach-" + runContext.render("{{ taskrun.id }}");
-        KVStore kv = runContext.namespaceKv(runContext.render("{{ flow.namespace }}"));
+        String key = "dbt_cloud_resume_" + runContext.taskRunInfo().taskRunId();
+        KVStore kv = runContext.namespaceKv(runContext.flowInfo().namespace());
 
         TriggerRun.Output output = task.run(runContext);
 
@@ -283,12 +283,12 @@ class MockTriggerRunTest {
             .token(Property.ofValue("demo"))
             .baseUrl(Property.ofValue("http://localhost:28181"))
             .wait(Property.ofValue(true))
-            .reattachOnRestart(Property.ofValue(false))
+            .resumeOnRestart(Property.ofValue(false))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
-        String key = "dbt-cloud-reattach-" + runContext.render("{{ taskrun.id }}");
-        KVStore kv = runContext.namespaceKv(runContext.render("{{ flow.namespace }}"));
+        String key = "dbt_cloud_resume_" + runContext.taskRunInfo().taskRunId();
+        KVStore kv = runContext.namespaceKv(runContext.flowInfo().namespace());
         kv.put(key, new KVValueAndMetadata(null, "789"));
 
         task.run(runContext);
@@ -331,8 +331,8 @@ class MockTriggerRunTest {
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
-        String key = "dbt-cloud-reattach-" + runContext.render("{{ taskrun.id }}");
-        KVStore kv = runContext.namespaceKv(runContext.render("{{ flow.namespace }}"));
+        String key = "dbt_cloud_resume_" + runContext.taskRunInfo().taskRunId();
+        KVStore kv = runContext.namespaceKv(runContext.flowInfo().namespace());
 
         assertThatThrownBy(() -> task.run(runContext))
             .isInstanceOf(TimeoutException.class);
@@ -371,13 +371,13 @@ class MockTriggerRunTest {
             .token(Property.ofValue("demo"))
             .baseUrl(Property.ofValue("http://localhost:28181"))
             .wait(Property.ofValue(true))
-            .reattachOnRestart(Property.ofValue(true))
+            .resumeOnRestart(Property.ofValue(true))
             .pollFrequency(Property.ofValue(Duration.ofMillis(100)))
             .build();
 
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
-        String key = "dbt-cloud-reattach-" + runContext.render("{{ taskrun.id }}");
-        KVStore kv = runContext.namespaceKv(runContext.render("{{ flow.namespace }}"));
+        String key = "dbt_cloud_resume_" + runContext.taskRunInfo().taskRunId();
+        KVStore kv = runContext.namespaceKv(runContext.flowInfo().namespace());
 
         assertThatThrownBy(() -> task.run(runContext))
             .hasMessageContaining("Failed run with status")

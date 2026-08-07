@@ -139,11 +139,11 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     Property<Boolean> wait = Property.ofValue(Boolean.TRUE);
 
     @Schema(
-        title = "Reattach on worker restart",
-        description = "If true (default), persists the dbt Cloud run ID after triggering and, on a worker restart, reattaches to the in-flight run instead of triggering a duplicate. Only applies when wait is true."
+        title = "Resume on worker restart",
+        description = "If true (default), remembers the dbt Cloud run ID after triggering and, on a worker restart, resumes the in-flight run instead of triggering a duplicate. Only applies when wait is true."
     )
     @Builder.Default
-    Property<Boolean> reattachOnRestart = Property.ofValue(Boolean.TRUE);
+    Property<Boolean> resumeOnRestart = Property.ofValue(Boolean.TRUE);
 
     @Schema(
         title = "Poll frequency",
@@ -172,30 +172,30 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         Logger logger = runContext.logger();
 
         boolean waiting = !Boolean.FALSE.equals(runContext.render(this.wait).as(Boolean.class).orElse(Boolean.TRUE));
-        boolean reattach = waiting && Boolean.TRUE.equals(runContext.render(this.reattachOnRestart).as(Boolean.class).orElse(Boolean.TRUE));
+        boolean resumeEnabled = waiting && Boolean.TRUE.equals(runContext.render(this.resumeOnRestart).as(Boolean.class).orElse(Boolean.TRUE));
 
         KVStore kv = null;
-        String kvKey = null;
+        String resumeKey = null;
         Long runId = null;
 
-        if (reattach) {
+        if (resumeEnabled) {
             Duration ttl = runContext.render(this.maxDuration).as(Duration.class).orElse(Duration.ofMinutes(60)).multipliedBy(2);
-            kv = runContext.namespaceKv(runContext.render("{{ flow.namespace }}"));
-            kvKey = "dbt-cloud-reattach-" + runContext.render("{{ taskrun.id }}");
+            kv = runContext.namespaceKv(runContext.flowInfo().namespace());
+            resumeKey = "dbt_cloud_resume_" + runContext.taskRunInfo().taskRunId();
 
-            Optional<Long> reattachedRunId = fetchReattachRunId(kv, kvKey);
-            if (reattachedRunId.isPresent()) {
-                runId = reattachedRunId.get();
-                logger.info("Reattaching to in-flight dbt Cloud run {}", runId);
-                // Heartbeat the token so a long run surviving several restarts doesn't outlive it.
-                persistReattachToken(logger, kv, kvKey, runId, ttl);
+            Optional<Long> rememberedRunId = recallRunId(kv, resumeKey);
+            if (rememberedRunId.isPresent()) {
+                runId = rememberedRunId.get();
+                logger.info("Resuming in-flight dbt Cloud run {}", runId);
+                // Heartbeat the stored run id so a long run surviving several restarts doesn't outlive it.
+                rememberRunId(logger, kv, resumeKey, runId, ttl);
             } else {
                 runId = triggerRun(runContext, logger);
 
                 // Best-effort: the run is already live and we hold runId in memory for this attempt,
-                // so a persist failure must not abandon the run or skip polling. A Kestra retry on a
-                // hard failure here would just duplicate an already-running job.
-                persistReattachToken(logger, kv, kvKey, runId, ttl);
+                // so a failure to remember it must not abandon the run or skip polling. A Kestra retry
+                // on a hard failure here would just duplicate an already-running job.
+                rememberRunId(logger, kv, resumeKey, runId, ttl);
             }
         } else {
             runId = triggerRun(runContext, logger);
@@ -222,16 +222,16 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
             runOutput = checkStatusJob.run(runContext);
         } catch (CheckStatus.RunFailedException e) {
             // Confirmed terminal failure: safe to let a task retry trigger a fresh run.
-            if (reattach) {
-                deleteReattachToken(logger, kv, kvKey);
+            if (resumeEnabled) {
+                forgetRunId(logger, kv, resumeKey);
             }
             throw e;
         }
         // Any other exception here (timeout while still in-flight, transient/unreadable status) leaves
-        // the reattach token in place so a subsequent worker restart reattaches instead of duplicating.
+        // the remembered run id in place so a subsequent worker restart resumes instead of duplicating.
 
-        if (reattach) {
-            deleteReattachToken(logger, kv, kvKey);
+        if (resumeEnabled) {
+            forgetRunId(logger, kv, resumeKey);
         }
 
         return Output.builder()
@@ -283,28 +283,28 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         return triggerRunResponse.getData().getId();
     }
 
-    private static Optional<Long> fetchReattachRunId(KVStore kv, String kvKey) throws IOException {
+    private static Optional<Long> recallRunId(KVStore kv, String resumeKey) throws IOException {
         try {
-            return kv.getValue(kvKey).map(value -> Long.valueOf(String.valueOf(value.value())));
+            return kv.getValue(resumeKey).map(value -> Long.valueOf(String.valueOf(value.value())));
         } catch (ResourceExpiredException e) {
-            // Expired token: treat exactly as if none was stored.
+            // Expired entry: treat exactly as if none was stored.
             return Optional.empty();
         }
     }
 
-    private static void persistReattachToken(Logger logger, KVStore kv, String kvKey, Long runId, Duration ttl) {
+    private static void rememberRunId(Logger logger, KVStore kv, String resumeKey, Long runId, Duration ttl) {
         try {
-            kv.put(kvKey, new KVValueAndMetadata(new KVMetadata("dbt Cloud run reattach token", ttl), runId.toString()));
+            kv.put(resumeKey, new KVValueAndMetadata(new KVMetadata("dbt Cloud run id, kept so the run can resume after a worker restart", ttl), runId.toString()));
         } catch (Exception e) {
-            logger.warn("Could not persist reattach token for dbt Cloud run {}; a worker restart during this run may trigger a duplicate", runId, e);
+            logger.warn("Could not remember dbt Cloud run {} for resume; a worker restart during this run may trigger a duplicate", runId, e);
         }
     }
 
-    private static void deleteReattachToken(Logger logger, KVStore kv, String kvKey) {
+    private static void forgetRunId(Logger logger, KVStore kv, String resumeKey) {
         try {
-            kv.delete(kvKey);
+            kv.delete(resumeKey);
         } catch (Exception e) {
-            logger.debug("Could not clean up dbt Cloud reattach token '{}': {}", kvKey, e.getMessage());
+            logger.debug("Could not forget dbt Cloud run id '{}': {}", resumeKey, e.getMessage());
         }
     }
 
