@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
 
 import org.slf4j.Logger;
 
@@ -220,15 +221,18 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         CheckStatus.Output runOutput;
         try {
             runOutput = checkStatusJob.run(runContext);
-        } catch (CheckStatus.RunFailedException e) {
-            // Confirmed terminal failure: safe to let a task retry trigger a fresh run.
+        } catch (TimeoutException e) {
+            // Still in-flight (maxDuration reached): keep the remembered run id so a worker restart
+            // resumes this run instead of triggering a duplicate.
+            throw e;
+        } catch (Exception e) {
+            // Terminal failure, or an unrecoverable read error: forget the run id so a task retry
+            // triggers a fresh run rather than resuming a dead one.
             if (resumeEnabled) {
                 forgetRunId(logger, kv, resumeKey);
             }
             throw e;
         }
-        // Any other exception here (timeout while still in-flight, transient/unreadable status) leaves
-        // the remembered run id in place so a subsequent worker restart resumes instead of duplicating.
 
         if (resumeEnabled) {
             forgetRunId(logger, kv, resumeKey);
