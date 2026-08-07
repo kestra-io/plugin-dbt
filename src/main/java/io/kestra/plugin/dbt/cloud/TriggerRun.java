@@ -1,20 +1,27 @@
 package io.kestra.plugin.dbt.cloud;
 
+import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import org.slf4j.Logger;
 
+import io.kestra.core.exceptions.ResourceExpiredException;
 import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.HttpResponse;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
+import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
+import io.kestra.core.storages.kv.KVMetadata;
+import io.kestra.core.storages.kv.KVStore;
+import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.plugin.dbt.cloud.models.RunResponse;
 
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -25,7 +32,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
-import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -133,6 +139,13 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     Property<Boolean> wait = Property.ofValue(Boolean.TRUE);
 
     @Schema(
+        title = "Reattach on worker restart",
+        description = "If true (default), persists the dbt Cloud run ID after triggering and, on a worker restart, reattaches to the in-flight run instead of triggering a duplicate. Only applies when wait is true."
+    )
+    @Builder.Default
+    Property<Boolean> reattachOnRestart = Property.ofValue(Boolean.TRUE);
+
+    @Schema(
         title = "Poll frequency",
         description = "Interval between status checks when waiting. Default 5s."
     )
@@ -158,7 +171,77 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     public TriggerRun.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
 
-        // trigger
+        boolean waiting = !Boolean.FALSE.equals(runContext.render(this.wait).as(Boolean.class).orElse(Boolean.TRUE));
+        boolean reattach = waiting && Boolean.TRUE.equals(runContext.render(this.reattachOnRestart).as(Boolean.class).orElse(Boolean.TRUE));
+
+        KVStore kv = null;
+        String kvKey = null;
+        Long runId = null;
+
+        if (reattach) {
+            Duration ttl = runContext.render(this.maxDuration).as(Duration.class).orElse(Duration.ofMinutes(60)).multipliedBy(2);
+            kv = runContext.namespaceKv(runContext.render("{{ flow.namespace }}"));
+            kvKey = "dbt-cloud-reattach-" + runContext.render("{{ taskrun.id }}");
+
+            Optional<Long> reattachedRunId = fetchReattachRunId(kv, kvKey);
+            if (reattachedRunId.isPresent()) {
+                runId = reattachedRunId.get();
+                logger.info("Reattaching to in-flight dbt Cloud run {}", runId);
+                // Heartbeat the token so a long run surviving several restarts doesn't outlive it.
+                persistReattachToken(logger, kv, kvKey, runId, ttl);
+            } else {
+                runId = triggerRun(runContext, logger);
+
+                // Best-effort: the run is already live and we hold runId in memory for this attempt,
+                // so a persist failure must not abandon the run or skip polling. A Kestra retry on a
+                // hard failure here would just duplicate an already-running job.
+                persistReattachToken(logger, kv, kvKey, runId, ttl);
+            }
+        } else {
+            runId = triggerRun(runContext, logger);
+        }
+
+        if (!waiting) {
+            return Output.builder()
+                .runId(runId)
+                .build();
+        }
+
+        CheckStatus checkStatusJob = CheckStatus.builder()
+            .runId(Property.ofValue(runId.toString()))
+            .baseUrl(getBaseUrl())
+            .token(getToken())
+            .accountId(getAccountId())
+            .pollFrequency(getPollFrequency())
+            .maxDuration(getMaxDuration())
+            .parseRunResults(getParseRunResults())
+            .build();
+
+        CheckStatus.Output runOutput;
+        try {
+            runOutput = checkStatusJob.run(runContext);
+        } catch (CheckStatus.RunFailedException e) {
+            // Confirmed terminal failure: safe to let a task retry trigger a fresh run.
+            if (reattach) {
+                deleteReattachToken(logger, kv, kvKey);
+            }
+            throw e;
+        }
+        // Any other exception here (timeout while still in-flight, transient/unreadable status) leaves
+        // the reattach token in place so a subsequent worker restart reattaches instead of duplicating.
+
+        if (reattach) {
+            deleteReattachToken(logger, kv, kvKey);
+        }
+
+        return Output.builder()
+            .runId(runId)
+            .runResults(runOutput.getRunResults())
+            .manifest(runOutput.getManifest())
+            .build();
+    }
+
+    private Long triggerRun(RunContext runContext, Logger logger) throws Exception {
         Map<String, Object> body = new HashMap<>();
         body.put("cause", runContext.render(this.cause).as(String.class).orElseThrow());
 
@@ -197,31 +280,32 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         }
 
         logger.info("Job status {} with response: {}", triggerResponse.getStatus(), triggerRunResponse);
-        Long runId = triggerRunResponse.getData().getId();
+        return triggerRunResponse.getData().getId();
+    }
 
-        if (Boolean.FALSE.equals(runContext.render(this.wait).as(Boolean.class).orElse(Boolean.TRUE))) {
-            return Output.builder()
-                .runId(runId)
-                .build();
+    private static Optional<Long> fetchReattachRunId(KVStore kv, String kvKey) throws IOException {
+        try {
+            return kv.getValue(kvKey).map(value -> Long.valueOf(String.valueOf(value.value())));
+        } catch (ResourceExpiredException e) {
+            // Expired token: treat exactly as if none was stored.
+            return Optional.empty();
         }
+    }
 
-        CheckStatus checkStatusJob = CheckStatus.builder()
-            .runId(Property.ofValue(runId.toString()))
-            .baseUrl(getBaseUrl())
-            .token(getToken())
-            .accountId(getAccountId())
-            .pollFrequency(getPollFrequency())
-            .maxDuration(getMaxDuration())
-            .parseRunResults(getParseRunResults())
-            .build();
+    private static void persistReattachToken(Logger logger, KVStore kv, String kvKey, Long runId, Duration ttl) {
+        try {
+            kv.put(kvKey, new KVValueAndMetadata(new KVMetadata("dbt Cloud run reattach token", ttl), runId.toString()));
+        } catch (Exception e) {
+            logger.warn("Could not persist reattach token for dbt Cloud run {}; a worker restart during this run may trigger a duplicate", runId, e);
+        }
+    }
 
-        CheckStatus.Output runOutput = checkStatusJob.run(runContext);
-
-        return Output.builder()
-            .runId(runId)
-            .runResults(runOutput.getRunResults())
-            .manifest(runOutput.getManifest())
-            .build();
+    private static void deleteReattachToken(Logger logger, KVStore kv, String kvKey) {
+        try {
+            kv.delete(kvKey);
+        } catch (Exception e) {
+            logger.debug("Could not clean up dbt Cloud reattach token '{}': {}", kvKey, e.getMessage());
+        }
     }
 
     @Builder

@@ -18,6 +18,7 @@ import io.kestra.core.http.client.HttpClientException;
 import io.kestra.core.http.client.HttpClientResponseException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
+import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
@@ -40,7 +41,6 @@ import lombok.experimental.SuperBuilder;
 
 import static io.kestra.core.utils.Rethrow.throwSupplier;
 import static java.lang.Math.max;
-import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -71,9 +71,9 @@ import io.kestra.core.models.annotations.PluginProperty;
 )
 public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckStatus.Output> {
     private static final Set<JobStatus> ENDED_STATUS = Set.of(
-        JobStatus.NUMBER_10,  // Success
-        JobStatus.NUMBER_20,  // Error
-        JobStatus.NUMBER_30   // Cancelled
+        JobStatus.NUMBER_10, // Success
+        JobStatus.NUMBER_20, // Error
+        JobStatus.NUMBER_30 // Cancelled
     );
 
     @Schema(
@@ -171,12 +171,13 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         logSteps(logger, finalRunResponse);
 
         if (!isSuccessful(finalRunResponse.getData())) {
-            throw new Exception(
+            throw new RunFailedException(
                 "Failed run with status '" + finalRunResponse.getData().getStatusHumanized() +
                     "' after " + finalRunResponse.getData().getDurationHumanized() +
                     (finalRunResponse.getData().getStatusMessage() != null
                         ? ": " + finalRunResponse.getData().getStatusMessage()
-                        : "") +
+                        : "")
+                    +
                     ": " + finalRunResponse
             );
         }
@@ -341,5 +342,16 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             description = "Internal storage URI for the downloaded `manifest.json`, when present."
         )
         private URI manifest;
+    }
+
+    /**
+     * Signals a confirmed terminal failure on dbt Cloud (as opposed to a transient read error or a
+     * timeout while the run is still in-flight), so callers can distinguish "safe to retrigger" from
+     * "still running, don't duplicate".
+     */
+    public static class RunFailedException extends Exception {
+        public RunFailedException(String message) {
+            super(message);
+        }
     }
 }
