@@ -135,6 +135,65 @@ class MockTriggerRunTest {
     }
 
     @Test
+    void testReattachToInFlightRun() throws Exception {
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .withQueryParam("status__in", equalTo("[1,2,3]"))
+                .withQueryParam("order_by", equalTo("-id"))
+                .willReturn(okJson("{\"data\":[{\"id\":789,\"status\":3}]}"))
+        );
+
+        TriggerRun task = TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("my-token"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .reattach(Property.ofValue(true))
+            .wait(Property.ofValue(false))
+            .build();
+
+        RunContext runContext = runContextFactory.of(Map.of());
+        TriggerRun.Output output = task.run(runContext);
+
+        assertThat(output.getRunId(), is(789L));
+        verify(0, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
+    }
+
+    @Test
+    void testReattachTriggersWhenNoRunInFlight() throws Exception {
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .willReturn(okJson("{\"data\":[]}"))
+        );
+
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(okJson("{\"data\":{\"id\":790}}"))
+        );
+
+        TriggerRun task = TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("my-token"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .reattach(Property.ofValue(true))
+            .wait(Property.ofValue(false))
+            .build();
+
+        RunContext runContext = runContextFactory.of(Map.of());
+        TriggerRun.Output output = task.run(runContext);
+
+        assertThat(output.getRunId(), is(790L));
+        verify(1, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
+    }
+
+    @Test
     void shouldThrowOnNon200Response() {
         stubFor(
             post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))

@@ -1,6 +1,8 @@
 package io.kestra.plugin.dbt.cloud;
 
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
@@ -15,6 +17,8 @@ import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
+import io.kestra.plugin.dbt.cloud.models.Run;
+import io.kestra.plugin.dbt.cloud.models.RunListResponse;
 import io.kestra.plugin.dbt.cloud.models.RunResponse;
 
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -133,6 +137,16 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     Property<Boolean> wait = Property.ofValue(Boolean.TRUE);
 
     @Schema(
+        title = "Reattach to an in-flight run",
+        description = "If true, the task first looks for an existing Queued, Starting, or Running run of the job " +
+            "and continues with it instead of triggering a new one. This makes the task safe to retry: a retry " +
+            "after a worker restart or a transient failure resumes the run already in flight rather than " +
+            "starting a duplicate. Default false, which always triggers a new run."
+    )
+    @Builder.Default
+    Property<Boolean> reattach = Property.ofValue(Boolean.FALSE);
+
+    @Schema(
         title = "Poll frequency",
         description = "Interval between status checks when waiting. Default 5s."
     )
@@ -157,6 +171,15 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     @Override
     public TriggerRun.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
+
+        if (Boolean.TRUE.equals(runContext.render(this.reattach).as(Boolean.class).orElse(Boolean.FALSE))) {
+            Run inFlightRun = this.findInFlightRun(runContext);
+            if (inFlightRun != null) {
+                logger.info("Reattached to in-flight run {} (status {}) instead of triggering a new one",
+                    inFlightRun.getId(), inFlightRun.getStatus());
+                return this.waitOrReturn(runContext, inFlightRun.getId());
+            }
+        }
 
         // trigger
         Map<String, Object> body = new HashMap<>();
@@ -197,8 +220,36 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         }
 
         logger.info("Job status {} with response: {}", triggerResponse.getStatus(), triggerRunResponse);
-        Long runId = triggerRunResponse.getData().getId();
 
+        return this.waitOrReturn(runContext, triggerRunResponse.getData().getId());
+    }
+
+    /**
+     * Look for a Queued, Starting, or Running run of the job, newest first.
+     * Returns null when the job has no run in flight.
+     */
+    private Run findInFlightRun(RunContext runContext) throws Exception {
+        HttpRequest.HttpRequestBuilder requestBuilder = HttpRequest.builder()
+            .uri(
+                URI.create(
+                    runContext.render(this.baseUrl).as(String.class).orElseThrow() + "/api/v2/accounts/" + runContext.render(this.accountId).as(String.class).orElseThrow() +
+                        "/runs/?job_definition_id=" + runContext.render(this.jobId).as(String.class).orElseThrow() +
+                        "&status__in=" + URLEncoder.encode("[1,2,3]", StandardCharsets.UTF_8) +
+                        "&order_by=-id"
+                )
+            )
+            .method("GET");
+
+        HttpResponse<RunListResponse> response = this.request(runContext, requestBuilder, RunListResponse.class);
+
+        RunListResponse listResponse = response.getBody();
+        if (listResponse == null || listResponse.getData() == null || listResponse.getData().isEmpty()) {
+            return null;
+        }
+        return listResponse.getData().getFirst();
+    }
+
+    private Output waitOrReturn(RunContext runContext, Long runId) throws Exception {
         if (Boolean.FALSE.equals(runContext.render(this.wait).as(Boolean.class).orElse(Boolean.TRUE))) {
             return Output.builder()
                 .runId(runId)
