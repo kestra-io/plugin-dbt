@@ -171,7 +171,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         logSteps(logger, finalRunResponse);
 
         if (!isSuccessful(finalRunResponse.getData())) {
-            throw new Exception(
+            throw new RunFailedException(
                 "Failed run with status '" + finalRunResponse.getData().getStatusHumanized() +
                     "' after " + finalRunResponse.getData().getDurationHumanized() +
                     (finalRunResponse.getData().getStatusMessage() != null
@@ -342,5 +342,12 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             description = "Internal storage URI for the downloaded `manifest.json`, when present."
         )
         private URI manifest;
+    }
+
+    /** Confirmed terminal failure on dbt Cloud (run ended in Error or Cancelled). */
+    public static class RunFailedException extends Exception {
+        public RunFailedException(String message) {
+            super(message);
+        }
     }
 }

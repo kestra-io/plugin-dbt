@@ -385,4 +385,44 @@ class MockTriggerRunTest {
 
         assertThat(kv.getValue(key).isEmpty(), is(true));
     }
+
+    @Test
+    void keepsKeyOnNonTransientReadError() throws Exception {
+        // Fresh trigger, then the first status poll returns 403 (a non-transient read error, not a
+        // confirmed dbt failure). The run may still be live on dbt Cloud, so the resume key must be
+        // KEPT so a restart resumes it rather than triggering a duplicate.
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(okJson("{\"data\":{\"id\":789}}"))
+        );
+
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/789/"))
+                .withQueryParam("include_related", matching(".*run_steps.*"))
+                .willReturn(aResponse().withStatus(403).withHeader("Content-Type", "application/json"))
+        );
+
+        TriggerRun task = TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("demo"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .wait(Property.ofValue(true))
+            .resumeOnRestart(Property.ofValue(true))
+            .pollFrequency(Property.ofValue(Duration.ofMillis(100)))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(1)))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        String key = "dbt_cloud_resume_" + runContext.taskRunInfo().taskRunId();
+        KVStore kv = runContext.namespaceKv(runContext.flowInfo().namespace());
+
+        // Not a confirmed dbt failure (RunFailedException), so cleanup must not fire.
+        assertThatThrownBy(() -> task.run(runContext))
+            .isNotInstanceOf(CheckStatus.RunFailedException.class);
+
+        assertThat(kv.getValue(key).isPresent(), is(true));
+    }
 }

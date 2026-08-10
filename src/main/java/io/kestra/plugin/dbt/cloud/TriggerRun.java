@@ -1,13 +1,11 @@
 package io.kestra.plugin.dbt.cloud;
 
-import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.TimeoutException;
 
 import org.slf4j.Logger;
 
@@ -144,6 +142,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         description = "If true (default), remembers the dbt Cloud run ID after triggering and, on a worker restart, resumes the in-flight run instead of triggering a duplicate. Only applies when wait is true."
     )
     @Builder.Default
+    @PluginProperty(group = "advanced")
     Property<Boolean> resumeOnRestart = Property.ofValue(Boolean.TRUE);
 
     @Schema(
@@ -153,12 +152,14 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     @Builder.Default
     Property<Duration> pollFrequency = Property.ofValue(Duration.ofSeconds(5));
 
+    private static final Duration DEFAULT_MAX_DURATION = Duration.ofMinutes(60);
+
     @Schema(
         title = "Max wait duration",
         description = "Ceiling for waiting on job completion. Default 60m."
     )
     @Builder.Default
-    Property<Duration> maxDuration = Property.ofValue(Duration.ofMinutes(60));
+    Property<Duration> maxDuration = Property.ofValue(DEFAULT_MAX_DURATION);
 
     @Builder.Default
     @Schema(
@@ -180,22 +181,17 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         Long runId = null;
 
         if (resumeEnabled) {
-            Duration ttl = runContext.render(this.maxDuration).as(Duration.class).orElse(Duration.ofMinutes(60)).multipliedBy(2);
+            Duration ttl = runContext.render(this.maxDuration).as(Duration.class).orElse(DEFAULT_MAX_DURATION).multipliedBy(2);
             kv = runContext.namespaceKv(runContext.flowInfo().namespace());
             resumeKey = "dbt_cloud_resume_" + runContext.taskRunInfo().taskRunId();
 
-            Optional<Long> rememberedRunId = recallRunId(kv, resumeKey);
+            Optional<Long> rememberedRunId = recallRunId(logger, kv, resumeKey);
             if (rememberedRunId.isPresent()) {
                 runId = rememberedRunId.get();
                 logger.info("Resuming in-flight dbt Cloud run {}", runId);
-                // Heartbeat the stored run id so a long run surviving several restarts doesn't outlive it.
-                rememberRunId(logger, kv, resumeKey, runId, ttl);
+                rememberRunId(logger, kv, resumeKey, runId, ttl); // refresh TTL
             } else {
                 runId = triggerRun(runContext, logger);
-
-                // Best-effort: the run is already live and we hold runId in memory for this attempt,
-                // so a failure to remember it must not abandon the run or skip polling. A Kestra retry
-                // on a hard failure here would just duplicate an already-running job.
                 rememberRunId(logger, kv, resumeKey, runId, ttl);
             }
         } else {
@@ -221,18 +217,15 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         CheckStatus.Output runOutput;
         try {
             runOutput = checkStatusJob.run(runContext);
-        } catch (TimeoutException e) {
-            // Still in-flight (maxDuration reached): keep the remembered run id so a worker restart
-            // resumes this run instead of triggering a duplicate.
-            throw e;
-        } catch (Exception e) {
-            // Terminal failure, or an unrecoverable read error: forget the run id so a task retry
-            // triggers a fresh run rather than resuming a dead one.
+        } catch (CheckStatus.RunFailedException e) {
+            // Confirmed failure: forget so a retry triggers a fresh run.
             if (resumeEnabled) {
                 forgetRunId(logger, kv, resumeKey);
             }
             throw e;
         }
+        // Any other exception (timeout, or unconfirmed status like 401/403/404) keeps the run id: it
+        // may still be live, so a restart resumes it rather than duplicating.
 
         if (resumeEnabled) {
             forgetRunId(logger, kv, resumeKey);
@@ -287,11 +280,14 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         return triggerRunResponse.getData().getId();
     }
 
-    private static Optional<Long> recallRunId(KVStore kv, String resumeKey) throws IOException {
+    private static Optional<Long> recallRunId(Logger logger, KVStore kv, String resumeKey) {
         try {
             return kv.getValue(resumeKey).map(value -> Long.valueOf(String.valueOf(value.value())));
         } catch (ResourceExpiredException e) {
-            // Expired entry: treat exactly as if none was stored.
+            return Optional.empty();
+        } catch (Exception e) {
+            // Read failure or bad value: fall back to a fresh trigger, don't fail the task.
+            logger.warn("Could not read remembered dbt Cloud run id, will trigger a fresh run", e);
             return Optional.empty();
         }
     }
