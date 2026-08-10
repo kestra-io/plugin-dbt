@@ -56,6 +56,11 @@ class MockTriggerRunTest {
 
         assertThat(output, is(notNullValue()));
         assertThat(output.getRunId(), is(789L));
+        // reattach defaults off, so the cause must be left untouched (no taskrun tag) for backward compatibility
+        verify(
+            postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .withRequestBody(matchingJsonPath("$.cause", equalTo("Triggered by Kestra.")))
+        );
     }
 
     @Test
@@ -222,11 +227,42 @@ class MockTriggerRunTest {
             .wait(Property.ofValue(false))
             .build();
 
-        RunContext runContext = runContextFactory.of(Map.of());
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
         TriggerRun.Output output = task.run(runContext);
 
         assertThat(output.getRunId(), is(790L));
-        verify(1, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
+        // reattach on, so the freshly triggered run carries this taskrun's tag in its cause
+        verify(
+            postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .withRequestBody(matchingJsonPath("$.cause", containing("[taskrun:")))
+        );
+    }
+
+    @Test
+    void testReattachFailsLoudWhenLookupErrors() throws Exception {
+        // The reattach lookup fails: the task must fail loudly, not silently trigger a duplicate.
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .willReturn(aResponse().withStatus(500).withHeader("Content-Type", "application/json"))
+        );
+
+        TriggerRun task = TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("my-token"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .reattach(Property.ofValue(true))
+            .wait(Property.ofValue(false))
+            .maxRetries(Property.ofValue(1))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+
+        assertThatThrownBy(() -> task.run(runContext)).isInstanceOf(Exception.class);
+        verify(0, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
     }
 
     @Test

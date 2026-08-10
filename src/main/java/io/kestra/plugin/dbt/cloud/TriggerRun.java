@@ -138,10 +138,10 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
     @Schema(
         title = "Reattach to an in-flight run",
-        description = "If true, on a worker restart or retry the task reattaches to the run it already started and " +
-            "waits for it instead of triggering a duplicate. It only reattaches to a run this execution started " +
-            "(matched by the taskrun id in the run cause), never one triggered elsewhere. Default false, which " +
-            "always triggers a new run."
+        description = """
+            If true, on a worker restart or retry the task reattaches to the run it already started and waits for it \
+            instead of triggering a duplicate. It only reattaches to a run this execution started (matched by the \
+            taskrun id in the run cause), never one triggered elsewhere. Default false, which always triggers a new run."""
     )
     @Builder.Default
     @PluginProperty(group = "reliability")
@@ -173,7 +173,9 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     public TriggerRun.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
 
-        if (Boolean.TRUE.equals(runContext.render(this.reattach).as(Boolean.class).orElse(Boolean.FALSE))) {
+        boolean reattachEnabled = Boolean.TRUE.equals(runContext.render(this.reattach).as(Boolean.class).orElse(Boolean.FALSE));
+
+        if (reattachEnabled) {
             Run inFlightRun = this.findInFlightRun(runContext);
             if (inFlightRun != null) {
                 logger.info(
@@ -186,8 +188,13 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
         // trigger
         Map<String, Object> body = new HashMap<>();
-        // Tag the cause with the taskrun id so a later reattach can find the exact run this execution started.
-        body.put("cause", runContext.render(this.cause).as(String.class).orElseThrow() + " " + taskrunTag(runContext));
+        String cause = runContext.render(this.cause).as(String.class).orElseThrow();
+        if (reattachEnabled) {
+            // Only when reattach is on: tag the cause with the taskrun id so a later attempt finds this exact run.
+            // When reattach is off the cause is left untouched, so upgrading changes nothing for existing flows.
+            cause = cause + " " + taskrunTag(runContext);
+        }
+        body.put("cause", cause);
 
         runContext.render(this.gitSha).as(String.class).ifPresent(sha -> body.put("git_sha", sha));
         runContext.render(this.gitBranch).as(String.class).ifPresent(branch -> body.put("git_branch", branch));
