@@ -1,6 +1,8 @@
 package io.kestra.plugin.dbt.cloud;
 
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
@@ -12,9 +14,12 @@ import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.HttpResponse;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
+import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
+import io.kestra.plugin.dbt.cloud.models.Run;
+import io.kestra.plugin.dbt.cloud.models.RunListResponse;
 import io.kestra.plugin.dbt.cloud.models.RunResponse;
 
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -25,7 +30,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
-import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -133,6 +137,17 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     Property<Boolean> wait = Property.ofValue(Boolean.TRUE);
 
     @Schema(
+        title = "Reattach to an in-flight run",
+        description = """
+            If true, on a worker restart or retry the task reattaches to the run it already started and waits for it \
+            instead of triggering a duplicate. It only reattaches to a run this execution started (matched by the \
+            taskrun id in the run cause), never one triggered elsewhere. Default false, which always triggers a new run."""
+    )
+    @Builder.Default
+    @PluginProperty(group = "reliability")
+    Property<Boolean> reattach = Property.ofValue(Boolean.FALSE);
+
+    @Schema(
         title = "Poll frequency",
         description = "Interval between status checks when waiting. Default 5s."
     )
@@ -158,9 +173,28 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     public TriggerRun.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
 
+        boolean reattachEnabled = Boolean.TRUE.equals(runContext.render(this.reattach).as(Boolean.class).orElse(Boolean.FALSE));
+
+        if (reattachEnabled) {
+            Run inFlightRun = this.findInFlightRun(runContext);
+            if (inFlightRun != null) {
+                logger.info(
+                    "Reattached to in-flight run {} (status {}) instead of triggering a new one",
+                    inFlightRun.getId(), inFlightRun.getStatus()
+                );
+                return this.waitOrReturn(runContext, inFlightRun.getId());
+            }
+        }
+
         // trigger
         Map<String, Object> body = new HashMap<>();
-        body.put("cause", runContext.render(this.cause).as(String.class).orElseThrow());
+        String cause = runContext.render(this.cause).as(String.class).orElseThrow();
+        if (reattachEnabled) {
+            // Only when reattach is on: tag the cause with the taskrun id so a later attempt finds this exact run.
+            // When reattach is off the cause is left untouched, so upgrading changes nothing for existing flows.
+            cause = cause + " " + taskrunTag(runContext);
+        }
+        body.put("cause", cause);
 
         runContext.render(this.gitSha).as(String.class).ifPresent(sha -> body.put("git_sha", sha));
         runContext.render(this.gitBranch).as(String.class).ifPresent(branch -> body.put("git_branch", branch));
@@ -197,8 +231,52 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         }
 
         logger.info("Job status {} with response: {}", triggerResponse.getStatus(), triggerRunResponse);
-        Long runId = triggerRunResponse.getData().getId();
 
+        return this.waitOrReturn(runContext, triggerRunResponse.getData().getId());
+    }
+
+    /**
+     * Look for an in-flight run of the job (Queued, Starting, or Running) that this taskrun started,
+     * matched by the taskrun tag in the run cause. Returns null when there is none, in which case a
+     * fresh run is triggered rather than attaching to a run this execution did not start.
+     */
+    private Run findInFlightRun(RunContext runContext) throws Exception {
+        HttpRequest.HttpRequestBuilder requestBuilder = HttpRequest.builder()
+            .uri(
+                URI.create(
+                    runContext.render(this.baseUrl).as(String.class).orElseThrow() + "/api/v2/accounts/" + runContext.render(this.accountId).as(String.class).orElseThrow() +
+                        "/runs/?job_definition_id=" + runContext.render(this.jobId).as(String.class).orElseThrow() +
+                        "&status__in=" + URLEncoder.encode("[1,2,3]", StandardCharsets.UTF_8) +
+                        "&order_by=-id" +
+                        "&include_related=" + URLEncoder.encode("[\"trigger\"]", StandardCharsets.UTF_8)
+                )
+            )
+            .method("GET");
+
+        HttpResponse<RunListResponse> response = this.request(runContext, requestBuilder, RunListResponse.class);
+
+        RunListResponse listResponse = response.getBody();
+        if (listResponse == null || listResponse.getData() == null || listResponse.getData().isEmpty()) {
+            return null;
+        }
+
+        String tag = taskrunTag(runContext);
+        return listResponse.getData().stream()
+            .filter(
+                run -> run.getTrigger() != null
+                    && run.getTrigger().getCause() != null
+                    && run.getTrigger().getCause().contains(tag)
+            )
+            .findFirst()
+            .orElse(null);
+    }
+
+    /** The marker embedded in a run's cause so a reattach can identify the run this taskrun started. */
+    private static String taskrunTag(RunContext runContext) {
+        return "[taskrun:" + runContext.taskRunInfo().taskRunId() + "]";
+    }
+
+    private Output waitOrReturn(RunContext runContext, Long runId) throws Exception {
         if (Boolean.FALSE.equals(runContext.render(this.wait).as(Boolean.class).orElse(Boolean.TRUE))) {
             return Output.builder()
                 .runId(runId)
