@@ -136,14 +136,6 @@ class MockTriggerRunTest {
 
     @Test
     void testReattachToInFlightRun() throws Exception {
-        stubFor(
-            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
-                .withQueryParam("job_definition_id", equalTo("456"))
-                .withQueryParam("status__in", equalTo("[1,2,3]"))
-                .withQueryParam("order_by", equalTo("-id"))
-                .willReturn(okJson("{\"data\":[{\"id\":789,\"status\":3}]}"))
-        );
-
         TriggerRun task = TriggerRun.builder()
             .id(IdUtils.create())
             .type(TriggerRun.class.getName())
@@ -155,11 +147,55 @@ class MockTriggerRunTest {
             .wait(Property.ofValue(false))
             .build();
 
-        RunContext runContext = runContextFactory.of(Map.of());
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        String tag = "[taskrun:" + runContext.taskRunInfo().taskRunId() + "]";
+
+        // in-flight run that THIS taskrun started (its cause carries our tag)
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .withQueryParam("status__in", equalTo("[1,2,3]"))
+                .withQueryParam("include_related", matching(".*trigger.*"))
+                .willReturn(okJson("{\"data\":[{\"id\":789,\"status\":3,\"trigger\":{\"cause\":\"Triggered by Kestra. " + tag + "\"}}]}"))
+        );
+
         TriggerRun.Output output = task.run(runContext);
 
         assertThat(output.getRunId(), is(789L));
         verify(0, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
+    }
+
+    @Test
+    void testReattachSkipsForeignRun() throws Exception {
+        TriggerRun task = TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("my-token"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .reattach(Property.ofValue(true))
+            .wait(Property.ofValue(false))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+
+        // an in-flight run of the job, but NOT started by this taskrun (cause has no matching tag)
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .willReturn(okJson("{\"data\":[{\"id\":999,\"status\":3,\"trigger\":{\"cause\":\"Triggered manually\"}}]}"))
+        );
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(okJson("{\"data\":{\"id\":790}}"))
+        );
+
+        TriggerRun.Output output = task.run(runContext);
+
+        // did not attach to the foreign run 999, triggered our own instead
+        assertThat(output.getRunId(), is(790L));
+        verify(1, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
     }
 
     @Test

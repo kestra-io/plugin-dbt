@@ -14,6 +14,7 @@ import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.HttpResponse;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
+import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
@@ -29,7 +30,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
-import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -138,12 +138,13 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
     @Schema(
         title = "Reattach to an in-flight run",
-        description = "If true, the task first looks for an existing Queued, Starting, or Running run of the job " +
-            "and continues with it instead of triggering a new one. This makes the task safe to retry: a retry " +
-            "after a worker restart or a transient failure resumes the run already in flight rather than " +
-            "starting a duplicate. Default false, which always triggers a new run."
+        description = "If true, on a worker restart or retry the task reattaches to the run it already started and " +
+            "waits for it instead of triggering a duplicate. It only reattaches to a run this execution started " +
+            "(matched by the taskrun id in the run cause), never one triggered elsewhere. Default false, which " +
+            "always triggers a new run."
     )
     @Builder.Default
+    @PluginProperty(group = "reliability")
     Property<Boolean> reattach = Property.ofValue(Boolean.FALSE);
 
     @Schema(
@@ -175,15 +176,18 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         if (Boolean.TRUE.equals(runContext.render(this.reattach).as(Boolean.class).orElse(Boolean.FALSE))) {
             Run inFlightRun = this.findInFlightRun(runContext);
             if (inFlightRun != null) {
-                logger.info("Reattached to in-flight run {} (status {}) instead of triggering a new one",
-                    inFlightRun.getId(), inFlightRun.getStatus());
+                logger.info(
+                    "Reattached to in-flight run {} (status {}) instead of triggering a new one",
+                    inFlightRun.getId(), inFlightRun.getStatus()
+                );
                 return this.waitOrReturn(runContext, inFlightRun.getId());
             }
         }
 
         // trigger
         Map<String, Object> body = new HashMap<>();
-        body.put("cause", runContext.render(this.cause).as(String.class).orElseThrow());
+        // Tag the cause with the taskrun id so a later reattach can find the exact run this execution started.
+        body.put("cause", runContext.render(this.cause).as(String.class).orElseThrow() + " " + taskrunTag(runContext));
 
         runContext.render(this.gitSha).as(String.class).ifPresent(sha -> body.put("git_sha", sha));
         runContext.render(this.gitBranch).as(String.class).ifPresent(branch -> body.put("git_branch", branch));
@@ -225,8 +229,9 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     }
 
     /**
-     * Look for a Queued, Starting, or Running run of the job, newest first.
-     * Returns null when the job has no run in flight.
+     * Look for an in-flight run of the job (Queued, Starting, or Running) that this taskrun started,
+     * matched by the taskrun tag in the run cause. Returns null when there is none, in which case a
+     * fresh run is triggered rather than attaching to a run this execution did not start.
      */
     private Run findInFlightRun(RunContext runContext) throws Exception {
         HttpRequest.HttpRequestBuilder requestBuilder = HttpRequest.builder()
@@ -235,7 +240,8 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
                     runContext.render(this.baseUrl).as(String.class).orElseThrow() + "/api/v2/accounts/" + runContext.render(this.accountId).as(String.class).orElseThrow() +
                         "/runs/?job_definition_id=" + runContext.render(this.jobId).as(String.class).orElseThrow() +
                         "&status__in=" + URLEncoder.encode("[1,2,3]", StandardCharsets.UTF_8) +
-                        "&order_by=-id"
+                        "&order_by=-id" +
+                        "&include_related=" + URLEncoder.encode("[\"trigger\"]", StandardCharsets.UTF_8)
                 )
             )
             .method("GET");
@@ -246,7 +252,21 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         if (listResponse == null || listResponse.getData() == null || listResponse.getData().isEmpty()) {
             return null;
         }
-        return listResponse.getData().getFirst();
+
+        String tag = taskrunTag(runContext);
+        return listResponse.getData().stream()
+            .filter(
+                run -> run.getTrigger() != null
+                    && run.getTrigger().getCause() != null
+                    && run.getTrigger().getCause().contains(tag)
+            )
+            .findFirst()
+            .orElse(null);
+    }
+
+    /** The marker embedded in a run's cause so a reattach can identify the run this taskrun started. */
+    private static String taskrunTag(RunContext runContext) {
+        return "[taskrun:" + runContext.taskRunInfo().taskRunId() + "]";
     }
 
     private Output waitOrReturn(RunContext runContext, Long runId) throws Exception {
