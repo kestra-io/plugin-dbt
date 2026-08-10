@@ -419,9 +419,9 @@ class MockTriggerRunTest {
         String key = "dbt_cloud_resume_" + runContext.taskRunInfo().taskRunId();
         KVStore kv = runContext.namespaceKv(runContext.flowInfo().namespace());
 
-        // Not a confirmed dbt failure (RunFailedException), so cleanup must not fire.
+        // A non-transient read error, not a confirmed dbt failure, so cleanup must not fire.
         assertThatThrownBy(() -> task.run(runContext))
-            .isNotInstanceOf(CheckStatus.RunFailedException.class);
+            .isInstanceOf(HttpClientResponseException.class);
 
         assertThat(kv.getValue(key).isPresent(), is(true));
     }

@@ -1,5 +1,6 @@
 package io.kestra.plugin.dbt.cloud;
 
+import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.HashMap;
@@ -142,7 +143,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         description = "If true (default), remembers the dbt Cloud run ID after triggering and, on a worker restart, resumes the in-flight run instead of triggering a duplicate. Only applies when wait is true."
     )
     @Builder.Default
-    @PluginProperty(group = "advanced")
+    @PluginProperty(group = "reliability")
     Property<Boolean> resumeOnRestart = Property.ofValue(Boolean.TRUE);
 
     @Schema(
@@ -280,16 +281,16 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         return triggerRunResponse.getData().getId();
     }
 
-    private static Optional<Long> recallRunId(Logger logger, KVStore kv, String resumeKey) {
+    private static Optional<Long> recallRunId(Logger logger, KVStore kv, String resumeKey) throws IOException {
         try {
             return kv.getValue(resumeKey).map(value -> Long.valueOf(String.valueOf(value.value())));
-        } catch (ResourceExpiredException e) {
-            return Optional.empty();
-        } catch (Exception e) {
-            // Read failure or bad value: fall back to a fresh trigger, don't fail the task.
-            logger.warn("Could not read remembered dbt Cloud run id, will trigger a fresh run", e);
+        } catch (ResourceExpiredException | NumberFormatException e) {
+            // Expired or a corrupt/non-numeric value: nothing usable to resume, so trigger fresh.
+            logger.warn("No usable remembered dbt Cloud run id, will trigger a fresh run: {}", e.getMessage());
             return Optional.empty();
         }
+        // A KVStore read failure (IOException) is left to propagate: the run may be remembered but
+        // unreadable, so fail loudly rather than silently trigger a duplicate.
     }
 
     private static void rememberRunId(Logger logger, KVStore kv, String resumeKey, Long runId, Duration ttl) {
