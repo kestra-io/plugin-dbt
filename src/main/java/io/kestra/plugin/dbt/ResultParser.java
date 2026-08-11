@@ -227,10 +227,8 @@ public abstract class ResultParser {
         }
     }
 
-    // Every dbt model is emitted as its own output asset; model-to-model edges are expressed
-    // as the downstream model's inputs (see inputIdentifiers), not as an upstream model's outputs.
-    // This ensures a model with no model-to-model dependency (e.g. reading only from a dbt source,
-    // or a single-model project) still surfaces as an asset instead of emitting nothing.
+    // Every dbt model is emitted as its own output asset. Model-to-model edges are the downstream
+    // model's inputs (see inputIdentifiers), so a model with no model dependency still surfaces.
     private static Asset modelOutputAsset(ModelAsset modelAsset) {
         return Custom.builder()
             .id(modelAsset.assetId())
