@@ -48,62 +48,62 @@ class RunnerTest {
         assertThat("should emit exactly 8 model assets", allEmitted, hasSize(8));
 
         /*
-         * Expected lineage (inputs = upstream deps, outputs = downstream children):
+         * Expected lineage (each model emits itself as output; inputs = upstream deps):
          *
-         * stg_customers: inputs=[] outputs=[int_customer_orders]
-         * stg_orders: inputs=[] outputs=[int_customer_orders, int_order_payments, int_daily_revenue]
-         * stg_payments: inputs=[] outputs=[int_order_payments, int_daily_revenue]
-         * int_customer_orders: inputs=[stg_customers, stg_orders] outputs=[fct_customer_summary]
-         * int_order_payments: inputs=[stg_orders, stg_payments] outputs=[fct_customer_summary]
-         * int_daily_revenue: inputs=[stg_orders, stg_payments] outputs=[fct_revenue_by_customer]
-         * fct_customer_summary: inputs=[int_customer_orders, int_order_payments] outputs=[fct_revenue_by_customer]
-         * fct_revenue_by_customer: inputs=[fct_customer_summary, int_daily_revenue] outputs=[]
+         * stg_customers: inputs=[] outputs=[stg_customers]
+         * stg_orders: inputs=[] outputs=[stg_orders]
+         * stg_payments: inputs=[] outputs=[stg_payments]
+         * int_customer_orders: inputs=[stg_customers, stg_orders] outputs=[int_customer_orders]
+         * int_order_payments: inputs=[stg_orders, stg_payments] outputs=[int_order_payments]
+         * int_daily_revenue: inputs=[stg_orders, stg_payments] outputs=[int_daily_revenue]
+         * fct_customer_summary: inputs=[int_customer_orders, int_order_payments] outputs=[fct_customer_summary]
+         * fct_revenue_by_customer: inputs=[fct_customer_summary, int_daily_revenue] outputs=[fct_revenue_by_customer]
          */
 
-        // Staging models: no inputs, outputs are the intermediate models they feed
+        // Staging models: no inputs, output is the model itself
         assertEmission(
             allEmitted, "stg_customers",
             List.of(),
-            List.of("memory.main.int_customer_orders")
+            List.of("memory.main.stg_customers")
         );
         assertEmission(
             allEmitted, "stg_orders",
             List.of(),
-            List.of("memory.main.int_customer_orders", "memory.main.int_order_payments", "memory.main.int_daily_revenue")
+            List.of("memory.main.stg_orders")
         );
         assertEmission(
             allEmitted, "stg_payments",
             List.of(),
-            List.of("memory.main.int_order_payments", "memory.main.int_daily_revenue")
+            List.of("memory.main.stg_payments")
         );
 
-        // Intermediate models: inputs from staging, outputs to marts
+        // Intermediate models: inputs from staging, output is the model itself
         assertEmission(
             allEmitted, "int_customer_orders",
             List.of("memory.main.stg_customers", "memory.main.stg_orders"),
-            List.of("memory.main.fct_customer_summary")
+            List.of("memory.main.int_customer_orders")
         );
         assertEmission(
             allEmitted, "int_order_payments",
             List.of("memory.main.stg_orders", "memory.main.stg_payments"),
-            List.of("memory.main.fct_customer_summary")
+            List.of("memory.main.int_order_payments")
         );
         assertEmission(
             allEmitted, "int_daily_revenue",
             List.of("memory.main.stg_orders", "memory.main.stg_payments"),
-            List.of("memory.main.fct_revenue_by_customer")
+            List.of("memory.main.int_daily_revenue")
         );
 
         // Mart models
         assertEmission(
             allEmitted, "fct_customer_summary",
             List.of("memory.main.int_customer_orders", "memory.main.int_order_payments"),
-            List.of("memory.main.fct_revenue_by_customer")
+            List.of("memory.main.fct_customer_summary")
         );
         assertEmission(
             allEmitted, "fct_revenue_by_customer",
             List.of("memory.main.fct_customer_summary", "memory.main.int_daily_revenue"),
-            List.of()
+            List.of("memory.main.fct_revenue_by_customer")
         );
     }
 

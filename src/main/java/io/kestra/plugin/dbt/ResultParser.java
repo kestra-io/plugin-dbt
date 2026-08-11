@@ -6,6 +6,8 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.*;
 
+import org.slf4j.event.Level;
+
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -27,8 +29,6 @@ import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.dbt.models.Manifest;
 import io.kestra.plugin.dbt.models.RunResult;
-
-import org.slf4j.event.Level;
 
 import static io.kestra.core.utils.Rethrow.throwConsumer;
 
@@ -203,7 +203,7 @@ public abstract class ResultParser {
         }
 
         List<AssetIdentifier> inputs = inputIdentifiers(modelAsset, modelAssets);
-        List<Asset> outputs = outputAssets(modelAsset, modelAssets);
+        List<Asset> outputs = List.of(modelOutputAsset(modelAsset));
 
         return new AssetsInOut(inputs, outputs);
     }
@@ -214,7 +214,7 @@ public abstract class ResultParser {
 
         for (ModelAsset asset : modelAssets.values()) {
             List<AssetIdentifier> inputs = inputIdentifiers(asset, modelAssets);
-            List<Asset> outputs = outputAssets(asset, modelAssets);
+            List<Asset> outputs = List.of(modelOutputAsset(asset));
             try {
                 runContext.assets().emit(new AssetEmit(inputs, outputs));
             } catch (UnsupportedOperationException e) {
@@ -227,22 +227,16 @@ public abstract class ResultParser {
         }
     }
 
-    private static List<Asset> outputAssets(ModelAsset modelAsset, Map<String, ModelAsset> modelAssets) {
-        if (modelAsset.children() == null || modelAsset.children().isEmpty()) {
-            return List.of();
-        }
-
-        return modelAsset.children().stream()
-            .map(modelAssets::get)
-            .filter(Objects::nonNull)
-            .<Asset> map(
-                child -> Custom.builder()
-                    .id(child.assetId())
-                    .type(TABLE_ASSET_TYPE)
-                    .metadata(child.metadata())
-                    .build()
-            )
-            .toList();
+    // Every dbt model is emitted as its own output asset; model-to-model edges are expressed
+    // as the downstream model's inputs (see inputIdentifiers), not as an upstream model's outputs.
+    // This ensures a model with no model-to-model dependency (e.g. reading only from a dbt source,
+    // or a single-model project) still surfaces as an asset instead of emitting nothing.
+    private static Asset modelOutputAsset(ModelAsset modelAsset) {
+        return Custom.builder()
+            .id(modelAsset.assetId())
+            .type(TABLE_ASSET_TYPE)
+            .metadata(modelAsset.metadata())
+            .build();
     }
 
     private static List<AssetIdentifier> inputIdentifiers(ModelAsset modelAsset, Map<String, ModelAsset> modelAssets) {
@@ -300,7 +294,7 @@ public abstract class ResultParser {
                 dependsOn = List.of();
             }
 
-            modelAssets.put(uniqueId, new ModelAsset(assetId, metadata, dependsOn, List.of()));
+            modelAssets.put(uniqueId, new ModelAsset(assetId, metadata, dependsOn));
         }
 
         Map<String, ModelAsset> filtered = new HashMap<>(modelAssets.size());
@@ -310,26 +304,10 @@ public abstract class ResultParser {
                 : a.dependsOn().stream()
                     .filter(modelAssets::containsKey)
                     .toList();
-            filtered.put(e.getKey(), new ModelAsset(a.assetId(), a.metadata(), deps, List.of()));
+            filtered.put(e.getKey(), new ModelAsset(a.assetId(), a.metadata(), deps));
         }
 
-        // Compute reverse dependencies (children: models that depend on this one)
-        Map<String, List<String>> childrenMap = new HashMap<>();
-        for (Map.Entry<String, ModelAsset> e : filtered.entrySet()) {
-            for (String dep : e.getValue().dependsOn()) {
-                childrenMap.computeIfAbsent(dep, k -> new ArrayList<>()).add(e.getKey());
-            }
-        }
-
-        // Rebuild with children populated
-        Map<String, ModelAsset> result = new HashMap<>(filtered.size());
-        for (Map.Entry<String, ModelAsset> e : filtered.entrySet()) {
-            ModelAsset a = e.getValue();
-            List<String> children = childrenMap.getOrDefault(e.getKey(), List.of());
-            result.put(e.getKey(), new ModelAsset(a.assetId(), a.metadata(), a.dependsOn(), children));
-        }
-
-        return result;
+        return filtered;
     }
 
     private static String adapterType(Manifest manifest) {
@@ -373,6 +351,6 @@ public abstract class ResultParser {
         return value != null && !value.trim().isEmpty();
     }
 
-    private record ModelAsset(String assetId, Map<String, Object> metadata, List<String> dependsOn, List<String> children) {
+    private record ModelAsset(String assetId, Map<String, Object> metadata, List<String> dependsOn) {
     }
 }

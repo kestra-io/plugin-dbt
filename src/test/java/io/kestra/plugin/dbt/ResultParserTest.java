@@ -85,23 +85,25 @@ class ResultParserTest {
         assertThat(manifestResult.manifest(), is(notNullValue()));
         assertThat(runContext.assets().emitted(), hasSize(2));
 
-        // stg_orders has no inputs and 1 output (fct_orders, its child)
-        // fct_orders has 1 input (stg_orders) and no outputs (leaf node)
-        var stgOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.fct_orders");
+        // Each model emits itself as its own output; model-to-model edges are the downstream
+        // model's inputs. stg_orders has no inputs, fct_orders has 1 input (stg_orders).
+        var stgOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.staging.stg_orders");
         assertThat("stg_orders emission should exist", stgOrdersEmit, is(notNullValue()));
         assertThat(stgOrdersEmit.inputs(), hasSize(0));
         assertThat(stgOrdersEmit.outputs(), hasSize(1));
 
-        var fctOrdersOutput = stgOrdersEmit.outputs().getFirst();
-        assertThat(fctOrdersOutput.getMetadata().get("system"), is("postgres"));
-        assertThat(fctOrdersOutput.getMetadata().get("database"), is("analytics"));
-        assertThat(fctOrdersOutput.getMetadata().get("schema"), is("marts"));
-        assertThat(fctOrdersOutput.getMetadata().get("name"), is("fct_orders"));
+        var stgOrdersOutput = stgOrdersEmit.outputs().getFirst();
+        assertThat(stgOrdersOutput.getMetadata().get("system"), is("postgres"));
+        assertThat(stgOrdersOutput.getMetadata().get("database"), is("analytics"));
+        assertThat(stgOrdersOutput.getMetadata().get("schema"), is("staging"));
+        assertThat(stgOrdersOutput.getMetadata().get("name"), is("stg_orders"));
 
-        var fctOrdersEmit = findEmitWithInput(runContext.assets().emitted(), "analytics.staging.stg_orders");
+        var fctOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.fct_orders");
         assertThat("fct_orders emission should exist", fctOrdersEmit, is(notNullValue()));
         assertThat(fctOrdersEmit.inputs(), hasSize(1));
-        assertThat(fctOrdersEmit.outputs(), hasSize(0));
+        assertThat(fctOrdersEmit.inputs().getFirst().id(), is("analytics.staging.stg_orders"));
+        assertThat(fctOrdersEmit.outputs(), hasSize(1));
+        assertThat(fctOrdersEmit.outputs().getFirst().getId(), is("analytics.marts.fct_orders"));
     }
 
     @Test
@@ -150,18 +152,58 @@ class ResultParserTest {
 
         assertThat(runContext.assets().emitted(), hasSize(2));
 
-        // my_first_dbt_model: no inputs, 1 output (my_second_dbt_model)
-        var firstModelEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.my_second_dbt_model");
+        // Each model emits itself as its own output; edges are expressed as the downstream model's inputs.
+        // my_first_dbt_model: no inputs
+        var firstModelEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.my_first_dbt_model");
         assertThat(firstModelEmit, is(notNullValue()));
         assertThat(firstModelEmit.inputs(), hasSize(0));
-        assertThat(firstModelEmit.outputs(), hasSize(1));
 
-        // my_second_dbt_model: 1 input (my_first_dbt_model), no outputs (leaf)
-        var secondModelEmit = findEmitWithInput(runContext.assets().emitted(), "analytics.marts.my_first_dbt_model");
+        // my_second_dbt_model: 1 input (my_first_dbt_model)
+        var secondModelEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.my_second_dbt_model");
         assertThat(secondModelEmit, is(notNullValue()));
         assertThat(secondModelEmit.inputs(), hasSize(1));
         assertThat(secondModelEmit.inputs().getFirst().id(), is("analytics.marts.my_first_dbt_model"));
-        assertThat(secondModelEmit.outputs(), hasSize(0));
+    }
+
+    @Test
+    void parseManifestWithAssets_singleModelWithOnlySourceDependency_shouldEmitModelAsOutput() throws Exception {
+        // A single-model project (or any model whose only dependency is a dbt source, not another
+        // model) has no model-to-model edge. It must still surface as its own output asset instead
+        // of emitting nothing (regression for a single model / source-only model producing no asset).
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        Files.writeString(manifestFile, """
+            {
+              "metadata": {
+                "adapter_type": "duckdb"
+              },
+              "nodes": {
+                "model.analytics.stg_orders": {
+                  "resource_type": "model",
+                  "database": "analytics",
+                  "schema": "staging",
+                  "name": "stg_orders",
+                  "unique_id": "model.analytics.stg_orders",
+                  "depends_on": {
+                    "nodes": ["source.analytics.raw.orders"]
+                  }
+                }
+              },
+              "parent_map": {
+                "model.analytics.stg_orders": ["source.analytics.raw.orders"]
+              }
+            }
+            """);
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile());
+
+        assertThat(runContext.assets().emitted(), hasSize(1));
+
+        var stgOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.staging.stg_orders");
+        assertThat("stg_orders should be emitted as its own output asset", stgOrdersEmit, is(notNullValue()));
+        assertThat(stgOrdersEmit.inputs(), hasSize(0));
+        assertThat(stgOrdersEmit.outputs(), hasSize(1));
+        assertThat(stgOrdersEmit.outputs().getFirst().getId(), is("analytics.staging.stg_orders"));
     }
 
     @Test
@@ -220,31 +262,24 @@ class ResultParserTest {
         assertThat(runContext.assets().emitted(), hasSize(3));
 
         // DAG: stg_orders → int_orders → fct_orders (parent_map, no transitive edges)
-        // Inputs = upstream deps, Outputs = downstream children
+        // Each model emits itself as its own output; inputs are its upstream model dependencies.
 
-        // stg_orders: no model inputs (source filtered out), 1 output (int_orders)
-        var stgOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "dev.intermediate.int_orders");
+        // stg_orders: no model inputs (source filtered out)
+        var stgOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "dev.staging.stg_orders");
         assertThat(stgOrdersEmit, is(notNullValue()));
         assertThat(stgOrdersEmit.inputs(), hasSize(0));
-        assertThat(stgOrdersEmit.outputs(), hasSize(1));
 
-        // int_orders: 1 input (stg_orders), 1 output (fct_orders)
-        var intOrdersEmit = findEmitWithInputAndOutput(
-            runContext.assets().emitted(),
-            "dev.staging.stg_orders", "dev.marts.fct_orders"
-        );
+        // int_orders: 1 input (stg_orders)
+        var intOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "dev.intermediate.int_orders");
         assertThat(intOrdersEmit, is(notNullValue()));
         assertThat(intOrdersEmit.inputs(), hasSize(1));
         assertThat(intOrdersEmit.inputs().getFirst().id(), is("dev.staging.stg_orders"));
-        assertThat(intOrdersEmit.outputs(), hasSize(1));
-        assertThat(intOrdersEmit.outputs().getFirst().getId(), is("dev.marts.fct_orders"));
 
-        // fct_orders: 1 input (int_orders only, from parent_map), no outputs (leaf)
-        var fctOrdersEmit = findEmitWithInput(runContext.assets().emitted(), "dev.intermediate.int_orders");
+        // fct_orders: 1 input (int_orders only, from parent_map)
+        var fctOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "dev.marts.fct_orders");
         assertThat(fctOrdersEmit, is(notNullValue()));
         assertThat(fctOrdersEmit.inputs(), hasSize(1));
         assertThat(fctOrdersEmit.inputs().getFirst().id(), is("dev.intermediate.int_orders"));
-        assertThat(fctOrdersEmit.outputs(), hasSize(0));
     }
 
     @Test
@@ -335,22 +370,6 @@ class ResultParserTest {
 
     private static AssetEmit findEmitWithOutput(List<AssetEmit> emitted, String outputId) {
         return emitted.stream()
-            .filter(e -> e.outputs().stream().anyMatch(o -> o.getId().equals(outputId)))
-            .findFirst()
-            .orElse(null);
-    }
-
-    private static AssetEmit findEmitWithInput(List<AssetEmit> emitted, String inputId) {
-        return emitted.stream()
-            .filter(e -> e.inputs().stream().anyMatch(i -> i.id().equals(inputId)))
-            .filter(e -> e.outputs().isEmpty())
-            .findFirst()
-            .orElse(null);
-    }
-
-    private static AssetEmit findEmitWithInputAndOutput(List<AssetEmit> emitted, String inputId, String outputId) {
-        return emitted.stream()
-            .filter(e -> e.inputs().stream().anyMatch(i -> i.id().equals(inputId)))
             .filter(e -> e.outputs().stream().anyMatch(o -> o.getId().equals(outputId)))
             .findFirst()
             .orElse(null);
