@@ -264,7 +264,7 @@ class ResultParserTest {
         // Each event is {parents} -> {the model itself}, one output per event.
 
         // stg_orders: its only parent is a source that this manifest never defines in `sources`,
-        // so it is dropped; stg_orders has no resolvable inputs.
+        // so it is dropped, leaving stg_orders with no resolvable inputs.
         var stgOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "dev.staging.stg_orders");
         assertThat(stgOrdersEmit, is(notNullValue()));
         assertThat(stgOrdersEmit.inputs(), hasSize(0));
