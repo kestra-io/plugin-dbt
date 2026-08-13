@@ -148,8 +148,11 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
             cause) instead of triggering a duplicate. On a worker restart or retry it adopts an in-flight or \
             already-succeeded run, so a delayed retry after a lost response does not duplicate, but lets a \
             failed or cancelled run re-trigger. If the trigger call itself fails with an ambiguous error \
-            (e.g. a timeout) that may mean dbt Cloud already received it, it adopts any matching run and \
-            reports its real outcome. Default false, which always triggers a new run."""
+            (e.g. a timeout) that may mean dbt Cloud already received it, it confirms and adopts the run \
+            this attempt created (never a stale run left over from a prior attempt) and reports its real \
+            outcome. A residual gap remains: a transparent internal retry of the trigger POST itself on a \
+            502/503/504 can still double-trigger; this is not solved by reattach. Default false, which \
+            always triggers a new run."""
     )
     @Builder.Default
     @PluginProperty(group = "reliability")
@@ -183,15 +186,19 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
         boolean reattachEnabled = Boolean.TRUE.equals(runContext.render(this.reattach).as(Boolean.class).orElse(Boolean.FALSE));
 
+        // Baseline id of the newest tagged run seen before the POST below, used by the ambiguous-failure
+        // confirm path to reject a stale run left over from a prior attempt (same taskrun id, reused tag).
+        long baseline = 0L;
         if (reattachEnabled) {
-            var existingRun = this.findReattachableRunForThisTaskRun(runContext);
-            if (existingRun != null) {
+            StartLookup lookup = this.findStartOfRunLookup(runContext);
+            if (lookup.adoptableRun() != null) {
                 logger.info(
                     "Reattached to run {} (status {}) already started by this taskrun instead of triggering a new one",
-                    existingRun.getId(), existingRun.getStatus()
+                    lookup.adoptableRun().getId(), lookup.adoptableRun().getStatus()
                 );
-                return this.waitOrReturn(runContext, existingRun.getId());
+                return this.waitOrReturn(runContext, lookup.adoptableRun().getId());
             }
+            baseline = lookup.baseline();
         }
 
         // trigger
@@ -239,7 +246,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
             if (reattachEnabled && wasPossiblySent(e)) {
                 Run adoptedRun = null;
                 try {
-                    adoptedRun = this.confirmRunAfterAmbiguousFailure(runContext);
+                    adoptedRun = this.confirmRunAfterAmbiguousFailure(runContext, baseline);
                 } catch (Exception confirmEx) {
                     // A failed confirm must not mask the original trigger failure.
                     logger.warn("Could not confirm whether the ambiguous trigger call created a run: {}", confirmEx.getMessage());
@@ -269,21 +276,25 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     private static final int FIND_RUN_LOOKUP_LIMIT = 100;
 
     /**
-     * Start-of-run reattach check. Adopts an in-flight or succeeded run (so a delayed retry after a lost
-     * response does not duplicate), but never an Error or Cancelled one, so a genuine failure lets the
-     * retry or restart re-trigger instead of re-reporting the old failure.
+     * Single start-of-run lookup, yielding both the adopt decision and the baseline for the later
+     * ambiguous-failure confirm path. Adopts an in-flight or succeeded run (so a delayed retry after a
+     * lost response does not duplicate), but never an Error or Cancelled one, so a genuine failure lets
+     * the retry or restart re-trigger instead of re-reporting the old failure. The baseline is that same
+     * run's id (0 if none), so a later confirm never mistakes it for a run created by this attempt.
      */
-    private Run findReattachableRunForThisTaskRun(RunContext runContext) throws Exception {
+    private StartLookup findStartOfRunLookup(RunContext runContext) throws Exception {
         var run = this.findRunForThisTaskRun(runContext);
-        if (run == null || run.getStatus() == JobStatus.NUMBER_20 || run.getStatus() == JobStatus.NUMBER_30) {
-            return null;
-        }
-        return run;
+        long baseline = (run != null && run.getId() != null) ? run.getId() : 0L;
+        boolean adoptable = run != null && run.getStatus() != JobStatus.NUMBER_20 && run.getStatus() != JobStatus.NUMBER_30;
+        return new StartLookup(adoptable ? run : null, baseline);
+    }
+
+    private record StartLookup(Run adoptableRun, long baseline) {
     }
 
     /**
      * Find a run this taskrun started, matched by its tag in the run cause, in any status. Callers that
-     * must not adopt a failed run filter via {@link #findReattachableRunForThisTaskRun}. Bounded to the
+     * must not adopt a failed run filter via {@link #findStartOfRunLookup}. Bounded to the
      * {@value #FIND_RUN_LOOKUP_LIMIT} newest runs of the job, not paginated further.
      */
     private Run findRunForThisTaskRun(RunContext runContext) throws Exception {
@@ -319,12 +330,15 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
     /**
      * After an ambiguous trigger failure, check whether the run was created, retrying a few times since
-     * a just-created run can take a moment to appear in the run list.
+     * a just-created run can take a moment to appear in the run list. Only a run whose id is strictly
+     * greater than {@code baseline} is accepted: the tag in the run cause is reused across retries of the
+     * same taskrun, so the newest tagged run at this point could still be a stale run from a prior
+     * attempt (id == baseline) rather than the one this attempt's POST just created.
      */
-    private Run confirmRunAfterAmbiguousFailure(RunContext runContext) throws Exception {
+    private Run confirmRunAfterAmbiguousFailure(RunContext runContext, long baseline) throws Exception {
         for (int attempt = 1; attempt <= CONFIRM_LOOKUP_MAX_ATTEMPTS; attempt++) {
             var found = this.findRunForThisTaskRun(runContext);
-            if (found != null) {
+            if (found != null && found.getId() != null && found.getId() > baseline) {
                 return found;
             }
             if (attempt < CONFIRM_LOOKUP_MAX_ATTEMPTS) {

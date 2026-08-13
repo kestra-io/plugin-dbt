@@ -655,4 +655,125 @@ class MockTriggerRunTest {
         verify(0, getRequestedFor(urlPathEqualTo("/api/v2/accounts/123/runs/")));
         verify(1, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
     }
+
+    @Test
+    void testDoesNotAdoptStaleRunFromPriorAttempt() throws Exception {
+        // Regression: a prior attempt's run (same taskrun id, tag reused) failed with status 20 (Error).
+        // This attempt's own POST times out, and every confirm lookup afterward still only turns up that
+        // same stale run, never a newer id. The original timeout must surface, never the stale run's
+        // Error outcome, and its id must be rejected as the baseline throughout the confirm loop.
+        HttpConfiguration shortTimeout = HttpConfiguration.builder()
+            .timeout(TimeoutConfiguration.builder().readIdleTimeout(Property.ofValue(Duration.ofMillis(300))).build())
+            .build();
+
+        TriggerRun task = TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("my-token"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .reattach(Property.ofValue(true))
+            .wait(Property.ofValue(false))
+            .options(shortTimeout)
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        String tag = "[taskrun:" + runContext.taskRunInfo().taskRunId() + "]";
+
+        // every lookup (the start-of-run check AND every confirm retry) only ever turns up the stale,
+        // already-failed run left over from a prior attempt
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .willReturn(okJson("{\"data\":[{\"id\":501,\"status\":20,\"trigger\":{\"cause\":\"Triggered by Kestra. " + tag + "\"}}]}"))
+        );
+
+        // this attempt's own POST reaches dbt Cloud (creating run 502) but the response is lost on the wire
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"data\":{\"id\":502}}")
+                        .withFixedDelay(1000)
+                )
+        );
+
+        assertThatThrownBy(() -> task.run(runContext))
+            .hasRootCauseInstanceOf(java.net.SocketTimeoutException.class);
+        verify(1, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
+    }
+
+    @Test
+    void testAdoptsLaggingNewRunNotStalePriorAttempt() throws Exception {
+        // Prior attempt's run #501 (Error) is the baseline. This attempt's POST times out and creates
+        // run #502, but the confirm lookup lags behind: it first still only shows #501 before #502
+        // appears. Only a run whose id is strictly greater than the baseline may be adopted, so the
+        // stale #501 is rejected even though it matches the same tag, and the loop keeps waiting until
+        // the genuinely new #502 shows up.
+        HttpConfiguration shortTimeout = HttpConfiguration.builder()
+            .timeout(TimeoutConfiguration.builder().readIdleTimeout(Property.ofValue(Duration.ofMillis(300))).build())
+            .build();
+
+        TriggerRun task = TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("my-token"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .reattach(Property.ofValue(true))
+            .wait(Property.ofValue(false))
+            .options(shortTimeout)
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        String tag = "[taskrun:" + runContext.taskRunInfo().taskRunId() + "]";
+
+        // hit 1 (start-of-run check): only the stale #501 exists yet
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .inScenario("lagging-new-run")
+                .whenScenarioStateIs(STARTED)
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .willReturn(okJson("{\"data\":[{\"id\":501,\"status\":20,\"trigger\":{\"cause\":\"Triggered by Kestra. " + tag + "\"}}]}"))
+                .willSetStateTo("confirm attempt 1")
+        );
+        // hit 2 (first confirm retry): still just #501, stale, must be rejected
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .inScenario("lagging-new-run")
+                .whenScenarioStateIs("confirm attempt 1")
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .willReturn(okJson("{\"data\":[{\"id\":501,\"status\":20,\"trigger\":{\"cause\":\"Triggered by Kestra. " + tag + "\"}}]}"))
+                .willSetStateTo("new run appeared")
+        );
+        // hit 3 (second confirm retry): the genuinely new, succeeded run #502 has now caught up
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .inScenario("lagging-new-run")
+                .whenScenarioStateIs("new run appeared")
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .willReturn(okJson("{\"data\":[{\"id\":502,\"status\":10,\"trigger\":{\"cause\":\"Triggered by Kestra. " + tag + "\"}}]}"))
+        );
+
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"data\":{\"id\":502}}")
+                        .withFixedDelay(1000)
+                )
+        );
+
+        TriggerRun.Output output = task.run(runContext);
+
+        // adopted the genuinely new #502, not the stale #501 baseline
+        assertThat(output.getRunId(), is(502L));
+        verify(1, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
+    }
 }
