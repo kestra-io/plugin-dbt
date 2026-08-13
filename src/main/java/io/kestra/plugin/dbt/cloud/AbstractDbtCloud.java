@@ -19,12 +19,12 @@ import io.kestra.core.http.client.HttpClientException;
 import io.kestra.core.http.client.HttpClientRequestException;
 import io.kestra.core.http.client.HttpClientResponseException;
 import io.kestra.core.http.client.configurations.HttpConfiguration;
+import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.models.tasks.retrys.Exponential;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.utils.RetryUtils;
-import io.kestra.core.models.annotations.PluginProperty;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
@@ -120,7 +120,8 @@ public abstract class AbstractDbtCloud extends Task {
     /**
      * Whether an error calling the dbt Cloud API is transient and worth retrying.
      *
-     * <p>Read-only methods (GET/HEAD) retry any transient signal: all 5xx, connection failures and
+     * <p>
+     * Read-only methods (GET/HEAD) retry any transient signal: all 5xx, connection failures and
      * timeouts. Other methods retry only the 502/503/504 gateway errors plus transport failures that
      * provably never reached dbt Cloud (TLS handshake, connection refused). A plain 500, a read timeout
      * or a mid-flight connection drop is not retried for them, since the request may already have
@@ -129,7 +130,8 @@ public abstract class AbstractDbtCloud extends Task {
      * any method, since dbt Cloud rejects it before running the request. Other client errors (4xx) are
      * never retried.
      *
-     * <p>The core HTTP client wraps a read timeout as {@code RuntimeException(SocketTimeoutException)},
+     * <p>
+     * The core HTTP client wraps a read timeout as {@code RuntimeException(SocketTimeoutException)},
      * so it is matched through the cause.
      */
     static boolean isRetriableTransientError(Throwable throwable, String method) {
@@ -174,6 +176,35 @@ public abstract class AbstractDbtCloud extends Task {
     // not safe to retry blindly here, so they are treated as write methods.
     private static boolean isReadOnlyMethod(String method) {
         return "GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method);
+    }
+
+    /**
+     * Whether a failed write call may already have reached dbt Cloud and created the run, as opposed
+     * to one that either never left the client or definitely did reach it (with a response already
+     * received). Used by callers that need to decide whether it is safe to look up and adopt the run
+     * that call may have created, instead of failing outright.
+     *
+     * <p>
+     * Mirrors the positive reasoning in {@link #isRetriableTransientError}: only a read timeout or a
+     * mid-flight connection drop leaves the request's fate genuinely unknown. A definitive HTTP
+     * response (any status code, including 4xx/5xx) means dbt Cloud received the request and replied,
+     * so it is never ambiguous. A TLS handshake failure or a refused connection provably never left
+     * the client either, so those are excluded even though they surface as an {@link IOException}.
+     */
+    static boolean wasPossiblySent(Throwable throwable) {
+        if (throwable == null) {
+            return false;
+        }
+
+        if (throwable instanceof HttpClientResponseException) {
+            return false;
+        }
+
+        if (hasCause(throwable, SSLHandshakeException.class) || hasCause(throwable, ConnectException.class)) {
+            return false;
+        }
+
+        return hasCause(throwable, SocketTimeoutException.class) || hasCause(throwable, IOException.class);
     }
 
     // Walks the cause chain (bounded, to tolerate a cyclic cause) looking for a given exception type.

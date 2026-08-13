@@ -1,5 +1,6 @@
 package io.kestra.plugin.dbt.cloud;
 
+import java.time.Duration;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -7,6 +8,8 @@ import org.junit.jupiter.api.Test;
 import com.github.tomakehurst.wiremock.junit5.WireMockTest;
 
 import io.kestra.core.http.client.HttpClientResponseException;
+import io.kestra.core.http.client.configurations.HttpConfiguration;
+import io.kestra.core.http.client.configurations.TimeoutConfiguration;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
@@ -18,6 +21,7 @@ import io.kestra.core.utils.TestsUtils;
 import jakarta.inject.Inject;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
+import static com.github.tomakehurst.wiremock.stubbing.Scenario.STARTED;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
@@ -62,6 +66,8 @@ class MockTriggerRunTest {
             postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
                 .withRequestBody(matchingJsonPath("$.cause", equalTo("Triggered by Kestra.")))
         );
+        // and no lookup of existing runs is ever made when reattach is off
+        verify(0, getRequestedFor(urlPathEqualTo("/api/v2/accounts/123/runs/")));
     }
 
     @Test
@@ -160,7 +166,6 @@ class MockTriggerRunTest {
         stubFor(
             get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
                 .withQueryParam("job_definition_id", equalTo("456"))
-                .withQueryParam("status__in", equalTo("[1,2,3]"))
                 .withQueryParam("include_related", matching(".*trigger.*"))
                 .willReturn(okJson("{\"data\":[{\"id\":789,\"status\":3,\"trigger\":{\"cause\":\"Triggered by Kestra. " + tag + "\"}}]}"))
         );
@@ -294,5 +299,198 @@ class MockTriggerRunTest {
         assertThatThrownBy(() -> task.run(runContext))
             .isInstanceOf(HttpClientResponseException.class)
             .hasMessageContaining("Failed http request with response code '500'");
+    }
+
+    @Test
+    void testAdoptsRunAfterAmbiguousTriggerTimeout() throws Exception {
+        // A short read timeout lets the delayed trigger response below surface as a SocketTimeoutException,
+        // the same ambiguous failure dbt Cloud produces when the response is lost on the wire mid-flight.
+        HttpConfiguration shortTimeout = HttpConfiguration.builder()
+            .timeout(TimeoutConfiguration.builder().readIdleTimeout(Property.ofValue(Duration.ofMillis(300))).build())
+            .build();
+
+        TriggerRun task = TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("my-token"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .reattach(Property.ofValue(true))
+            .wait(Property.ofValue(false))
+            .options(shortTimeout)
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        String tag = "[taskrun:" + runContext.taskRunInfo().taskRunId() + "]";
+
+        // no run started by this taskrun yet: the start-of-run reattach lookup finds nothing, so the trigger fires
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .inScenario("adopt-on-timeout")
+                .whenScenarioStateIs(STARTED)
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .willReturn(okJson("{\"data\":[]}"))
+                .willSetStateTo("run created")
+        );
+
+        // the trigger POST reaches dbt Cloud (which creates the run) but its response is lost on the wire
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"data\":{\"id\":789}}")
+                        .withFixedDelay(1000)
+                )
+        );
+
+        // the confirm-and-adopt lookup after the timeout now finds the run this taskrun created
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .inScenario("adopt-on-timeout")
+                .whenScenarioStateIs("run created")
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .willReturn(okJson("{\"data\":[{\"id\":789,\"status\":10,\"trigger\":{\"cause\":\"Triggered by Kestra. " + tag + "\"}}]}"))
+        );
+
+        TriggerRun.Output output = task.run(runContext);
+
+        assertThat(output.getRunId(), is(789L));
+        verify(1, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
+    }
+
+    @Test
+    void testFailsWhenAmbiguousTimeoutFindsNoMatchingRun() throws Exception {
+        HttpConfiguration shortTimeout = HttpConfiguration.builder()
+            .timeout(TimeoutConfiguration.builder().readIdleTimeout(Property.ofValue(Duration.ofMillis(300))).build())
+            .build();
+
+        TriggerRun task = TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("my-token"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .reattach(Property.ofValue(true))
+            .wait(Property.ofValue(false))
+            .options(shortTimeout)
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+
+        // the lookup never finds a run carrying this taskrun's tag: the POST genuinely never created one
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .willReturn(okJson("{\"data\":[]}"))
+        );
+
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"data\":{\"id\":789}}")
+                        .withFixedDelay(1000)
+                )
+        );
+
+        assertThatThrownBy(() -> task.run(runContext))
+            .hasRootCauseInstanceOf(java.net.SocketTimeoutException.class);
+        verify(1, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
+    }
+
+    @Test
+    void testConfirmLookupFailureDoesNotMaskOriginalFailure() throws Exception {
+        // The trigger POST times out (ambiguous), and the follow-up confirm-and-adopt lookup itself
+        // fails (500). The task must fail loud with the ORIGINAL timeout, never the lookup failure,
+        // and it must not have triggered a duplicate run.
+        HttpConfiguration shortTimeout = HttpConfiguration.builder()
+            .timeout(TimeoutConfiguration.builder().readIdleTimeout(Property.ofValue(Duration.ofMillis(300))).build())
+            .build();
+
+        TriggerRun task = TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("my-token"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .reattach(Property.ofValue(true))
+            .wait(Property.ofValue(false))
+            .options(shortTimeout)
+            .maxRetries(Property.ofValue(1))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+
+        // no run started by this taskrun yet: the start-of-run reattach lookup finds nothing, so the trigger fires
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .inScenario("confirm-lookup-fails")
+                .whenScenarioStateIs(STARTED)
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .willReturn(okJson("{\"data\":[]}"))
+                .willSetStateTo("trigger sent")
+        );
+
+        // the trigger POST reaches dbt Cloud (which creates the run) but its response is lost on the wire
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"data\":{\"id\":789}}")
+                        .withFixedDelay(1000)
+                )
+        );
+
+        // the confirm-and-adopt lookup after the timeout itself fails: it must never mask the original timeout
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .inScenario("confirm-lookup-fails")
+                .whenScenarioStateIs("trigger sent")
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .willReturn(aResponse().withStatus(500).withHeader("Content-Type", "application/json"))
+        );
+
+        assertThatThrownBy(() -> task.run(runContext))
+            .hasRootCauseInstanceOf(java.net.SocketTimeoutException.class);
+        verify(1, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
+    }
+
+    @Test
+    void testReattachAdoptsAlreadyFinishedRun() throws Exception {
+        TriggerRun task = TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("my-token"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .reattach(Property.ofValue(true))
+            .wait(Property.ofValue(false))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        String tag = "[taskrun:" + runContext.taskRunInfo().taskRunId() + "]";
+
+        // this taskrun's run already completed (status 10 = success) before this re-run started
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .withQueryParam("include_related", matching(".*trigger.*"))
+                .willReturn(okJson("{\"data\":[{\"id\":789,\"status\":10,\"trigger\":{\"cause\":\"Triggered by Kestra. " + tag + "\"}}]}"))
+        );
+
+        TriggerRun.Output output = task.run(runContext);
+
+        assertThat(output.getRunId(), is(789L));
+        verify(0, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
     }
 }

@@ -60,6 +60,11 @@ import lombok.experimental.SuperBuilder;
 )
 public class TriggerRun extends AbstractDbtCloud implements RunnableTask<TriggerRun.Output> {
 
+    // Bounded retry for the post-failure confirm-and-adopt lookup: a run that was just created by an
+    // ambiguous (possibly-sent) trigger call can take a moment to show up in the run list.
+    private static final int CONFIRM_LOOKUP_MAX_ATTEMPTS = 3;
+    private static final Duration CONFIRM_LOOKUP_BACKOFF = Duration.ofSeconds(1);
+
     @Schema(
         title = "Job ID",
         description = "Numeric dbt Cloud job identifier to trigger."
@@ -139,9 +144,11 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     @Schema(
         title = "Reattach to an in-flight run",
         description = """
-            If true, on a worker restart or retry the task reattaches to the run it already started and waits for it \
-            instead of triggering a duplicate. It only reattaches to a run this execution started (matched by the \
-            taskrun id in the run cause), never one triggered elsewhere. Default false, which always triggers a new run."""
+            If true, the task reattaches to a run it already started instead of triggering a duplicate: at the \
+            start of a worker restart or retry, and when the trigger call itself fails with an ambiguous error \
+            (e.g. a timeout) that may mean dbt Cloud already received it. It only reattaches to a run this \
+            execution started (matched by the taskrun id in the run cause), never one triggered elsewhere. \
+            Default false, which always triggers a new run."""
     )
     @Builder.Default
     @PluginProperty(group = "reliability")
@@ -176,13 +183,13 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         boolean reattachEnabled = Boolean.TRUE.equals(runContext.render(this.reattach).as(Boolean.class).orElse(Boolean.FALSE));
 
         if (reattachEnabled) {
-            Run inFlightRun = this.findInFlightRun(runContext);
-            if (inFlightRun != null) {
+            Run existingRun = this.findRunForThisTaskRun(runContext);
+            if (existingRun != null) {
                 logger.info(
-                    "Reattached to in-flight run {} (status {}) instead of triggering a new one",
-                    inFlightRun.getId(), inFlightRun.getStatus()
+                    "Reattached to run {} (status {}) already started by this taskrun instead of triggering a new one",
+                    existingRun.getId(), existingRun.getStatus()
                 );
-                return this.waitOrReturn(runContext, inFlightRun.getId());
+                return this.waitOrReturn(runContext, existingRun.getId());
             }
         }
 
@@ -223,7 +230,33 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
                     .build()
             );
 
-        HttpResponse<RunResponse> triggerResponse = this.request(runContext, requestBuilder, RunResponse.class);
+        HttpResponse<RunResponse> triggerResponse;
+        try {
+            triggerResponse = this.request(runContext, requestBuilder, RunResponse.class);
+        } catch (Exception e) {
+            // Only when reattach is on (a marker was written above) is a lookup reliable: an ambiguous
+            // failure (read timeout, mid-flight drop) may mean dbt Cloud already created the run, so
+            // confirm before failing loud and creating a duplicate on the next retry.
+            if (reattachEnabled && wasPossiblySent(e)) {
+                Run adoptedRun = null;
+                try {
+                    adoptedRun = this.confirmRunAfterAmbiguousFailure(runContext);
+                } catch (Exception confirmEx) {
+                    // The confirm-lookup itself failing (the GET exhausting retries, an interrupted
+                    // backoff) must never mask the original trigger failure below: log and fall
+                    // through so `e` is the one rethrown.
+                    logger.warn("Could not confirm whether the ambiguous trigger call created a run: {}", confirmEx.getMessage());
+                }
+                if (adoptedRun != null) {
+                    logger.warn(
+                        "Trigger call failed ({}) but dbt Cloud already has a matching run {} (status {}); adopting it instead of failing",
+                        e.getMessage(), adoptedRun.getId(), adoptedRun.getStatus()
+                    );
+                    return this.waitOrReturn(runContext, adoptedRun.getId());
+                }
+            }
+            throw e;
+        }
 
         RunResponse triggerRunResponse = triggerResponse.getBody();
         if (triggerRunResponse == null) {
@@ -235,19 +268,33 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         return this.waitOrReturn(runContext, triggerRunResponse.getData().getId());
     }
 
+    // Bounds the run-list lookup below to the most recent runs of the job. `order_by=-id` puts the
+    // newest run first, so the tagged run is only missed if more than this many newer runs of the
+    // same job were created since it started: a residual limitation, documented on the method itself.
+    private static final int FIND_RUN_LOOKUP_LIMIT = 100;
+
     /**
-     * Look for an in-flight run of the job (Queued, Starting, or Running) that this taskrun started,
-     * matched by the taskrun tag in the run cause. Returns null when there is none, in which case a
+     * Look for a run of the job that this taskrun already started, matched strictly by the taskrun
+     * tag in the run cause: that tag is the unique key, so any status (queued, running, or already
+     * finished) qualifies. A finished run must be adopted and its real outcome reported by
+     * {@link #waitOrReturn}, never re-triggered. Returns null when there is none, in which case a
      * fresh run is triggered rather than attaching to a run this execution did not start.
+     *
+     * <p>
+     * The lookup is bounded to the {@value #FIND_RUN_LOOKUP_LIMIT} most recent runs of the job
+     * (newest first via {@code order_by=-id}), not paginated further. If the tagged run has been
+     * pushed past that window by that many newer runs of the same job (e.g. after a long worker
+     * downtime on a very actively scheduled job), it will not be found and a fresh run is triggered
+     * instead, which can result in a duplicate in that rare case.
      */
-    private Run findInFlightRun(RunContext runContext) throws Exception {
+    private Run findRunForThisTaskRun(RunContext runContext) throws Exception {
         HttpRequest.HttpRequestBuilder requestBuilder = HttpRequest.builder()
             .uri(
                 URI.create(
                     runContext.render(this.baseUrl).as(String.class).orElseThrow() + "/api/v2/accounts/" + runContext.render(this.accountId).as(String.class).orElseThrow() +
                         "/runs/?job_definition_id=" + runContext.render(this.jobId).as(String.class).orElseThrow() +
-                        "&status__in=" + URLEncoder.encode("[1,2,3]", StandardCharsets.UTF_8) +
                         "&order_by=-id" +
+                        "&limit=" + FIND_RUN_LOOKUP_LIMIT +
                         "&include_related=" + URLEncoder.encode("[\"trigger\"]", StandardCharsets.UTF_8)
                 )
             )
@@ -269,6 +316,32 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
             )
             .findFirst()
             .orElse(null);
+    }
+
+    /**
+     * After a trigger call fails ambiguously (the request may already have reached dbt Cloud), check
+     * whether it actually created a run before giving up. A run that was just created can take a
+     * moment to appear in the run list, so this retries a few times with a short pause rather than
+     * concluding "no run" on the first empty result.
+     */
+    private Run confirmRunAfterAmbiguousFailure(RunContext runContext) throws Exception {
+        for (int attempt = 1; attempt <= CONFIRM_LOOKUP_MAX_ATTEMPTS; attempt++) {
+            Run found = this.findRunForThisTaskRun(runContext);
+            if (found != null) {
+                return found;
+            }
+            if (attempt < CONFIRM_LOOKUP_MAX_ATTEMPTS) {
+                try {
+                    Thread.sleep(CONFIRM_LOOKUP_BACKOFF.toMillis());
+                } catch (InterruptedException ie) {
+                    // Stop looking rather than propagate: the caller must fall through to rethrow the
+                    // original trigger failure, not fail on an interrupted backoff.
+                    Thread.currentThread().interrupt();
+                    return null;
+                }
+            }
+        }
+        return null;
     }
 
     /** The marker embedded in a run's cause so a reattach can identify the run this taskrun started. */
