@@ -306,6 +306,28 @@ class ResultParserTest {
     }
 
     @Test
+    void parseManifestWithAssets_shouldSkipNodeWithMissingResourceType() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        // A node with no `resource_type` (partial/hand-edited manifest or dbt schema drift) must be skipped, not crash.
+        Files.writeString(manifestFile, """
+            {
+              "nodes": {
+                "model.p.good": {"unique_id": "model.p.good", "resource_type": "model", "database": "db", "schema": "s", "name": "good"},
+                "model.p.bad":  {"unique_id": "model.p.bad", "database": "db", "schema": "s", "name": "bad"}
+              },
+              "parent_map": {"model.p.good": [], "model.p.bad": []}
+            }
+            """);
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile());
+
+        // The node missing resource_type is skipped; only the valid model is emitted, no NPE.
+        assertThat(runContext.assets().emitted(), hasSize(1));
+        assertThat(findEmitWithOutput(runContext.assets().emitted(), "db.s.good"), is(notNullValue()));
+    }
+
+    @Test
     void parseRunResult_shouldEmitModelLogsUnderDynamicTaskRuns() throws Exception {
         var runContext = mockRunContext();
         var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");

@@ -272,7 +272,7 @@ public abstract class ResultParser {
         if (manifest.getNodes() != null) {
             for (Map.Entry<String, Manifest.Node> entry : manifest.getNodes().entrySet()) {
                 Manifest.Node node = entry.getValue();
-                if (node == null || !PRODUCED_RESOURCE_TYPES.contains(lower(node.getResourceType()))) {
+                if (node == null || node.getResourceType() == null || !PRODUCED_RESOURCE_TYPES.contains(lower(node.getResourceType()))) {
                     continue;
                 }
 
