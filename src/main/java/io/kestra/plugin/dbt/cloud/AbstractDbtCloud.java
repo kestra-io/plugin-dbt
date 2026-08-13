@@ -179,21 +179,11 @@ public abstract class AbstractDbtCloud extends Task {
     }
 
     /**
-     * Whether a failed write call may already have reached dbt Cloud and created the run, as opposed
-     * to one that either never left the client or definitely did reach it (with a response already
-     * received). Used by callers that need to decide whether it is safe to look up and adopt the run
-     * that call may have created, instead of failing outright.
-     *
-     * <p>
-     * Mirrors the positive reasoning in {@link #isRetriableTransientError}: only a read timeout or a
-     * mid-flight connection drop leaves the request's fate genuinely unknown, so those are the cases
-     * this returns true for. A definitive HTTP response (any status code, including 4xx/5xx) is treated
-     * as unambiguous and returns false. This is not an absolute guarantee: if a 200 response body fails
-     * Jackson deserialization, that surfaces here as a plain {@link IOException} indistinguishable from
-     * a timeout, so this returns true even though a response was in fact received. That misclassification
-     * is harmless, since the run really was created and adopting it is still the correct outcome. A TLS
-     * handshake failure or a refused connection provably never left the client, so those are excluded
-     * even though they too surface as an {@link IOException}.
+     * Whether a failed write call may already have reached dbt Cloud and created the run, so callers can
+     * decide whether to look it up and adopt it rather than fail. True only for a read timeout or a
+     * mid-flight drop, whose fate is unknown. A received HTTP response, a TLS handshake failure, or a
+     * refused connection all return false. A 200 whose body fails to parse also returns true (it looks
+     * like an {@link IOException}), which is harmless since the run really was created.
      */
     static boolean wasPossiblySent(Throwable throwable) {
         if (throwable == null) {
