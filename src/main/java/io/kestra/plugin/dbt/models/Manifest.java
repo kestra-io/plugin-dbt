@@ -16,6 +16,9 @@ public class Manifest {
     Map<String, Object> metadata;
     Map<String, Node> nodes;
 
+    // Sources are raw tables dbt reads but does not build, resolved so model-to-source edges survive.
+    Map<String, Source> sources;
+
     @JsonProperty("parent_map")
     Map<String, List<String>> parentMap;
 
@@ -39,6 +42,23 @@ public class Manifest {
 
         @JsonProperty("depends_on")
         Map<String, List<String>> dependsOn;
+
+        @JsonProperty("unique_id")
+        String uniqueId;
+    }
+
+    @Value
+    @Jacksonized
+    @SuperBuilder
+    public static class Source {
+        String database;
+
+        String schema;
+
+        String name;
+
+        // The physical table name of the source. Prefer this over `name` (the dbt source name) when present.
+        String identifier;
 
         @JsonProperty("unique_id")
         String uniqueId;
