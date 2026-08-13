@@ -776,4 +776,87 @@ class MockTriggerRunTest {
         assertThat(output.getRunId(), is(502L));
         verify(1, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
     }
+
+    @Test
+    void testAdoptsRunAfterGatewayError() throws Exception {
+        // A 504 gateway timeout on the trigger POST is ambiguous: the proxy gave up, but dbt Cloud behind
+        // it may already have received the request and created the run. With reattach on it must NOT be
+        // blindly retried (that would duplicate); it is confirmed and the created run is adopted.
+        TriggerRun task = TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("my-token"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .reattach(Property.ofValue(true))
+            .wait(Property.ofValue(false))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        String tag = "[taskrun:" + runContext.taskRunInfo().taskRunId() + "]";
+
+        // start-of-run lookup finds nothing, then the confirm lookup turns up the run the POST created
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .inScenario("adopt-on-gateway")
+                .whenScenarioStateIs(STARTED)
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .willReturn(okJson("{\"data\":[]}"))
+                .willSetStateTo("run created")
+        );
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .inScenario("adopt-on-gateway")
+                .whenScenarioStateIs("run created")
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .willReturn(okJson("{\"data\":[{\"id\":789,\"status\":10,\"trigger\":{\"cause\":\"Triggered by Kestra. " + tag + "\"}}]}"))
+        );
+
+        // the trigger POST returns a 504 (the proxy timed out) even though dbt created run 789 behind it
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(aResponse().withStatus(504))
+        );
+
+        TriggerRun.Output output = task.run(runContext);
+
+        assertThat(output.getRunId(), is(789L));
+        // a single POST: the ambiguous 504 was confirmed-and-adopted, never blindly retried into a duplicate
+        verify(1, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
+    }
+
+    @Test
+    void testGatewayErrorCreatingNoRunIsNotBlindlyRetried() throws Exception {
+        // Same 504, but it created no run. The task must fail with the gateway error and, crucially, must
+        // NOT have re-sent the POST: with reattach on the ambiguous 504 is routed to confirm-and-adopt, not
+        // to the generic HTTP-layer retry that would otherwise re-POST and risk a duplicate.
+        TriggerRun task = TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("my-token"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .reattach(Property.ofValue(true))
+            .wait(Property.ofValue(false))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+
+        // no run carrying this taskrun's tag ever appears: the 504 genuinely created nothing
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .willReturn(okJson("{\"data\":[]}"))
+        );
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(aResponse().withStatus(504))
+        );
+
+        // the original 504 surfaces unmasked (not the confirm lookup's own give-up), and only one POST was sent
+        assertThatThrownBy(() -> task.run(runContext)).isInstanceOf(HttpClientResponseException.class);
+        verify(1, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
+    }
 }

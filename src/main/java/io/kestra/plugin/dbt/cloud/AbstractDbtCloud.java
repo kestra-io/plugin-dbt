@@ -6,6 +6,8 @@ import java.net.NoRouteToHostException;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.time.Duration;
+import java.util.Set;
+import java.util.function.BiPredicate;
 
 import javax.net.ssl.SSLHandshakeException;
 
@@ -85,6 +87,17 @@ public abstract class AbstractDbtCloud extends Task {
         RunContext runContext,
         HttpRequest.HttpRequestBuilder requestBuilder,
         Class<RES> responseType) throws HttpClientException, IllegalVariableEvaluationException, IOException {
+        return this.request(runContext, requestBuilder, responseType, AbstractDbtCloud::isRetriableTransientError);
+    }
+
+    // Same as above but with a caller-supplied retry decision (throwable, method) -> retry. Used by callers
+    // that can recover an ambiguous write differently (e.g. TriggerRun confirming and adopting the run it may
+    // already have created) and so must not let the generic retry re-send it.
+    protected <RES> HttpResponse<RES> request(
+        RunContext runContext,
+        HttpRequest.HttpRequestBuilder requestBuilder,
+        Class<RES> responseType,
+        BiPredicate<Throwable, String> retryWhen) throws HttpClientException, IllegalVariableEvaluationException, IOException {
 
         var request = requestBuilder
             .addHeader("Authorization", "Bearer " + runContext.render(this.token).as(String.class).orElseThrow())
@@ -103,7 +116,7 @@ public abstract class AbstractDbtCloud extends Task {
                     .maxAttempts(rMaxRetries)
                     .build()
             ).run(
-                (res, throwable) -> isRetriableTransientError(throwable, request.getMethod()),
+                (res, throwable) -> retryWhen.test(throwable, request.getMethod()),
                 () ->
                 {
                     var response = client.request(request, String.class);
@@ -118,6 +131,18 @@ public abstract class AbstractDbtCloud extends Task {
             );
         }
     }
+
+    // dbt Cloud rejects a rate-limited request before running it, so it is always safe to retry.
+    private static final int TOO_MANY_REQUESTS = 429;
+
+    // Gateway errors retried for a write. 503 almost certainly never reached the app. 502 and 504 are
+    // ambiguous (the request may already have created the run), so a caller that can look the run up
+    // routes them through isAmbiguousFailure instead, but the generic retry keeps them for callers that
+    // cannot, preserving the previous behavior.
+    private static final Set<Integer> RETRIABLE_WRITE_GATEWAY_CODES = Set.of(502, 503, 504);
+
+    // Gateway errors that may mean dbt Cloud already received the write and created the run.
+    private static final Set<Integer> AMBIGUOUS_WRITE_GATEWAY_CODES = Set.of(502, 504);
 
     /**
      * Whether an error calling the dbt Cloud API is transient and worth retrying.
@@ -145,14 +170,13 @@ public abstract class AbstractDbtCloud extends Task {
 
         if (throwable instanceof HttpClientResponseException ex) {
             int code = ex.getResponse().getStatus().getCode();
-            // 429 (rate limited) is rejected before the request runs, so it is safe to retry for any method.
-            if (code == 429) {
+            if (code == TOO_MANY_REQUESTS) {
                 return true;
             }
             if (readOnly) {
                 return code >= 500 && code <= 599;
             }
-            return code == 502 || code == 503 || code == 504;
+            return RETRIABLE_WRITE_GATEWAY_CODES.contains(code);
         }
 
         // Transport-level failures. For read-only methods any of them is retriable. For write methods
@@ -182,21 +206,24 @@ public abstract class AbstractDbtCloud extends Task {
 
     /**
      * Whether a failed write call had an ambiguous outcome: it may already have reached dbt Cloud and
-     * created the run, so callers can look it up and adopt it rather than fail. True only for a read
-     * timeout or a mid-flight drop, whose fate is unknown. A received HTTP response, a TLS handshake
-     * failure, a refused connection, a DNS resolution failure, or a no-route-to-host error all return
-     * false: none of these ever put a byte on the wire. A generic {@link java.net.SocketException} (e.g.
-     * a connection reset mid-flight) is deliberately NOT excluded, since the request may already have
-     * reached dbt Cloud. A 200 whose body fails to parse also returns true (it looks like an
-     * {@link IOException}), which is harmless since the run really was created.
+     * created the run, so callers can look it up and adopt it rather than fail. True for a read timeout,
+     * a mid-flight drop, or a 502/504 gateway error, whose fate is unknown. Any other HTTP response
+     * (a 4xx, a plain 500, a 503) is a definitive answer and returns false, as do a TLS handshake
+     * failure, a refused connection, a DNS resolution failure, and a no-route-to-host error, since none
+     * of these ever put a byte on the wire. A generic {@link java.net.SocketException} (e.g. a connection
+     * reset mid-flight) is deliberately NOT excluded, since the request may already have reached dbt
+     * Cloud. A 200 whose body fails to parse also returns true (it looks like an {@link IOException}),
+     * which is harmless since the run really was created.
      */
     static boolean isAmbiguousFailure(Throwable throwable) {
         if (throwable == null) {
             return false;
         }
 
-        if (throwable instanceof HttpClientResponseException) {
-            return false;
+        if (throwable instanceof HttpClientResponseException ex) {
+            // A 502/504 gateway error may mean dbt Cloud received the request behind the proxy; any other
+            // response is a definitive answer, so it is not ambiguous.
+            return AMBIGUOUS_WRITE_GATEWAY_CODES.contains(ex.getResponse().getStatus().getCode());
         }
 
         if (

@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiPredicate;
 
 import org.slf4j.Logger;
 
@@ -150,11 +151,12 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
             cause) instead of triggering a duplicate. On a worker restart or retry it adopts an in-flight or \
             already-succeeded run, so a delayed retry after a lost response does not duplicate, but lets a \
             failed or cancelled run re-trigger. If the trigger call itself fails with an ambiguous error \
-            (e.g. a timeout) that may mean dbt Cloud already received it, it confirms and adopts the run \
-            this attempt created (never a stale run left over from a prior attempt) and reports its real \
-            outcome. A residual gap remains: a transparent internal retry of the trigger POST itself on a \
-            502/503/504 can still double-trigger; this is not solved by reattach. Default false, which \
-            always triggers a new run."""
+            (a read timeout, a mid-flight drop, or a 502/504 gateway error) that may mean dbt Cloud already \
+            received it, it confirms and adopts the run this attempt created (never a stale run left over \
+            from a prior attempt) and reports its real outcome. A small residual gap remains: a 503 on the \
+            trigger POST is still retried internally, since a 503 almost always means the request never \
+            reached dbt Cloud, so in a rare case it could double-trigger. Default false, which always \
+            triggers a new run."""
     )
     @Builder.Default
     @PluginProperty(group = "reliability")
@@ -240,11 +242,22 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
                     .build()
             );
 
+        // The trigger POST is not idempotent, so when reattach is on it must not be blindly retried by the
+        // generic HTTP layer on an ambiguous failure, since a retry could start the job twice. Keep the safe
+        // transient retries (503, TLS handshake, refused connection) but let an ambiguous failure (read
+        // timeout, mid-flight drop, or a 502/504 gateway error) surface here, where we can confirm and adopt
+        // the run it may already have created. When reattach is off, behave exactly as before.
+        BiPredicate<Throwable, String> triggerRetry = reattachEnabled
+            ? (throwable, method) -> isRetriableTransientError(throwable, method) && !isAmbiguousFailure(throwable)
+            : AbstractDbtCloud::isRetriableTransientError;
+
         HttpResponse<RunResponse> triggerResponse;
         try {
-            triggerResponse = this.request(runContext, requestBuilder, RunResponse.class);
+            triggerResponse = this.request(runContext, requestBuilder, RunResponse.class, triggerRetry);
         } catch (Exception e) {
-            // An ambiguous failure may mean dbt already created the run, so confirm before failing.
+            // An ambiguous failure may mean dbt already created the run, so confirm and adopt it before failing.
+            // If no run was created the original failure is rethrown; a task-level retry then triggers a fresh
+            // run and the start-of-run reattach above adopts it, so there is no in-task re-POST to duplicate.
             if (reattachEnabled && isAmbiguousFailure(e)) {
                 Run adoptedRun = null;
                 try {
