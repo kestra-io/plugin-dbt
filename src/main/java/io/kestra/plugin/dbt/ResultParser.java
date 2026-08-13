@@ -6,6 +6,8 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.*;
 
+import org.slf4j.event.Level;
+
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -27,8 +29,6 @@ import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.dbt.models.Manifest;
 import io.kestra.plugin.dbt.models.RunResult;
-
-import org.slf4j.event.Level;
 
 import static io.kestra.core.utils.Rethrow.throwConsumer;
 
@@ -146,7 +146,7 @@ public abstract class ResultParser {
                         )
                     );
                 if (assets != null) {
-                    taskRunBuilder.assets(assets);
+                    taskRunBuilder.assetEmits(List.of(assets));
                 }
 
                 // Register the dynamic taskrun together with its log lines in one call: the run
