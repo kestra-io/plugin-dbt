@@ -181,16 +181,16 @@ public abstract class AbstractDbtCloud extends Task {
     }
 
     /**
-     * Whether a failed write call may already have reached dbt Cloud and created the run, so callers can
-     * decide whether to look it up and adopt it rather than fail. True only for a read timeout or a
-     * mid-flight drop, whose fate is unknown. A received HTTP response, a TLS handshake failure, a
-     * refused connection, a DNS resolution failure, or a no-route-to-host error all return false: none of
-     * these ever put a byte on the wire. A generic {@link java.net.SocketException} (e.g. a connection
-     * reset mid-flight) is deliberately NOT excluded, since the request may already have reached dbt
-     * Cloud. A 200 whose body fails to parse also returns true (it looks like an {@link IOException}),
-     * which is harmless since the run really was created.
+     * Whether a failed write call had an ambiguous outcome: it may already have reached dbt Cloud and
+     * created the run, so callers can look it up and adopt it rather than fail. True only for a read
+     * timeout or a mid-flight drop, whose fate is unknown. A received HTTP response, a TLS handshake
+     * failure, a refused connection, a DNS resolution failure, or a no-route-to-host error all return
+     * false: none of these ever put a byte on the wire. A generic {@link java.net.SocketException} (e.g.
+     * a connection reset mid-flight) is deliberately NOT excluded, since the request may already have
+     * reached dbt Cloud. A 200 whose body fails to parse also returns true (it looks like an
+     * {@link IOException}), which is harmless since the run really was created.
      */
-    static boolean wasPossiblySent(Throwable throwable) {
+    static boolean isAmbiguousFailure(Throwable throwable) {
         if (throwable == null) {
             return false;
         }

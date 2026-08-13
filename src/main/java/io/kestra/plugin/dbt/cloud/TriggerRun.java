@@ -17,7 +17,9 @@ import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
+import io.kestra.core.models.tasks.retrys.Constant;
 import io.kestra.core.runners.RunContext;
+import io.kestra.core.utils.RetryUtils;
 import io.kestra.plugin.dbt.cloud.models.JobStatus;
 import io.kestra.plugin.dbt.cloud.models.Run;
 import io.kestra.plugin.dbt.cloud.models.RunListResponse;
@@ -61,9 +63,9 @@ import lombok.experimental.SuperBuilder;
 )
 public class TriggerRun extends AbstractDbtCloud implements RunnableTask<TriggerRun.Output> {
 
-    // A just-created run can take a moment to show up in the run list.
+    // A just-created run can take a moment to show up in the run list, so the confirm lookup is retried.
     private static final int CONFIRM_LOOKUP_MAX_ATTEMPTS = 3;
-    private static final Duration CONFIRM_LOOKUP_BACKOFF = Duration.ofSeconds(1);
+    private static final Duration CONFIRM_LOOKUP_BACKOFF = Duration.ofSeconds(2);
 
     @Schema(
         title = "Job ID",
@@ -243,7 +245,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
             triggerResponse = this.request(runContext, requestBuilder, RunResponse.class);
         } catch (Exception e) {
             // An ambiguous failure may mean dbt already created the run, so confirm before failing.
-            if (reattachEnabled && wasPossiblySent(e)) {
+            if (reattachEnabled && isAmbiguousFailure(e)) {
                 Run adoptedRun = null;
                 try {
                     adoptedRun = this.confirmRunAfterAmbiguousFailure(runContext, baseline);
@@ -329,29 +331,24 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     }
 
     /**
-     * After an ambiguous trigger failure, check whether the run was created, retrying a few times since
-     * a just-created run can take a moment to appear in the run list. Only a run whose id is strictly
-     * greater than {@code baseline} is accepted: the tag in the run cause is reused across retries of the
-     * same taskrun, so the newest tagged run at this point could still be a stale run from a prior
-     * attempt (id == baseline) rather than the one this attempt's POST just created.
+     * After an ambiguous trigger failure, check whether the run was created, retrying the lookup a few
+     * times since a just-created run can take a moment to appear in the run list. Only a run whose id is
+     * strictly greater than {@code baseline} is accepted: the tag in the run cause is reused across
+     * retries of the same taskrun, so the newest tagged run could still be a stale run from a prior
+     * attempt (id == baseline) rather than the one this attempt's POST just created. Throws once the
+     * attempts are exhausted without such a run, which the caller treats as "not created".
      */
     private Run confirmRunAfterAmbiguousFailure(RunContext runContext, long baseline) throws Exception {
-        for (int attempt = 1; attempt <= CONFIRM_LOOKUP_MAX_ATTEMPTS; attempt++) {
-            var found = this.findRunForThisTaskRun(runContext);
-            if (found != null && found.getId() != null && found.getId() > baseline) {
-                return found;
-            }
-            if (attempt < CONFIRM_LOOKUP_MAX_ATTEMPTS) {
-                try {
-                    Thread.sleep(CONFIRM_LOOKUP_BACKOFF.toMillis());
-                } catch (InterruptedException ie) {
-                    // Stop looking; let the caller rethrow the original trigger failure.
-                    Thread.currentThread().interrupt();
-                    return null;
-                }
-            }
-        }
-        return null;
+        return RetryUtils.<Run, Exception> of(
+            Constant.builder()
+                .interval(CONFIRM_LOOKUP_BACKOFF)
+                .maxAttempts(CONFIRM_LOOKUP_MAX_ATTEMPTS)
+                .build()
+        )
+            .run(
+                (run, throwable) -> throwable == null && (run == null || run.getId() == null || run.getId() <= baseline),
+                () -> this.findRunForThisTaskRun(runContext)
+            );
     }
 
     /** The marker embedded in a run's cause so a reattach can identify the run this taskrun started. */
