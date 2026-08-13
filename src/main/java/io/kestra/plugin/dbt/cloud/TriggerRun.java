@@ -18,6 +18,7 @@ import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
+import io.kestra.plugin.dbt.cloud.models.JobStatus;
 import io.kestra.plugin.dbt.cloud.models.Run;
 import io.kestra.plugin.dbt.cloud.models.RunListResponse;
 import io.kestra.plugin.dbt.cloud.models.RunResponse;
@@ -144,10 +145,16 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     @Schema(
         title = "Reattach to an in-flight run",
         description = """
-            If true, the task reattaches to a run it already started instead of triggering a duplicate: at the \
-            start of a worker restart or retry, and when the trigger call itself fails with an ambiguous error \
-            (e.g. a timeout) that may mean dbt Cloud already received it. It only reattaches to a run this \
-            execution started (matched by the taskrun id in the run cause), never one triggered elsewhere. \
+            If true, the task reattaches to a run it already started instead of triggering a duplicate. This is \
+            checked at the start of a worker restart or retry: a run this taskrun started that is still queued, \
+            starting, running, or already succeeded is adopted, so a delayed retry after a lost response does not \
+            trigger a duplicate. A run that genuinely failed or was cancelled is NOT adopted at this point, so a \
+            task-level `retry` or a manual "Restart from failed task" still triggers a fresh run instead of \
+            silently re-reporting the old failure. It is also checked when the trigger call itself fails with an \
+            ambiguous error (e.g. a timeout) that may mean dbt Cloud already received it: in that case any \
+            matching run is adopted regardless of status, since it was just created by the call that timed out and \
+            its real outcome (success or failure) must be reported for this attempt. It only reattaches to a run \
+            this execution started (matched by the taskrun id in the run cause), never one triggered elsewhere. \
             Default false, which always triggers a new run."""
     )
     @Builder.Default
@@ -183,7 +190,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         boolean reattachEnabled = Boolean.TRUE.equals(runContext.render(this.reattach).as(Boolean.class).orElse(Boolean.FALSE));
 
         if (reattachEnabled) {
-            Run existingRun = this.findRunForThisTaskRun(runContext);
+            var existingRun = this.findReattachableRunForThisTaskRun(runContext);
             if (existingRun != null) {
                 logger.info(
                     "Reattached to run {} (status {}) already started by this taskrun instead of triggering a new one",
@@ -274,10 +281,27 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     private static final int FIND_RUN_LOOKUP_LIMIT = 100;
 
     /**
+     * Start-of-run reattach check (worker restart, task-level {@code retry}, manual restart from a
+     * failed task). Adopts a run this taskrun already started only if it is still in flight (queued,
+     * starting, running) or already succeeded, never one that ended in Error or Cancelled: a genuinely
+     * failed dbt run must let the retry / restart re-trigger a fresh attempt instead of silently
+     * re-adopting and re-reporting the same historical failure. A succeeded run is still adopted so a
+     * delayed retry after a lost response does not create a duplicate.
+     */
+    private Run findReattachableRunForThisTaskRun(RunContext runContext) throws Exception {
+        var run = this.findRunForThisTaskRun(runContext);
+        if (run == null || run.getStatus() == JobStatus.NUMBER_20 || run.getStatus() == JobStatus.NUMBER_30) {
+            return null;
+        }
+        return run;
+    }
+
+    /**
      * Look for a run of the job that this taskrun already started, matched strictly by the taskrun
      * tag in the run cause: that tag is the unique key, so any status (queued, running, or already
-     * finished) qualifies. A finished run must be adopted and its real outcome reported by
-     * {@link #waitOrReturn}, never re-triggered. Returns null when there is none, in which case a
+     * finished, whether success or failure) qualifies. Callers that need to only adopt an in-flight or
+     * successful run (and let a genuine failure re-trigger) must filter the result themselves, e.g. via
+     * {@link #findReattachableRunForThisTaskRun}. Returns null when there is none, in which case a
      * fresh run is triggered rather than attaching to a run this execution did not start.
      *
      * <p>
@@ -326,7 +350,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
      */
     private Run confirmRunAfterAmbiguousFailure(RunContext runContext) throws Exception {
         for (int attempt = 1; attempt <= CONFIRM_LOOKUP_MAX_ATTEMPTS; attempt++) {
-            Run found = this.findRunForThisTaskRun(runContext);
+            var found = this.findRunForThisTaskRun(runContext);
             if (found != null) {
                 return found;
             }

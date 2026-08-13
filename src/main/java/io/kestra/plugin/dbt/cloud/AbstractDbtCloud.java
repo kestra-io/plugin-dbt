@@ -186,10 +186,14 @@ public abstract class AbstractDbtCloud extends Task {
      *
      * <p>
      * Mirrors the positive reasoning in {@link #isRetriableTransientError}: only a read timeout or a
-     * mid-flight connection drop leaves the request's fate genuinely unknown. A definitive HTTP
-     * response (any status code, including 4xx/5xx) means dbt Cloud received the request and replied,
-     * so it is never ambiguous. A TLS handshake failure or a refused connection provably never left
-     * the client either, so those are excluded even though they surface as an {@link IOException}.
+     * mid-flight connection drop leaves the request's fate genuinely unknown, so those are the cases
+     * this returns true for. A definitive HTTP response (any status code, including 4xx/5xx) is treated
+     * as unambiguous and returns false. This is not an absolute guarantee: if a 200 response body fails
+     * Jackson deserialization, that surfaces here as a plain {@link IOException} indistinguishable from
+     * a timeout, so this returns true even though a response was in fact received. That misclassification
+     * is harmless, since the run really was created and adopting it is still the correct outcome. A TLS
+     * handshake failure or a refused connection provably never left the client, so those are excluded
+     * even though they too surface as an {@link IOException}.
      */
     static boolean wasPossiblySent(Throwable throwable) {
         if (throwable == null) {
