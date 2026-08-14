@@ -302,7 +302,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
      * run's id (0 if none), so a later confirm never mistakes it for a run created by this attempt.
      */
     private StartLookup findStartOfRunLookup(RunContext runContext) throws Exception {
-        List<Run> firstPage = this.fetchRunsPage(runContext, 0);
+        List<Run> firstPage = this.fetchRunsPage(runContext, 0, 0L);
 
         // Baseline is the newest run id of the job (any status) seen before the POST, so a later confirm
         // only adopts a run created after it and never a stale run from a prior attempt. Using the newest
@@ -339,7 +339,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     private Run findRunCreatedByThisTaskRun(RunContext runContext, long baseline) throws Exception {
         String tag = taskrunTag(runContext);
         for (int page = 0; page < FIND_RUN_CONFIRM_MAX_PAGES; page++) {
-            List<Run> runs = this.fetchRunsPage(runContext, page * FIND_RUN_LOOKUP_LIMIT);
+            List<Run> runs = this.fetchRunsPage(runContext, page * FIND_RUN_LOOKUP_LIMIT, baseline);
             if (runs.isEmpty()) {
                 return null;
             }
@@ -365,8 +365,10 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         return null;
     }
 
-    // One page of the job's runs, newest first (order_by=-id), from the given offset.
-    private List<Run> fetchRunsPage(RunContext runContext, int offset) throws Exception {
+    // One page of the job's runs, newest first (order_by=-id), from the given offset. When idGt > 0 the
+    // dbt Cloud `id__gt` filter returns only runs newer than it, so the confirm lookup scans just the
+    // runs created after its baseline instead of the whole newest-100, which is usually a single page.
+    private List<Run> fetchRunsPage(RunContext runContext, int offset, long idGt) throws Exception {
         HttpRequest.HttpRequestBuilder requestBuilder = HttpRequest.builder()
             .uri(
                 URI.create(
@@ -375,6 +377,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
                         "&order_by=-id" +
                         "&limit=" + FIND_RUN_LOOKUP_LIMIT +
                         "&offset=" + offset +
+                        (idGt > 0 ? "&id__gt=" + idGt : "") +
                         "&include_related=" + URLEncoder.encode("[\"trigger\"]", StandardCharsets.UTF_8)
                 )
             )
