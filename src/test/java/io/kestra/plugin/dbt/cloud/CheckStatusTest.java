@@ -13,11 +13,13 @@ import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import io.kestra.core.http.client.HttpClientResponseException;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.executions.LogEntry;
+import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.queues.QueueFactoryInterface;
 import io.kestra.core.queues.QueueInterface;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
+import io.kestra.core.runners.WorkerTaskResult;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
 
@@ -28,6 +30,7 @@ import reactor.core.publisher.Flux;
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
@@ -242,6 +245,96 @@ class CheckStatusTest {
 
         var ex = assertThrows(Exception.class, () -> checkStatus.run(runContext));
         assertThat(ex.getMessage(), containsString("Compilation failed in step 1"));
+    }
+
+    /**
+     * Regression test for issue #315: on a FAILED run, dbt Cloud still saves run_results.json, and
+     * the task must download/parse it (emitting per-model dynamic taskruns and logs) before failing,
+     * instead of throwing immediately and leaving the failed models with no per-node visibility.
+     */
+    @Test
+    void shouldEmitModelTaskRunsOnFailedRunBeforeThrowing() throws Exception {
+        stubFor(
+            get(urlMatching("/api/v2/accounts/123/runs/6667/\\?.*"))
+                .willReturn(okJson("""
+                        {
+                          "data": {
+                            "id": 6667,
+                            "status": 20,
+                            "status_humanized": "Error",
+                            "status_message": "Model failed",
+                            "duration_humanized": "5s",
+                            "run_steps": []
+                          }
+                        }
+                    """))
+        );
+
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/6667/artifacts/run_results.json"))
+                .willReturn(okJson("""
+                        {
+                          "metadata": {"dbt_version": "1.8.0"},
+                          "results": [
+                            {
+                              "status": "error",
+                              "message": "Database Error in model fct_orders",
+                              "failures": 1,
+                              "unique_id": "model.my_project.fct_orders",
+                              "execution_time": 0.13,
+                              "adapter_response": {},
+                              "timing": [
+                                {"name": "compile", "started_at": "2024-01-01T00:00:00Z", "completed_at": "2024-01-01T00:00:01Z"},
+                                {"name": "execute", "started_at": "2024-01-01T00:00:01Z", "completed_at": "2024-01-01T00:00:02Z"}
+                              ]
+                            }
+                          ],
+                          "elapsed_time": 0.13
+                        }
+                    """))
+        );
+
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/6667/artifacts/manifest.json"))
+                .willReturn(aResponse().withStatus(404).withBody("Not Found"))
+        );
+
+        CheckStatus checkStatus = CheckStatus.builder()
+            .id(IdUtils.create())
+            .type(CheckStatus.class.getName())
+            .baseUrl(Property.ofValue("http://localhost:8089"))
+            .runId(Property.ofValue("6667"))
+            .accountId(Property.ofValue("123"))
+            .token(Property.ofValue("fake-token"))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(5)))
+            .parseRunResults(Property.ofValue(true))
+            .build();
+
+        RunContext runContext = mockRunContext(checkStatus);
+
+        List<LogEntry> logs = new CopyOnWriteArrayList<>();
+        Flux<LogEntry> receive = TestsUtils.receive(logQueue, l -> logs.add(l.getLeft()));
+
+        // The run failed — the task must still throw, carrying the same message as before the fix.
+        var ex = assertThrows(Exception.class, () -> checkStatus.run(runContext));
+        assertThat(ex.getMessage(), containsString("Model failed"));
+
+        // But run_results.json must have been downloaded and parsed regardless, emitting a dynamic
+        // taskrun for the failed model with an ERROR state — this is what was missing before the fix.
+        List<WorkerTaskResult> modelTaskRuns = runContext.dynamicWorkerResults();
+        assertThat(modelTaskRuns, hasSize(1));
+        assertThat(modelTaskRuns.getFirst().getTaskRun().getTaskId(), is("model.my_project.fct_orders"));
+        assertThat(modelTaskRuns.getFirst().getTaskRun().getState().getCurrent(), is(State.Type.FAILED));
+
+        // And its failure message must have been logged under that model's own dynamic taskrun.
+        String modelTaskRunId = modelTaskRuns.getFirst().getTaskRun().getId();
+        TestsUtils.awaitLog(logs, l -> l.getTaskRunId() != null && l.getTaskRunId().equals(modelTaskRunId));
+        receive.blockLast();
+
+        assertThat(
+            logs.stream().anyMatch(l -> modelTaskRunId.equals(l.getTaskRunId()) && l.getMessage().contains("Database Error")),
+            is(true)
+        );
     }
 
     /**
@@ -562,10 +655,12 @@ class CheckStatusTest {
             get(urlMatching("/api/v2/accounts/123/runs/9090/\\?.*"))
                 .inScenario("transient-then-success")
                 .whenScenarioStateIs(Scenario.STARTED)
-                .willReturn(aResponse()
-                    .withStatus(500)
-                    .withHeader("Content-Type", "text/html")
-                    .withBody("<html><title>Uh oh! | dbt</title></html>"))
+                .willReturn(
+                    aResponse()
+                        .withStatus(500)
+                        .withHeader("Content-Type", "text/html")
+                        .withBody("<html><title>Uh oh! | dbt</title></html>")
+                )
                 .willSetStateTo("recovered")
         );
 
