@@ -859,4 +859,124 @@ class MockTriggerRunTest {
         assertThatThrownBy(() -> task.run(runContext)).isInstanceOf(HttpClientResponseException.class);
         verify(1, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
     }
+
+    @Test
+    void testRetriedGatewayErrorStillConfirmsAndAdopts() throws Exception {
+        // The POST is retried once on a 503 (safe transient) and then hits an ambiguous 504. The 504 must
+        // still be classified ambiguous, confirmed, and the created run adopted, not misread and hard-failed.
+        TriggerRun task = TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("my-token"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .reattach(Property.ofValue(true))
+            .wait(Property.ofValue(false))
+            .initialDelayMs(Property.ofValue(1L))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        String tag = "[taskrun:" + runContext.taskRunInfo().taskRunId() + "]";
+
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .inScenario("gw-retry")
+                .whenScenarioStateIs(STARTED)
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .willReturn(okJson("{\"data\":[]}"))
+                .willSetStateTo("gw-created")
+        );
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .inScenario("gw-retry")
+                .whenScenarioStateIs("gw-created")
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .willReturn(okJson("{\"data\":[{\"id\":789,\"status\":10,\"trigger\":{\"cause\":\"Triggered by Kestra. " + tag + "\"}}]}"))
+        );
+
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .inScenario("gw-retry-post")
+                .whenScenarioStateIs(STARTED)
+                .willReturn(aResponse().withStatus(503))
+                .willSetStateTo("gw-second")
+        );
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .inScenario("gw-retry-post")
+                .whenScenarioStateIs("gw-second")
+                .willReturn(aResponse().withStatus(504))
+        );
+
+        TriggerRun.Output output = task.run(runContext);
+
+        assertThat(output.getRunId(), is(789L));
+    }
+
+    @Test
+    void testConfirmPaginatesToFindRunBeyondFirstPage() throws Exception {
+        // Busy shared job: this attempt's POST creates a run, but a burst of more than 100 newer runs then
+        // pushes it off the first page of the run list. The confirm lookup must page past the first 100 to
+        // find and adopt it, instead of concluding "not created" and letting a retry duplicate the job.
+        TriggerRun task = TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("my-token"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .reattach(Property.ofValue(true))
+            .wait(Property.ofValue(false))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        String tag = "[taskrun:" + runContext.taskRunInfo().taskRunId() + "]";
+
+        // start-of-run: newest run is 5000, untagged -> baseline 5000, nothing to adopt, POST fires
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .inScenario("flood")
+                .whenScenarioStateIs(STARTED)
+                .withQueryParam("offset", equalTo("0"))
+                .willReturn(okJson("{\"data\":[{\"id\":5000,\"status\":10,\"trigger\":{\"cause\":\"other\"}}]}"))
+                .willSetStateTo("posted")
+        );
+
+        // confirm page 1 (offset 0): 100 newer but untagged runs (5151..5052), a full page, so it must page on
+        StringBuilder floodPage = new StringBuilder("{\"data\":[");
+        for (int i = 0; i < 100; i++) {
+            if (i > 0) {
+                floodPage.append(",");
+            }
+            floodPage.append("{\"id\":").append(5151 - i).append(",\"status\":3,\"trigger\":{\"cause\":\"other\"}}");
+        }
+        floodPage.append("]}");
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .inScenario("flood")
+                .whenScenarioStateIs("posted")
+                .withQueryParam("offset", equalTo("0"))
+                .willReturn(okJson(floodPage.toString()))
+        );
+
+        // confirm page 2 (offset 100): the run this attempt created, tagged, id 5001 > baseline 5000
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .withQueryParam("offset", equalTo("100"))
+                .willReturn(okJson("{\"data\":[{\"id\":5001,\"status\":10,\"trigger\":{\"cause\":\"Triggered by Kestra. " + tag + "\"}}]}"))
+        );
+
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(aResponse().withStatus(504))
+        );
+
+        TriggerRun.Output output = task.run(runContext);
+
+        assertThat(output.getRunId(), is(5001L));
+        verify(1, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
+        // proves it paged past the first 100 rather than giving up on page 1
+        verify(getRequestedFor(urlPathEqualTo("/api/v2/accounts/123/runs/")).withQueryParam("offset", equalTo("100")));
+    }
 }

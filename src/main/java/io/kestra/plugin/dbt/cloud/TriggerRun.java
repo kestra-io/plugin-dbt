@@ -287,8 +287,12 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         return this.waitOrReturn(runContext, triggerRunResponse.getData().getId());
     }
 
-    // Newest first, so the tagged run is only missed if this many newer runs of the job appeared since.
+    // Page size for the run-list lookup, newest first (order_by=-id).
     private static final int FIND_RUN_LOOKUP_LIMIT = 100;
+
+    // Safety cap on how many pages the confirm lookup walks back before giving up, so a pathological
+    // flood of runs cannot loop unbounded. FIND_RUN_LOOKUP_LIMIT times this is the deepest it looks.
+    private static final int FIND_RUN_CONFIRM_MAX_PAGES = 10;
 
     /**
      * Single start-of-run lookup, yielding both the adopt decision and the baseline for the later
@@ -298,21 +302,71 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
      * run's id (0 if none), so a later confirm never mistakes it for a run created by this attempt.
      */
     private StartLookup findStartOfRunLookup(RunContext runContext) throws Exception {
-        var run = this.findRunForThisTaskRun(runContext);
-        long baseline = (run != null && run.getId() != null) ? run.getId() : 0L;
-        boolean adoptable = run != null && run.getStatus() != JobStatus.NUMBER_20 && run.getStatus() != JobStatus.NUMBER_30;
-        return new StartLookup(adoptable ? run : null, baseline);
+        List<Run> firstPage = this.fetchRunsPage(runContext, 0);
+
+        // Baseline is the newest run id of the job (any status) seen before the POST, so a later confirm
+        // only adopts a run created after it and never a stale run from a prior attempt. Using the newest
+        // run overall, not just a tagged one, keeps it a tight, always-available floor for the confirm
+        // pagination even when this taskrun has no earlier run.
+        long baseline = firstPage.stream()
+            .map(Run::getId)
+            .filter(id -> id != null)
+            .findFirst()
+            .orElse(0L);
+
+        String tag = taskrunTag(runContext);
+        Run tagged = firstPage.stream()
+            .filter(run -> matchesTaskrunTag(run, tag))
+            .findFirst()
+            .orElse(null);
+
+        // Adopt an in-flight or succeeded run, but never an Error or Cancelled one, so a genuine failure
+        // lets the retry or restart re-trigger instead of re-reporting the old failure.
+        boolean adoptable = tagged != null && tagged.getStatus() != JobStatus.NUMBER_20 && tagged.getStatus() != JobStatus.NUMBER_30;
+        return new StartLookup(adoptable ? tagged : null, baseline);
     }
 
     private record StartLookup(Run adoptableRun, long baseline) {
     }
 
     /**
-     * Find a run this taskrun started, matched by its tag in the run cause, in any status. Callers that
-     * must not adopt a failed run filter via {@link #findStartOfRunLookup}. Bounded to the
-     * {@value #FIND_RUN_LOOKUP_LIMIT} newest runs of the job, not paginated further.
+     * Find the run this attempt's POST created after an ambiguous failure. Matched by the taskrun tag and
+     * required to be newer than {@code baseline} (the newest run seen before the POST), so a stale run
+     * from a prior attempt is never mistaken for it. Pages newest-first until the run is found, or a page
+     * crosses the baseline (every run newer than it has been seen, so none was created), or the page cap
+     * is hit. Returns null in the not-found cases, and the caller then rethrows the original failure.
      */
-    private Run findRunForThisTaskRun(RunContext runContext) throws Exception {
+    private Run findRunCreatedByThisTaskRun(RunContext runContext, long baseline) throws Exception {
+        String tag = taskrunTag(runContext);
+        for (int page = 0; page < FIND_RUN_CONFIRM_MAX_PAGES; page++) {
+            List<Run> runs = this.fetchRunsPage(runContext, page * FIND_RUN_LOOKUP_LIMIT);
+            if (runs.isEmpty()) {
+                return null;
+            }
+            for (Run run : runs) {
+                if (run.getId() != null && run.getId() <= baseline) {
+                    // Reached the pre-POST baseline: a run this attempt created (id > baseline) would
+                    // already have been seen, so there is none.
+                    return null;
+                }
+                if (matchesTaskrunTag(run, tag)) {
+                    return run;
+                }
+            }
+            if (runs.size() < FIND_RUN_LOOKUP_LIMIT) {
+                // Short page: the list is exhausted with no matching run.
+                return null;
+            }
+        }
+        runContext.logger().warn(
+            "Confirm lookup walked {} pages without reaching baseline run id {}; a created run may have been missed",
+            FIND_RUN_CONFIRM_MAX_PAGES, baseline
+        );
+        return null;
+    }
+
+    // One page of the job's runs, newest first (order_by=-id), from the given offset.
+    private List<Run> fetchRunsPage(RunContext runContext, int offset) throws Exception {
         HttpRequest.HttpRequestBuilder requestBuilder = HttpRequest.builder()
             .uri(
                 URI.create(
@@ -320,6 +374,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
                         "/runs/?job_definition_id=" + runContext.render(this.jobId).as(String.class).orElseThrow() +
                         "&order_by=-id" +
                         "&limit=" + FIND_RUN_LOOKUP_LIMIT +
+                        "&offset=" + offset +
                         "&include_related=" + URLEncoder.encode("[\"trigger\"]", StandardCharsets.UTF_8)
                 )
             )
@@ -328,28 +383,23 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         HttpResponse<RunListResponse> response = this.request(runContext, requestBuilder, RunListResponse.class);
 
         RunListResponse listResponse = response.getBody();
-        if (listResponse == null || listResponse.getData() == null || listResponse.getData().isEmpty()) {
-            return null;
+        if (listResponse == null || listResponse.getData() == null) {
+            return List.of();
         }
+        return listResponse.getData();
+    }
 
-        String tag = taskrunTag(runContext);
-        return listResponse.getData().stream()
-            .filter(
-                run -> run.getTrigger() != null
-                    && run.getTrigger().getCause() != null
-                    && run.getTrigger().getCause().contains(tag)
-            )
-            .findFirst()
-            .orElse(null);
+    private static boolean matchesTaskrunTag(Run run, String tag) {
+        return run.getTrigger() != null
+            && run.getTrigger().getCause() != null
+            && run.getTrigger().getCause().contains(tag);
     }
 
     /**
-     * After an ambiguous trigger failure, check whether the run was created, retrying the lookup a few
-     * times since a just-created run can take a moment to appear in the run list. Only a run whose id is
-     * strictly greater than {@code baseline} is accepted: the tag in the run cause is reused across
-     * retries of the same taskrun, so the newest tagged run could still be a stale run from a prior
-     * attempt (id == baseline) rather than the one this attempt's POST just created. Throws once the
-     * attempts are exhausted without such a run, which the caller treats as "not created".
+     * After an ambiguous trigger failure, check whether the run was created, retrying the paginated lookup
+     * a few times since a just-created run can take a moment to appear in the run list. The baseline and
+     * tag matching are handled by {@link #findRunCreatedByThisTaskRun}. Throws once the attempts are
+     * exhausted without a match, which the caller treats as "not created".
      */
     private Run confirmRunAfterAmbiguousFailure(RunContext runContext, long baseline) throws Exception {
         return RetryUtils.<Run, Exception> of(
@@ -359,8 +409,10 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
                 .build()
         )
             .run(
-                (run, throwable) -> throwable == null && (run == null || run.getId() == null || run.getId() <= baseline),
-                () -> this.findRunForThisTaskRun(runContext)
+                // findRunCreatedByThisTaskRun already applies the baseline, so retry only while it has not
+                // yet surfaced (a just-created run can lag in the run list for a moment).
+                (run, throwable) -> throwable == null && run == null,
+                () -> this.findRunCreatedByThisTaskRun(runContext, baseline)
             );
     }
 
