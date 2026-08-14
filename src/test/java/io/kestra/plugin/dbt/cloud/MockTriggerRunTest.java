@@ -979,4 +979,53 @@ class MockTriggerRunTest {
         // proves it paged past the first 100 rather than giving up on page 1
         verify(getRequestedFor(urlPathEqualTo("/api/v2/accounts/123/runs/")).withQueryParam("offset", equalTo("100")));
     }
+
+    @Test
+    void testStartOfRunReattachPaginatesToFindEarlierRun() throws Exception {
+        // On a restart of a busy job, the run this taskrun started earlier has been pushed off the first
+        // page by 100+ newer runs. The start-of-run reattach check must page past the first 100 to find it
+        // and adopt it, instead of missing it and triggering a duplicate.
+        TriggerRun task = TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("my-token"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .reattach(Property.ofValue(true))
+            .wait(Property.ofValue(false))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        String tag = "[taskrun:" + runContext.taskRunInfo().taskRunId() + "]";
+
+        // page 1 (offset 0): 100 newer, untagged runs, a full page so the lookup must page on
+        StringBuilder floodPage = new StringBuilder("{\"data\":[");
+        for (int i = 0; i < 100; i++) {
+            if (i > 0) {
+                floodPage.append(",");
+            }
+            floodPage.append("{\"id\":").append(5200 - i).append(",\"status\":10,\"trigger\":{\"cause\":\"other\"}}");
+        }
+        floodPage.append("]}");
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .withQueryParam("offset", equalTo("0"))
+                .willReturn(okJson(floodPage.toString()))
+        );
+
+        // page 2 (offset 100): the run this taskrun started earlier, still running, carrying our tag
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .withQueryParam("offset", equalTo("100"))
+                .willReturn(okJson("{\"data\":[{\"id\":5001,\"status\":3,\"trigger\":{\"cause\":\"Triggered by Kestra. " + tag + "\"}}]}"))
+        );
+
+        TriggerRun.Output output = task.run(runContext);
+
+        // adopted the earlier run found on page 2, and never triggered a new one
+        assertThat(output.getRunId(), is(5001L));
+        verify(0, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
+        verify(getRequestedFor(urlPathEqualTo("/api/v2/accounts/123/runs/")).withQueryParam("offset", equalTo("100")));
+    }
 }

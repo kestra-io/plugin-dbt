@@ -153,10 +153,12 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
             failed or cancelled run re-trigger. If the trigger call itself fails with an ambiguous error \
             (a read timeout, a mid-flight drop, or a 502/504 gateway error) that may mean dbt Cloud already \
             received it, it confirms and adopts the run this attempt created (never a stale run left over \
-            from a prior attempt) and reports its real outcome. A small residual gap remains: a 503 on the \
+            from a prior attempt) and reports its real outcome. Two small residual gaps remain. A 503 on the \
             trigger POST is still retried internally, since a 503 almost always means the request never \
-            reached dbt Cloud, so in a rare case it could double-trigger. Default false, which always \
-            triggers a new run."""
+            reached dbt Cloud, so in a rare case it could double-trigger. And the restart or retry check \
+            scans only the most recent runs of the job, so on a very busy or heavily shared job that has \
+            accumulated a large backlog of runs since this one started, it may not find the earlier run and \
+            could trigger a duplicate. Default false, which always triggers a new run."""
     )
     @Builder.Default
     @PluginProperty(group = "reliability")
@@ -294,6 +296,11 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     // flood of runs cannot loop unbounded. FIND_RUN_LOOKUP_LIMIT times this is the deepest it looks.
     private static final int FIND_RUN_CONFIRM_MAX_PAGES = 10;
 
+    // Pages the start-of-run reattach walks looking for an earlier run of this taskrun. Unlike the confirm
+    // path it has no baseline to stop at, so on a first attempt (no earlier run) it walks up to this many
+    // pages before giving up. Kept small so the cost on the common first-attempt path stays bounded.
+    private static final int FIND_RUN_START_MAX_PAGES = 5;
+
     /**
      * Single start-of-run lookup, yielding both the adopt decision and the baseline for the later
      * ambiguous-failure confirm path. Adopts an in-flight or succeeded run (so a delayed retry after a
@@ -302,23 +309,28 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
      * run's id (0 if none), so a later confirm never mistakes it for a run created by this attempt.
      */
     private StartLookup findStartOfRunLookup(RunContext runContext) throws Exception {
-        List<Run> firstPage = this.fetchRunsPage(runContext, 0, 0L);
-
-        // Baseline is the newest run id of the job (any status) seen before the POST, so a later confirm
-        // only adopts a run created after it and never a stale run from a prior attempt. Using the newest
-        // run overall, not just a tagged one, keeps it a tight, always-available floor for the confirm
-        // pagination even when this taskrun has no earlier run.
-        long baseline = firstPage.stream()
-            .map(Run::getId)
-            .filter(id -> id != null)
-            .findFirst()
-            .orElse(0L);
-
         String tag = taskrunTag(runContext);
-        Run tagged = firstPage.stream()
-            .filter(run -> matchesTaskrunTag(run, tag))
-            .findFirst()
-            .orElse(null);
+        long baseline = 0L;
+        Run tagged = null;
+
+        // Walk newest-first for an earlier run of this taskrun. Paginate so a busy job that has pushed the
+        // earlier run past the first page does not silently miss it and trigger a duplicate. Bounded by
+        // FIND_RUN_START_MAX_PAGES since, with no earlier run to find, there is no baseline to stop at.
+        for (int page = 0; page < FIND_RUN_START_MAX_PAGES; page++) {
+            List<Run> runs = this.fetchRunsPage(runContext, page * FIND_RUN_LOOKUP_LIMIT, 0L);
+            if (runs.isEmpty()) {
+                break;
+            }
+            if (page == 0) {
+                // Baseline is the newest run id of the job (any status) seen before the POST, so a later
+                // confirm only adopts a run created after it and never a stale run from a prior attempt.
+                baseline = runs.stream().map(Run::getId).filter(id -> id != null).findFirst().orElse(0L);
+            }
+            tagged = runs.stream().filter(run -> matchesTaskrunTag(run, tag)).findFirst().orElse(null);
+            if (tagged != null || runs.size() < FIND_RUN_LOOKUP_LIMIT) {
+                break;
+            }
+        }
 
         // Adopt an in-flight or succeeded run, but never an Error or Cancelled one, so a genuine failure
         // lets the retry or restart re-trigger instead of re-reporting the old failure.

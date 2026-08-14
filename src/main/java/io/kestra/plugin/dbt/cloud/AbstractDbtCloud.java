@@ -120,7 +120,11 @@ public abstract class AbstractDbtCloud extends Task {
                 () ->
                 {
                     var response = client.request(request, String.class);
-                    var parsedResponse = MAPPER.readValue(response.getBody(), responseType);
+                    // A response with no body cannot be parsed. Surface it as a null-bodied response so the
+                    // caller's own "missing body" handling runs, instead of an opaque Jackson null-argument
+                    // error (readValue(null, ...) throws IllegalArgumentException, not an IOException).
+                    var body = response.getBody();
+                    var parsedResponse = body == null ? null : MAPPER.readValue(body, responseType);
                     return HttpResponse.<RES> builder()
                         .request(request)
                         .body(parsedResponse)
