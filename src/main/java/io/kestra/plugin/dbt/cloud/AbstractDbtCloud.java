@@ -120,11 +120,16 @@ public abstract class AbstractDbtCloud extends Task {
                 () ->
                 {
                     var response = client.request(request, String.class);
-                    // A response with no body cannot be parsed. Surface it as a null-bodied response so the
-                    // caller's own "missing body" handling runs, instead of an opaque Jackson null-argument
-                    // error (readValue(null, ...) throws IllegalArgumentException, not an IOException).
+                    // A success status with an empty body cannot be parsed. Throw rather than return a
+                    // null-bodied response: callers that expect a body (e.g. artifact download) fail loudly
+                    // instead of silently writing a "null" artifact, and the trigger POST sees an IOException,
+                    // which isAmbiguousFailure treats as ambiguous so it confirms the run it may have created.
+                    // readValue(null, ...) would itself throw an opaque IllegalArgumentException, so guard first.
                     var body = response.getBody();
-                    var parsedResponse = body == null ? null : MAPPER.readValue(body, responseType);
+                    if (body == null || body.isBlank()) {
+                        throw new IOException("Empty response body from dbt Cloud");
+                    }
+                    var parsedResponse = MAPPER.readValue(body, responseType);
                     return HttpResponse.<RES> builder()
                         .request(request)
                         .body(parsedResponse)

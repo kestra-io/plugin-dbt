@@ -978,6 +978,12 @@ class MockTriggerRunTest {
         verify(1, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
         // proves it paged past the first 100 rather than giving up on page 1
         verify(getRequestedFor(urlPathEqualTo("/api/v2/accounts/123/runs/")).withQueryParam("offset", equalTo("100")));
+        // and that the confirm lookup scoped server-side to runs created after the baseline (id__gt)
+        verify(
+            getRequestedFor(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .withQueryParam("offset", equalTo("100"))
+                .withQueryParam("id__gt", equalTo("5000"))
+        );
     }
 
     @Test
@@ -1027,5 +1033,53 @@ class MockTriggerRunTest {
         assertThat(output.getRunId(), is(5001L));
         verify(0, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
         verify(getRequestedFor(urlPathEqualTo("/api/v2/accounts/123/runs/")).withQueryParam("offset", equalTo("100")));
+    }
+
+    @Test
+    void testEmptyBodyTriggerResponseConfirmsAndAdopts() throws Exception {
+        // dbt Cloud accepted the trigger (200) and created the run, but the response body was stripped on
+        // the wire. An empty body must be treated as ambiguous and routed to confirm-and-adopt, not fail
+        // raw, so the created run is still adopted rather than duplicated on a retry.
+        TriggerRun task = TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("my-token"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .reattach(Property.ofValue(true))
+            .wait(Property.ofValue(false))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        String tag = "[taskrun:" + runContext.taskRunInfo().taskRunId() + "]";
+
+        // start-of-run lookup finds nothing, then the confirm lookup turns up the run the POST created
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .inScenario("empty-body")
+                .whenScenarioStateIs(STARTED)
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .willReturn(okJson("{\"data\":[]}"))
+                .willSetStateTo("run created")
+        );
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .inScenario("empty-body")
+                .whenScenarioStateIs("run created")
+                .withQueryParam("job_definition_id", equalTo("456"))
+                .willReturn(okJson("{\"data\":[{\"id\":789,\"status\":10,\"trigger\":{\"cause\":\"Triggered by Kestra. " + tag + "\"}}]}"))
+        );
+
+        // the trigger POST returns 200 with an empty body (created the run, body lost)
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(aResponse().withStatus(200))
+        );
+
+        TriggerRun.Output output = task.run(runContext);
+
+        assertThat(output.getRunId(), is(789L));
+        verify(1, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
     }
 }
