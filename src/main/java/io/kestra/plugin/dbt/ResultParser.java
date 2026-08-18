@@ -6,6 +6,8 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.*;
 
+import org.slf4j.event.Level;
+
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -28,8 +30,6 @@ import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.dbt.models.Manifest;
 import io.kestra.plugin.dbt.models.RunResult;
 
-import org.slf4j.event.Level;
-
 import static io.kestra.core.utils.Rethrow.throwConsumer;
 
 public abstract class ResultParser {
@@ -38,6 +38,12 @@ public abstract class ResultParser {
 
     private static final String TABLE_ASSET_TYPE = "io.kestra.plugin.ee.assets.Table";
     private static final String RESOURCE_TYPE_MODEL = "model";
+    private static final String RESOURCE_TYPE_SEED = "seed";
+    private static final String RESOURCE_TYPE_SNAPSHOT = "snapshot";
+    private static final String RESOURCE_TYPE_SOURCE = "source";
+
+    // dbt node resource types that map to a physical table dbt builds.
+    private static final Set<String> PRODUCED_RESOURCE_TYPES = Set.of(RESOURCE_TYPE_MODEL, RESOURCE_TYPE_SEED, RESOURCE_TYPE_SNAPSHOT);
 
     public record ManifestResult(Manifest manifest, URI uri) {
     }
@@ -54,7 +60,7 @@ public abstract class ResultParser {
             RunResult.class
         );
 
-        Map<String, ModelAsset> modelAssets = manifest == null ? Map.of() : extractModelAssets(manifest);
+        Map<String, ModelAsset> modelAssets = manifest == null ? Map.of() : extractAssetNodes(manifest);
 
         // Emit one dynamic taskrun per dbt model (the UI timeline "bars"), attaching that model's
         // own status/message/failures as logs riding with its taskrun so they render inline under
@@ -198,23 +204,29 @@ public abstract class ResultParser {
         }
 
         ModelAsset modelAsset = modelAssets.get(uniqueId);
-        if (modelAsset == null) {
+        // A source can resolve here via `dbt source freshness` results and must never be this taskrun's output.
+        if (modelAsset == null || !modelAsset.produced()) {
             return null;
         }
 
         List<AssetIdentifier> inputs = inputIdentifiers(modelAsset, modelAssets);
-        List<Asset> outputs = outputAssets(modelAsset, modelAssets);
+        List<Asset> outputs = List.of(selfAsset(modelAsset));
 
         return new AssetsInOut(inputs, outputs);
     }
 
     private static void emitAssets(RunContext runContext, Manifest manifest) throws IllegalVariableEvaluationException {
-        Map<String, ModelAsset> modelAssets = extractModelAssets(manifest);
-        runContext.logger().info("dbt assets extracted from manifest: {}", modelAssets.size());
+        Map<String, ModelAsset> assetNodes = extractAssetNodes(manifest);
+        runContext.logger().info("dbt assets extracted from manifest: {}", assetNodes.size());
 
-        for (ModelAsset asset : modelAssets.values()) {
-            List<AssetIdentifier> inputs = inputIdentifiers(asset, modelAssets);
-            List<Asset> outputs = outputAssets(asset, modelAssets);
+        for (ModelAsset asset : assetNodes.values()) {
+            if (!asset.produced()) {
+                continue;
+            }
+
+            // Bundle is {parents} -> {this node} only (never children) so each event is self-contained, no cartesian join.
+            List<AssetIdentifier> inputs = inputIdentifiers(asset, assetNodes);
+            List<Asset> outputs = List.of(selfAsset(asset));
             try {
                 runContext.assets().emit(new AssetEmit(inputs, outputs));
             } catch (UnsupportedOperationException e) {
@@ -227,22 +239,12 @@ public abstract class ResultParser {
         }
     }
 
-    private static List<Asset> outputAssets(ModelAsset modelAsset, Map<String, ModelAsset> modelAssets) {
-        if (modelAsset.children() == null || modelAsset.children().isEmpty()) {
-            return List.of();
-        }
-
-        return modelAsset.children().stream()
-            .map(modelAssets::get)
-            .filter(Objects::nonNull)
-            .<Asset> map(
-                child -> Custom.builder()
-                    .id(child.assetId())
-                    .type(TABLE_ASSET_TYPE)
-                    .metadata(child.metadata())
-                    .build()
-            )
-            .toList();
+    private static Asset selfAsset(ModelAsset asset) {
+        return Custom.builder()
+            .id(asset.assetId())
+            .type(TABLE_ASSET_TYPE)
+            .metadata(asset.metadata())
+            .build();
     }
 
     private static List<AssetIdentifier> inputIdentifiers(ModelAsset modelAsset, Map<String, ModelAsset> modelAssets) {
@@ -257,79 +259,100 @@ public abstract class ResultParser {
             .toList();
     }
 
-    private static Map<String, ModelAsset> extractModelAssets(Manifest manifest) {
-        if (manifest == null || manifest.getNodes() == null || manifest.getNodes().isEmpty()) {
+    // Every model/seed/snapshot/source as an asset node keyed by unique_id, deps filtered to nodes in this set.
+    private static Map<String, ModelAsset> extractAssetNodes(Manifest manifest) {
+        if (manifest == null) {
             return Map.of();
         }
 
         String system = adapterType(manifest);
-        Map<String, ModelAsset> modelAssets = new HashMap<>();
+        Map<String, ModelAsset> assetNodes = new HashMap<>();
 
-        for (Map.Entry<String, Manifest.Node> entry : manifest.getNodes().entrySet()) {
-            Manifest.Node node = entry.getValue();
-            if (node == null || !RESOURCE_TYPE_MODEL.equalsIgnoreCase(node.getResourceType())) {
-                continue;
+        // Table-producing nodes (models, seeds, snapshots) from `nodes`.
+        if (manifest.getNodes() != null) {
+            for (Map.Entry<String, Manifest.Node> entry : manifest.getNodes().entrySet()) {
+                Manifest.Node node = entry.getValue();
+                if (node == null || node.getResourceType() == null || !PRODUCED_RESOURCE_TYPES.contains(lower(node.getResourceType()))) {
+                    continue;
+                }
+
+                String uniqueId = firstNonBlank(node.getUniqueId(), entry.getKey());
+                if (uniqueId == null) {
+                    continue;
+                }
+
+                String name = firstNonBlank(node.getAlias(), node.getName(), uniqueId);
+                String assetId = assetIdFor(node.getDatabase(), node.getSchema(), name, uniqueId);
+
+                // Use parent_map from manifest (the canonical DAG) when available,
+                // falling back to node-level depends_on for older manifests.
+                List<String> dependsOn;
+                if (manifest.getParentMap() != null && manifest.getParentMap().containsKey(uniqueId)) {
+                    dependsOn = manifest.getParentMap().get(uniqueId);
+                } else if (node.getDependsOn() != null) {
+                    dependsOn = node.getDependsOn().getOrDefault("nodes", List.of());
+                } else {
+                    dependsOn = List.of();
+                }
+
+                assetNodes.put(uniqueId, new ModelAsset(assetId, metadataFor(system, node.getDatabase(), node.getSchema(), name), dependsOn, lower(node.getResourceType())));
             }
-
-            String uniqueId = firstNonBlank(node.getUniqueId(), entry.getKey());
-            if (uniqueId == null) {
-                continue;
-            }
-
-            String name = firstNonBlank(node.getAlias(), node.getName(), uniqueId);
-            String assetId = assetIdFor(node.getDatabase(), node.getSchema(), name, uniqueId);
-
-            Map<String, Object> metadata = new HashMap<>();
-            if (hasValue(system))
-                metadata.put("system", system);
-            if (hasValue(node.getDatabase()))
-                metadata.put("database", node.getDatabase());
-            if (hasValue(node.getSchema()))
-                metadata.put("schema", node.getSchema());
-            if (hasValue(name))
-                metadata.put("name", name);
-
-            // Use parent_map from manifest (the canonical DAG) when available,
-            // falling back to node-level depends_on for older manifests.
-            List<String> dependsOn;
-            if (manifest.getParentMap() != null && manifest.getParentMap().containsKey(uniqueId)) {
-                dependsOn = manifest.getParentMap().get(uniqueId);
-            } else if (node.getDependsOn() != null) {
-                dependsOn = node.getDependsOn().getOrDefault("nodes", List.of());
-            } else {
-                dependsOn = List.of();
-            }
-
-            modelAssets.put(uniqueId, new ModelAsset(assetId, metadata, dependsOn, List.of()));
         }
 
-        Map<String, ModelAsset> filtered = new HashMap<>(modelAssets.size());
-        for (Map.Entry<String, ModelAsset> e : modelAssets.entrySet()) {
+        // Sources (raw tables the project reads but does not build). Referenced as parents; no dependencies.
+        if (manifest.getSources() != null) {
+            for (Map.Entry<String, Manifest.Source> entry : manifest.getSources().entrySet()) {
+                Manifest.Source source = entry.getValue();
+                if (source == null) {
+                    continue;
+                }
+
+                String uniqueId = firstNonBlank(source.getUniqueId(), entry.getKey());
+                if (uniqueId == null) {
+                    continue;
+                }
+
+                // The physical table name is `identifier`; fall back to the dbt source name.
+                String name = firstNonBlank(source.getIdentifier(), source.getName(), uniqueId);
+                String assetId = assetIdFor(source.getDatabase(), source.getSchema(), name, uniqueId);
+
+                assetNodes.put(uniqueId, new ModelAsset(assetId, metadataFor(system, source.getDatabase(), source.getSchema(), name), List.of(), RESOURCE_TYPE_SOURCE));
+            }
+        }
+
+        // Keep only dependencies that resolve to a known asset node in this set.
+        Map<String, ModelAsset> resolved = new HashMap<>(assetNodes.size());
+        for (Map.Entry<String, ModelAsset> e : assetNodes.entrySet()) {
             ModelAsset a = e.getValue();
             List<String> deps = a.dependsOn() == null ? List.of()
                 : a.dependsOn().stream()
-                    .filter(modelAssets::containsKey)
+                    .filter(assetNodes::containsKey)
                     .toList();
-            filtered.put(e.getKey(), new ModelAsset(a.assetId(), a.metadata(), deps, List.of()));
+            resolved.put(e.getKey(), new ModelAsset(a.assetId(), a.metadata(), deps, a.resourceType()));
         }
 
-        // Compute reverse dependencies (children: models that depend on this one)
-        Map<String, List<String>> childrenMap = new HashMap<>();
-        for (Map.Entry<String, ModelAsset> e : filtered.entrySet()) {
-            for (String dep : e.getValue().dependsOn()) {
-                childrenMap.computeIfAbsent(dep, k -> new ArrayList<>()).add(e.getKey());
-            }
-        }
+        return resolved;
+    }
 
-        // Rebuild with children populated
-        Map<String, ModelAsset> result = new HashMap<>(filtered.size());
-        for (Map.Entry<String, ModelAsset> e : filtered.entrySet()) {
-            ModelAsset a = e.getValue();
-            List<String> children = childrenMap.getOrDefault(e.getKey(), List.of());
-            result.put(e.getKey(), new ModelAsset(a.assetId(), a.metadata(), a.dependsOn(), children));
+    private static Map<String, Object> metadataFor(String system, String database, String schema, String name) {
+        Map<String, Object> metadata = new HashMap<>();
+        if (hasValue(system)) {
+            metadata.put("system", system);
         }
+        if (hasValue(database)) {
+            metadata.put("database", database);
+        }
+        if (hasValue(schema)) {
+            metadata.put("schema", schema);
+        }
+        if (hasValue(name)) {
+            metadata.put("name", name);
+        }
+        return metadata;
+    }
 
-        return result;
+    private static String lower(String value) {
+        return value == null ? null : value.toLowerCase(Locale.ROOT);
     }
 
     private static String adapterType(Manifest manifest) {
@@ -373,6 +396,10 @@ public abstract class ResultParser {
         return value != null && !value.trim().isEmpty();
     }
 
-    private record ModelAsset(String assetId, Map<String, Object> metadata, List<String> dependsOn, List<String> children) {
+    private record ModelAsset(String assetId, Map<String, Object> metadata, List<String> dependsOn, String resourceType) {
+        // True for nodes dbt builds (models, seeds, snapshots), not read-only sources.
+        boolean produced() {
+            return PRODUCED_RESOURCE_TYPES.contains(resourceType);
+        }
     }
 }

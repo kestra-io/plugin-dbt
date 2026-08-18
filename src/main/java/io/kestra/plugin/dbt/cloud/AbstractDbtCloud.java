@@ -45,10 +45,22 @@ public abstract class AbstractDbtCloud extends Task {
         .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
         .registerModule(new JavaTimeModule());
 
-    @Schema(title = "Base URL to select the tenant")
+    // Legacy shared host. It no longer resolves tokens for regional-cell accounts, whose access URL
+    // instead follows ACCOUNT_PREFIX.REGION.dbt.com. Kept as the default for backward compatibility,
+    // but flagged on a 401 (see request()).
+    private static final String LEGACY_BASE_URL = "https://cloud.getdbt.com";
+
+    @Schema(
+        title = "Base URL to select the tenant",
+        description = """
+            The access URL for your dbt Cloud account. Regional and cell-based accounts use a URL \
+            of the form `ACCOUNT_PREFIX.REGION.dbt.com`, not the legacy `cloud.getdbt.com` host, \
+            which no longer resolves tokens for these accounts and returns a 401 error even with a \
+            valid token."""
+    )
     @NotNull
     @Builder.Default
-    Property<String> baseUrl = Property.ofValue("https://cloud.getdbt.com");
+    Property<String> baseUrl = Property.ofValue(LEGACY_BASE_URL);
 
     @Schema(
         title = "Numeric ID of the account",
@@ -106,6 +118,11 @@ public abstract class AbstractDbtCloud extends Task {
 
         var rMaxRetries = runContext.render(this.maxRetries).as(Integer.class).orElse(3);
         var rInitialDelay = runContext.render(this.initialDelayMs).as(Long.class).orElse(1000L);
+        // The legacy default is still valid for non-regional accounts, so it is not flagged up front.
+        // Only a genuine 401 against it is worth a hint, emitted in the catch below.
+        var usesLegacyBaseUrl = LEGACY_BASE_URL.equals(
+            runContext.render(this.baseUrl).as(String.class).orElse(LEGACY_BASE_URL)
+        );
 
         try (var client = new HttpClient(runContext, options)) {
             return RetryUtils.<HttpResponse<RES>, HttpClientException> of(
@@ -119,23 +136,41 @@ public abstract class AbstractDbtCloud extends Task {
                 (res, throwable) -> retryWhen.test(throwable, request.getMethod()),
                 () ->
                 {
-                    var response = client.request(request, String.class);
-                    // A success status with an empty body cannot be parsed. Throw rather than return a
-                    // null-bodied response: callers that expect a body (e.g. artifact download) fail loudly
-                    // instead of silently writing a "null" artifact, and the trigger POST sees an IOException,
-                    // which isAmbiguousFailure treats as ambiguous so it confirms the run it may have created.
-                    // readValue(null, ...) would itself throw an opaque IllegalArgumentException, so guard first.
-                    var body = response.getBody();
-                    if (body == null || body.isBlank()) {
-                        throw new IOException("Empty response body from dbt Cloud");
+                    try {
+                        var response = client.request(request, String.class);
+                        // A success status with an empty body cannot be parsed. Throw rather than return a
+                        // null-bodied response: callers that expect a body (e.g. artifact download) fail loudly
+                        // instead of silently writing a "null" artifact, and the trigger POST sees an IOException,
+                        // which isAmbiguousFailure treats as ambiguous so it confirms the run it may have created.
+                        // readValue(null, ...) would itself throw an opaque IllegalArgumentException, so guard first.
+                        var body = response.getBody();
+                        if (body == null || body.isBlank()) {
+                            throw new IOException("Empty response body from dbt Cloud");
+                        }
+                        var parsedResponse = MAPPER.readValue(body, responseType);
+                        return HttpResponse.<RES> builder()
+                            .request(request)
+                            .body(parsedResponse)
+                            .headers(response.getHeaders())
+                            .status(response.getStatus())
+                            .build();
+                    } catch (HttpClientResponseException e) {
+                        // A 401 against the legacy default host is almost always a wrong baseUrl, not a bad
+                        // token: the shared host no longer resolves tokens for regional and cell-based
+                        // accounts. Rethrow the same type with an enriched message so the failure itself
+                        // names baseUrl, keeping the original 401 as the cause. Other cases pass through.
+                        if (usesLegacyBaseUrl && e.getResponse().getStatus().getCode() == 401) {
+                            throw new HttpClientResponseException(
+                                "Received a 401 while using the legacy baseUrl default \"" + LEGACY_BASE_URL +
+                                    "\". This host no longer resolves tokens for regional and cell-based dbt " +
+                                    "Cloud accounts. Before checking the token, set baseUrl to your account's " +
+                                    "access URL (ACCOUNT_PREFIX.REGION.dbt.com). Original error: " + e.getMessage(),
+                                e.getResponse(),
+                                e
+                            );
+                        }
+                        throw e;
                     }
-                    var parsedResponse = MAPPER.readValue(body, responseType);
-                    return HttpResponse.<RES> builder()
-                        .request(request)
-                        .body(parsedResponse)
-                        .headers(response.getHeaders())
-                        .status(response.getStatus())
-                        .build();
                 }
             );
         }
