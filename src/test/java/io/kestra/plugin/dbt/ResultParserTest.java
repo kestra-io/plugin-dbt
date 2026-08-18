@@ -1,6 +1,8 @@
 package io.kestra.plugin.dbt;
 
 import java.nio.file.Files;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -13,6 +15,7 @@ import org.slf4j.event.Level;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.executions.LogEntry;
 import io.kestra.core.models.executions.TaskRun;
+import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.queues.QueueFactoryInterface;
 import io.kestra.core.queues.QueueInterface;
@@ -490,4 +493,64 @@ class ResultParserTest {
         var taskRun = TestsUtils.mockTaskRun(execution, task);
         return runContextFactory.of(flow, task, execution, taskRun, false);
     }
+
+    @Test
+    void parseRunResult_shouldNotFailOnANodeWithNoTimings() throws Exception {
+        var runContext = mockRunContext();
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        // dbt emits an empty `timing` for a node it never ran: a skipped model, or one that failed
+        // before it compiled. Its taskrun must still carry a usable state history.
+        Files.writeString(runResultsFile, """
+            {
+              "metadata": {
+                "dbt_version": "1.8.0",
+                "generated_at": "2024-01-01T00:00:10Z"
+              },
+              "results": [
+                {
+                  "status": "skipped",
+                  "message": null,
+                  "failures": null,
+                  "unique_id": "model.my_project.downstream",
+                  "execution_time": 0.0,
+                  "adapter_response": {},
+                  "timing": []
+                },
+                {
+                  "status": "success",
+                  "message": "CREATE VIEW",
+                  "failures": null,
+                  "unique_id": "model.my_project.stg_orders",
+                  "execution_time": 0.42,
+                  "adapter_response": {},
+                  "timing": [
+                    {"name": "compile", "started_at": "2024-01-01T00:00:00Z", "completed_at": "2024-01-01T00:00:01Z"},
+                    {"name": "execute", "started_at": "2024-01-01T00:00:01Z", "completed_at": "2024-01-01T00:00:02Z"}
+                  ]
+                }
+              ],
+              "elapsed_time": 1.23
+            }
+            """);
+
+        ResultParser.parseRunResult(runContext, runResultsFile.toFile(), null);
+
+        Map<String, TaskRun> byNode = runContext.dynamicWorkerResults().stream()
+            .map(WorkerTaskResult::getTaskRun)
+            .collect(Collectors.toMap(TaskRun::getTaskId, t -> t));
+        assertThat(byNode.keySet(), hasSize(2));
+
+        // the skipped node: reading its dates must not throw, and it is anchored on the run's generated_at
+        var skipped = byNode.get("model.my_project.downstream").getState();
+        assertThat(skipped.getCurrent(), is(State.Type.SKIPPED));
+        assertThat(skipped.getStartDate(), is(Instant.parse("2024-01-01T00:00:10Z")));
+        assertThat(skipped.getDuration(), is(java.util.Optional.of(Duration.ZERO)));
+
+        // the node dbt did run still reports dbt's own timings, not Kestra's materialization time
+        var ran = byNode.get("model.my_project.stg_orders").getState();
+        assertThat(ran.getStartDate(), is(Instant.parse("2024-01-01T00:00:00Z")));
+        assertThat(ran.getEndDate(), is(java.util.Optional.of(Instant.parse("2024-01-01T00:00:02Z"))));
+        assertThat(ran.getDuration(), is(java.util.Optional.of(Duration.ofSeconds(2))));
+    }
+
 }

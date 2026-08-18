@@ -62,6 +62,9 @@ public abstract class ResultParser {
 
         Map<String, ModelAsset> modelAssets = manifest == null ? Map.of() : extractAssetNodes(manifest);
 
+        // Anchor for nodes dbt never ran, which carry no timings of their own.
+        Instant generatedAt = result.getMetadata() == null ? null : result.getMetadata().getGeneratedAt();
+
         // Emit one dynamic taskrun per dbt model (the UI timeline "bars"), attaching that model's
         // own status/message/failures as logs riding with its taskrun so they render inline under
         // its bar instead of all landing on the parent task root (issue #276).
@@ -70,55 +73,9 @@ public abstract class ResultParser {
             .stream()
             .forEach(throwConsumer(r ->
             {
-                ArrayList<State.History> histories = new ArrayList<>();
-
-                // List of status are not safe and can be not present on api calls
-                r.getTiming()
-                    .stream()
-                    .mapToLong(timing -> timing.getStartedAt().toEpochMilli())
-                    .min()
-                    .ifPresent(value ->
-                    {
-                        histories.add(
-                            new State.History(
-                                State.Type.CREATED,
-                                Instant.ofEpochMilli(value)
-                            )
-                        );
-                    });
-
-                r.getTiming()
-                    .stream()
-                    .filter(timing -> timing.getName().equals("execute"))
-                    .mapToLong(timing -> timing.getStartedAt().toEpochMilli())
-                    .min()
-                    .ifPresent(value ->
-                    {
-                        histories.add(
-                            new State.History(
-                                State.Type.RUNNING,
-                                Instant.ofEpochMilli(value)
-                            )
-                        );
-                    });
-
-                r.getTiming()
-                    .stream()
-                    .mapToLong(timing -> timing.getCompletedAt().toEpochMilli())
-                    .max()
-                    .ifPresent(value ->
-                    {
-                        histories.add(
-                            new State.History(
-                                r.state(),
-                                Instant.ofEpochMilli(value)
-                            )
-                        );
-                    });
-
                 State state = State.of(
                     r.state(),
-                    histories
+                    historiesFor(r, generatedAt)
                 );
 
                 r.getAdapterResponse()
@@ -165,6 +122,57 @@ public abstract class ResultParser {
             }));
 
         return runContext.storage().putFile(file);
+    }
+
+    /**
+     * Build a model taskrun's state history from dbt's own timings, so the UI timeline shows when dbt ran
+     * the node rather than when Kestra materialized the taskrun.
+     *
+     * <p>
+     * dbt leaves {@code timing} empty for a node it never ran: a skipped model, or one that failed before
+     * it compiled. There is no per-node instant to use then, so the history is anchored on the run's
+     * {@code generated_at} and spans the node's {@code execution_time}, which is 0 for a skipped node.
+     * An empty history is not an option, since {@link State#getStartDate()} reads the first entry and
+     * throws on an empty one, taking the whole run down with it.
+     */
+    static List<State.History> historiesFor(RunResult.Result r, Instant generatedAt) {
+        List<RunResult.Timing> timings = r.getTiming() == null ? List.of() : r.getTiming();
+
+        ArrayList<State.History> histories = new ArrayList<>();
+
+        // The timings themselves are not safe either: they can be absent on api calls.
+        timings.stream()
+            .map(RunResult.Timing::getStartedAt)
+            .filter(Objects::nonNull)
+            .min(Instant::compareTo)
+            .ifPresent(value -> histories.add(new State.History(State.Type.CREATED, value)));
+
+        timings.stream()
+            .filter(timing -> "execute".equals(timing.getName()))
+            .map(RunResult.Timing::getStartedAt)
+            .filter(Objects::nonNull)
+            .min(Instant::compareTo)
+            .ifPresent(value -> histories.add(new State.History(State.Type.RUNNING, value)));
+
+        timings.stream()
+            .map(RunResult.Timing::getCompletedAt)
+            .filter(Objects::nonNull)
+            .max(Instant::compareTo)
+            .ifPresent(value -> histories.add(new State.History(r.state(), value)));
+
+        if (!histories.isEmpty()) {
+            return histories;
+        }
+
+        Instant end = generatedAt != null ? generatedAt : Instant.now();
+        long executionMillis = r.getExecutionTime() == null ? 0L : Math.round(r.getExecutionTime() * 1000);
+        Instant start = end.minusMillis(executionMillis);
+
+        return List.of(
+            new State.History(State.Type.CREATED, start),
+            new State.History(State.Type.RUNNING, start),
+            new State.History(r.state(), end)
+        );
     }
 
     /**

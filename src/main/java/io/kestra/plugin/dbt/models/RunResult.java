@@ -18,10 +18,22 @@ import lombok.extern.jackson.Jacksonized;
 public class RunResult {
     List<Result> results;
 
+    Metadata metadata;
+
     @JsonProperty("elapsed_time")
     Double elapsedTime;
 
     Map<String, Object> args;
+
+    @Value
+    @Jacksonized
+    @SuperBuilder
+    public static class Metadata {
+        // When dbt wrote run_results.json. Used as the anchor for a node dbt never ran, which carries
+        // no timings of its own.
+        @JsonProperty("generated_at")
+        Instant generatedAt;
+    }
 
     @Value
     @Jacksonized
