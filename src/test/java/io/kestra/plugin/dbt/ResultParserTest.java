@@ -328,6 +328,110 @@ class ResultParserTest {
     }
 
     @Test
+    void parseManifestWithAssets_shouldIgnoreUnknownDependsOnKeys() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        // dbt adds keys under `depends_on` between manifest schema versions. `nodes_with_ref_location`
+        // holds arrays, not strings: reading it must not break lineage for the keys we do use.
+        Files.writeString(manifestFile, """
+            {
+              "metadata": {
+                "adapter_type": "postgres"
+              },
+              "nodes": {
+                "model.analytics.parent": {
+                  "resource_type": "model",
+                  "database": "analytics",
+                  "schema": "marts",
+                  "name": "parent",
+                  "unique_id": "model.analytics.parent",
+                  "depends_on": {
+                    "macros": [],
+                    "nodes": [],
+                    "nodes_with_ref_location": []
+                  }
+                },
+                "model.analytics.child": {
+                  "resource_type": "model",
+                  "database": "analytics",
+                  "schema": "marts",
+                  "name": "child",
+                  "unique_id": "model.analytics.child",
+                  "depends_on": {
+                    "macros": [],
+                    "nodes": ["model.analytics.parent"],
+                    "nodes_with_ref_location": [
+                      ["model.analytics.parent", {"file": "models/child.sql", "line": 3}]
+                    ]
+                  }
+                }
+              }
+            }
+            """);
+
+        var manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile());
+
+        assertThat(manifestResult.manifest(), is(notNullValue()));
+        assertThat(runContext.assets().emitted(), hasSize(2));
+
+        // depends_on.nodes is still read (no parent_map here), so the edge survives the unknown key.
+        var childEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.child");
+        assertThat(childEmit, is(notNullValue()));
+        assertThat(childEmit.inputs(), hasSize(1));
+        assertThat(childEmit.inputs().getFirst().id(), is("analytics.marts.parent"));
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldStoreTheManifestFileUntouched() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        // The Manifest POJO drops keys it does not declare. The stored artifact must not: it is the
+        // file users download, so it has to stay byte-for-byte what dbt wrote.
+        var original = """
+            {
+              "nodes": {
+                "model.p.child": {
+                  "unique_id": "model.p.child",
+                  "resource_type": "model",
+                  "database": "db",
+                  "schema": "s",
+                  "name": "child",
+                  "depends_on": {
+                    "nodes": ["model.p.parent"],
+                    "nodes_with_ref_location": [["model.p.parent", {"file": "models/child.sql", "line": 3}]],
+                    "some_future_key": ["anything"]
+                  }
+                }
+              }
+            }
+            """;
+        Files.writeString(manifestFile, original);
+
+        var manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile());
+
+        // putFile stores a copy and deletes the local file, so read it back from internal storage:
+        // the bytes must be what dbt wrote, undeclared keys and all.
+        var stored = new String(runContext.storage().getFile(manifestResult.uri()).readAllBytes());
+        assertThat(stored, is(original));
+        assertThat(stored, containsString("nodes_with_ref_location"));
+        assertThat(stored, containsString("some_future_key"));
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldStoreManifestWhenItCannotBeRead() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        // An unreadable manifest is metadata we lose, not a reason to fail a dbt run that succeeded.
+        Files.writeString(manifestFile, "{ this is not json");
+
+        var manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile());
+
+        assertThat(manifestResult.manifest(), is(nullValue()));
+        assertThat(manifestResult.uri(), is(notNullValue()));
+        assertThat(runContext.assets().emitted(), hasSize(0));
+    }
+
+    @Test
     void parseRunResult_shouldEmitModelLogsUnderDynamicTaskRuns() throws Exception {
         var runContext = mockRunContext();
         var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");

@@ -49,8 +49,19 @@ public abstract class ResultParser {
     }
 
     public static ManifestResult parseManifestWithAssets(RunContext runContext, File file) throws IOException, IllegalVariableEvaluationException {
-        Manifest manifest = MAPPER.readValue(file, Manifest.class);
-        emitAssets(runContext, manifest);
+        Manifest manifest = null;
+
+        // Asset lineage is metadata about the run, not the run itself. dbt adds fields to the
+        // manifest between schema versions, so a manifest this plugin cannot map must not turn a
+        // successful dbt run into a failed task. Store the raw file and carry on without assets.
+        try {
+            manifest = MAPPER.readValue(file, Manifest.class);
+            emitAssets(runContext, manifest);
+        } catch (Exception e) {
+            manifest = null;
+            runContext.logger().warn("Unable to read the dbt manifest, assets will not be emitted. The manifest is still stored as an output file.", e);
+        }
+
         return new ManifestResult(manifest, runContext.storage().putFile(file));
     }
 
@@ -289,8 +300,8 @@ public abstract class ResultParser {
                 List<String> dependsOn;
                 if (manifest.getParentMap() != null && manifest.getParentMap().containsKey(uniqueId)) {
                     dependsOn = manifest.getParentMap().get(uniqueId);
-                } else if (node.getDependsOn() != null) {
-                    dependsOn = node.getDependsOn().getOrDefault("nodes", List.of());
+                } else if (node.getDependsOn() != null && node.getDependsOn().getNodes() != null) {
+                    dependsOn = node.getDependsOn().getNodes();
                 } else {
                     dependsOn = List.of();
                 }
