@@ -481,7 +481,9 @@ class ResultParserTest {
         assertThat(modelTaskRunIds, hasSize(2));
         assertThat(modelTaskRunIds, not(hasItem(parentTaskRunId)));
 
-        TestsUtils.awaitLog(logs, l -> l.getTaskRunId() != null && modelTaskRunIds.contains(l.getTaskRunId()));
+        // 2.0 has no Flux to drain, so wait for each line asserted below before snapshotting.
+        TestsUtils.awaitLog(logs, l -> isModelLog(l, modelTaskRunIds, "success"));
+        TestsUtils.awaitLog(logs, l -> isModelLog(l, modelTaskRunIds, "Database Error"));
 
         List<LogEntry> modelLogs = List.copyOf(logs).stream()
             .filter(l -> l.getTaskRunId() != null && modelTaskRunIds.contains(l.getTaskRunId()))
@@ -569,6 +571,13 @@ class ResultParserTest {
         TaskRun sourceTaskRun = byTaskId.get("source.analytics.raw.orders");
         assertThat(sourceTaskRun, is(notNullValue()));
         assertThat(sourceTaskRun.getAssetEmits(), is(nullValue()));
+    }
+
+    private static boolean isModelLog(LogEntry log, Set<String> modelTaskRunIds, String messagePart) {
+        return log.getTaskRunId() != null
+            && modelTaskRunIds.contains(log.getTaskRunId())
+            && log.getMessage() != null
+            && log.getMessage().contains(messagePart);
     }
 
     private static AssetEmit findEmitWithOutput(List<AssetEmit> emitted, String outputId) {
