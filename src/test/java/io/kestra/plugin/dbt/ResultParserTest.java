@@ -12,17 +12,18 @@ import org.slf4j.event.Level;
 
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.executions.LogEntry;
+import io.kestra.core.models.executions.TaskRun;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.queues.DispatchQueueInterface;
 import io.kestra.core.runners.AssetEmit;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
+import io.kestra.core.runners.WorkerTaskResult;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
 import io.kestra.plugin.dbt.cli.DbtCLI;
 
 import jakarta.inject.Inject;
-import jakarta.inject.Named;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
@@ -34,6 +35,40 @@ class ResultParserTest {
 
     @Inject
     private DispatchQueueInterface<LogEntry> logQueue;
+
+    // One model reading one source, shared by the source-lineage tests.
+    private static final String SOURCE_MANIFEST_JSON = """
+        {
+          "metadata": {
+            "adapter_type": "postgres"
+          },
+          "nodes": {
+            "model.analytics.stg_orders": {
+              "resource_type": "model",
+              "database": "analytics",
+              "schema": "staging",
+              "name": "stg_orders",
+              "unique_id": "model.analytics.stg_orders",
+              "depends_on": {
+                "nodes": ["source.analytics.raw.orders"]
+              }
+            }
+          },
+          "sources": {
+            "source.analytics.raw.orders": {
+              "database": "analytics",
+              "schema": "raw",
+              "name": "orders",
+              "identifier": "orders",
+              "resource_type": "source",
+              "unique_id": "source.analytics.raw.orders"
+            }
+          },
+          "parent_map": {
+            "model.analytics.stg_orders": ["source.analytics.raw.orders"]
+          }
+        }
+        """;
 
     @Test
     void parseManifestWithAssets_shouldEmitModelAssets() throws Exception {
@@ -82,23 +117,28 @@ class ResultParserTest {
         assertThat(manifestResult.manifest(), is(notNullValue()));
         assertThat(runContext.assets().emitted(), hasSize(2));
 
-        // stg_orders has no inputs and 1 output (fct_orders, its child)
-        // fct_orders has 1 input (stg_orders) and no outputs (leaf node)
-        var stgOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.fct_orders");
+        // Each model emits one bundle: {its parents} -> {the model itself}.
+        // stg_orders: no parents, output is stg_orders.
+        var stgOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.staging.stg_orders");
         assertThat("stg_orders emission should exist", stgOrdersEmit, is(notNullValue()));
         assertThat(stgOrdersEmit.inputs(), hasSize(0));
         assertThat(stgOrdersEmit.outputs(), hasSize(1));
 
-        var fctOrdersOutput = stgOrdersEmit.outputs().getFirst();
-        assertThat(fctOrdersOutput.getMetadata().get("system"), is("postgres"));
-        assertThat(fctOrdersOutput.getMetadata().get("database"), is("analytics"));
-        assertThat(fctOrdersOutput.getMetadata().get("schema"), is("marts"));
-        assertThat(fctOrdersOutput.getMetadata().get("name"), is("fct_orders"));
+        var stgOrdersOutput = stgOrdersEmit.outputs().getFirst();
+        assertThat(stgOrdersOutput.getMetadata().get("system"), is("postgres"));
+        assertThat(stgOrdersOutput.getMetadata().get("database"), is("analytics"));
+        assertThat(stgOrdersOutput.getMetadata().get("schema"), is("staging"));
+        assertThat(stgOrdersOutput.getMetadata().get("name"), is("stg_orders"));
 
-        var fctOrdersEmit = findEmitWithInput(runContext.assets().emitted(), "analytics.staging.stg_orders");
+        // fct_orders: parent stg_orders -> model fct_orders.
+        var fctOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.fct_orders");
         assertThat("fct_orders emission should exist", fctOrdersEmit, is(notNullValue()));
         assertThat(fctOrdersEmit.inputs(), hasSize(1));
-        assertThat(fctOrdersEmit.outputs(), hasSize(0));
+        assertThat(fctOrdersEmit.inputs().getFirst().id(), is("analytics.staging.stg_orders"));
+        assertThat(fctOrdersEmit.outputs(), hasSize(1));
+
+        // Every event has exactly one output (the model), so nothing can cross-join downstream.
+        assertThat(runContext.assets().emitted().stream().allMatch(e -> e.outputs().size() == 1), is(true));
     }
 
     @Test
@@ -147,18 +187,18 @@ class ResultParserTest {
 
         assertThat(runContext.assets().emitted(), hasSize(2));
 
-        // my_first_dbt_model: no inputs, 1 output (my_second_dbt_model)
-        var firstModelEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.my_second_dbt_model");
+        // my_first_dbt_model: no parents, output is itself.
+        var firstModelEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.my_first_dbt_model");
         assertThat(firstModelEmit, is(notNullValue()));
         assertThat(firstModelEmit.inputs(), hasSize(0));
         assertThat(firstModelEmit.outputs(), hasSize(1));
 
-        // my_second_dbt_model: 1 input (my_first_dbt_model), no outputs (leaf)
-        var secondModelEmit = findEmitWithInput(runContext.assets().emitted(), "analytics.marts.my_first_dbt_model");
+        // my_second_dbt_model: parent my_first_dbt_model -> model my_second_dbt_model.
+        var secondModelEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.my_second_dbt_model");
         assertThat(secondModelEmit, is(notNullValue()));
         assertThat(secondModelEmit.inputs(), hasSize(1));
         assertThat(secondModelEmit.inputs().getFirst().id(), is("analytics.marts.my_first_dbt_model"));
-        assertThat(secondModelEmit.outputs(), hasSize(0));
+        assertThat(secondModelEmit.outputs(), hasSize(1));
     }
 
     @Test
@@ -216,32 +256,175 @@ class ResultParserTest {
 
         assertThat(runContext.assets().emitted(), hasSize(3));
 
-        // DAG: stg_orders → int_orders → fct_orders (parent_map, no transitive edges)
-        // Inputs = upstream deps, Outputs = downstream children
+        // DAG from parent_map (no transitive edges): stg_orders -> int_orders -> fct_orders.
+        // Each event is {parents} -> {the model itself}, one output per event.
 
-        // stg_orders: no model inputs (source filtered out), 1 output (int_orders)
-        var stgOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "dev.intermediate.int_orders");
+        // stg_orders: its only parent is a source that this manifest never defines in `sources`,
+        // so it is dropped, leaving stg_orders with no resolvable inputs.
+        var stgOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "dev.staging.stg_orders");
         assertThat(stgOrdersEmit, is(notNullValue()));
         assertThat(stgOrdersEmit.inputs(), hasSize(0));
         assertThat(stgOrdersEmit.outputs(), hasSize(1));
 
-        // int_orders: 1 input (stg_orders), 1 output (fct_orders)
-        var intOrdersEmit = findEmitWithInputAndOutput(
-            runContext.assets().emitted(),
-            "dev.staging.stg_orders", "dev.marts.fct_orders"
-        );
+        // int_orders: parent stg_orders -> model int_orders.
+        var intOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "dev.intermediate.int_orders");
         assertThat(intOrdersEmit, is(notNullValue()));
         assertThat(intOrdersEmit.inputs(), hasSize(1));
         assertThat(intOrdersEmit.inputs().getFirst().id(), is("dev.staging.stg_orders"));
         assertThat(intOrdersEmit.outputs(), hasSize(1));
-        assertThat(intOrdersEmit.outputs().getFirst().getId(), is("dev.marts.fct_orders"));
 
-        // fct_orders: 1 input (int_orders only, from parent_map), no outputs (leaf)
-        var fctOrdersEmit = findEmitWithInput(runContext.assets().emitted(), "dev.intermediate.int_orders");
+        // fct_orders: parent int_orders only (parent_map is the direct DAG) -> model fct_orders.
+        var fctOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "dev.marts.fct_orders");
         assertThat(fctOrdersEmit, is(notNullValue()));
         assertThat(fctOrdersEmit.inputs(), hasSize(1));
         assertThat(fctOrdersEmit.inputs().getFirst().id(), is("dev.intermediate.int_orders"));
-        assertThat(fctOrdersEmit.outputs(), hasSize(0));
+        assertThat(fctOrdersEmit.outputs(), hasSize(1));
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldEmitModelToSourceEdges() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        Files.writeString(manifestFile, SOURCE_MANIFEST_JSON);
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile());
+
+        // Only the model is emitted (a source is never built, so it emits no event of its own),
+        // but the source is preserved as the model's input, giving a real source -> model edge.
+        assertThat(runContext.assets().emitted(), hasSize(1));
+
+        var stgOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.staging.stg_orders");
+        assertThat(stgOrdersEmit, is(notNullValue()));
+        assertThat(stgOrdersEmit.outputs(), hasSize(1));
+        assertThat(stgOrdersEmit.inputs(), hasSize(1));
+        // source assetId is database.schema.identifier
+        assertThat(stgOrdersEmit.inputs().getFirst().id(), is("analytics.raw.orders"));
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldSkipNodeWithMissingResourceType() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        // A node with no `resource_type` (partial/hand-edited manifest or dbt schema drift) must be skipped, not crash.
+        Files.writeString(manifestFile, """
+            {
+              "nodes": {
+                "model.p.good": {"unique_id": "model.p.good", "resource_type": "model", "database": "db", "schema": "s", "name": "good"},
+                "model.p.bad":  {"unique_id": "model.p.bad", "database": "db", "schema": "s", "name": "bad"}
+              },
+              "parent_map": {"model.p.good": [], "model.p.bad": []}
+            }
+            """);
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile());
+
+        // The node missing resource_type is skipped; only the valid model is emitted, no NPE.
+        assertThat(runContext.assets().emitted(), hasSize(1));
+        assertThat(findEmitWithOutput(runContext.assets().emitted(), "db.s.good"), is(notNullValue()));
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldIgnoreUnknownDependsOnKeys() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        // dbt adds keys under `depends_on` between manifest schema versions. `nodes_with_ref_location`
+        // holds arrays, not strings: reading it must not break lineage for the keys we do use.
+        Files.writeString(manifestFile, """
+            {
+              "metadata": {
+                "adapter_type": "postgres"
+              },
+              "nodes": {
+                "model.analytics.parent": {
+                  "resource_type": "model",
+                  "database": "analytics",
+                  "schema": "marts",
+                  "name": "parent",
+                  "unique_id": "model.analytics.parent",
+                  "depends_on": {
+                    "macros": [],
+                    "nodes": [],
+                    "nodes_with_ref_location": []
+                  }
+                },
+                "model.analytics.child": {
+                  "resource_type": "model",
+                  "database": "analytics",
+                  "schema": "marts",
+                  "name": "child",
+                  "unique_id": "model.analytics.child",
+                  "depends_on": {
+                    "macros": [],
+                    "nodes": ["model.analytics.parent"],
+                    "nodes_with_ref_location": [
+                      ["model.analytics.parent", {"file": "models/child.sql", "line": 3}]
+                    ]
+                  }
+                }
+              }
+            }
+            """);
+
+        var manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile());
+
+        assertThat(manifestResult.manifest(), is(notNullValue()));
+        assertThat(runContext.assets().emitted(), hasSize(2));
+
+        // depends_on.nodes is still read (no parent_map here), so the edge survives the unknown key.
+        var childEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.child");
+        assertThat(childEmit, is(notNullValue()));
+        assertThat(childEmit.inputs(), hasSize(1));
+        assertThat(childEmit.inputs().getFirst().id(), is("analytics.marts.parent"));
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldStoreTheManifestFileUntouched() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        // The Manifest POJO drops keys it does not declare. The stored artifact must not: it is the
+        // file users download, so it has to stay byte-for-byte what dbt wrote.
+        var original = """
+            {
+              "nodes": {
+                "model.p.child": {
+                  "unique_id": "model.p.child",
+                  "resource_type": "model",
+                  "database": "db",
+                  "schema": "s",
+                  "name": "child",
+                  "depends_on": {
+                    "nodes": ["model.p.parent"],
+                    "nodes_with_ref_location": [["model.p.parent", {"file": "models/child.sql", "line": 3}]],
+                    "some_future_key": ["anything"]
+                  }
+                }
+              }
+            }
+            """;
+        Files.writeString(manifestFile, original);
+
+        var manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile());
+
+        // putFile stores a copy and deletes the local file, so read it back from internal storage:
+        // the bytes must be what dbt wrote, undeclared keys and all.
+        var stored = new String(runContext.storage().getFile(manifestResult.uri()).readAllBytes());
+        assertThat(stored, is(original));
+        assertThat(stored, containsString("nodes_with_ref_location"));
+        assertThat(stored, containsString("some_future_key"));
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldStoreManifestWhenItCannotBeRead() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        // An unreadable manifest is metadata we lose, not a reason to fail a dbt run that succeeded.
+        Files.writeString(manifestFile, "{ this is not json");
+
+        var manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile());
+
+        assertThat(manifestResult.manifest(), is(nullValue()));
+        assertThat(manifestResult.uri(), is(notNullValue()));
+        assertThat(runContext.assets().emitted(), hasSize(0));
     }
 
     @Test
@@ -329,24 +512,67 @@ class ResultParserTest {
         assertThat(errorLogs.stream().anyMatch(l -> l.getMessage().contains("Database Error")), is(true));
     }
 
+    @Test
+    void parseRunResult_shouldAttachModelAssetsButNotClaimSourceAsOutput() throws Exception {
+        var runContext = mockRunContext();
+
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        Files.writeString(manifestFile, SOURCE_MANIFEST_JSON);
+        var manifest = ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile()).manifest();
+
+        // run_results with a `dbt source freshness` entry for the source alongside the model build.
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        Files.writeString(runResultsFile, """
+            {
+              "metadata": {"dbt_version": "1.8.0"},
+              "results": [
+                {
+                  "status": "pass",
+                  "unique_id": "source.analytics.raw.orders",
+                  "execution_time": 0.1,
+                  "adapter_response": {},
+                  "timing": [
+                    {"name": "execute", "started_at": "2024-01-01T00:00:00Z", "completed_at": "2024-01-01T00:00:01Z"}
+                  ]
+                },
+                {
+                  "status": "success",
+                  "unique_id": "model.analytics.stg_orders",
+                  "execution_time": 0.2,
+                  "adapter_response": {},
+                  "timing": [
+                    {"name": "execute", "started_at": "2024-01-01T00:00:01Z", "completed_at": "2024-01-01T00:00:02Z"}
+                  ]
+                }
+              ],
+              "elapsed_time": 0.3
+            }
+            """);
+
+        ResultParser.parseRunResult(runContext, runResultsFile.toFile(), manifest);
+
+        Map<String, TaskRun> byTaskId = runContext.dynamicWorkerResults().stream()
+            .map(WorkerTaskResult::getTaskRun)
+            .collect(Collectors.toMap(TaskRun::getTaskId, tr -> tr));
+
+        // the model's dynamic taskrun carries {source} -> {the model itself}
+        TaskRun modelTaskRun = byTaskId.get("model.analytics.stg_orders");
+        assertThat(modelTaskRun, is(notNullValue()));
+        assertThat(modelTaskRun.getAssetEmits(), hasSize(1));
+        var modelBundle = modelTaskRun.getAssetEmits().getFirst();
+        assertThat(modelBundle.getOutputs(), hasSize(1));
+        assertThat(modelBundle.getOutputs().getFirst().getId(), is("analytics.staging.stg_orders"));
+        assertThat(modelBundle.getInputs(), hasSize(1));
+        assertThat(modelBundle.getInputs().getFirst().id(), is("analytics.raw.orders"));
+
+        // the source-freshness taskrun must NOT claim it produced the source table
+        TaskRun sourceTaskRun = byTaskId.get("source.analytics.raw.orders");
+        assertThat(sourceTaskRun, is(notNullValue()));
+        assertThat(sourceTaskRun.getAssetEmits(), is(nullValue()));
+    }
+
     private static AssetEmit findEmitWithOutput(List<AssetEmit> emitted, String outputId) {
         return emitted.stream()
-            .filter(e -> e.outputs().stream().anyMatch(o -> o.getId().equals(outputId)))
-            .findFirst()
-            .orElse(null);
-    }
-
-    private static AssetEmit findEmitWithInput(List<AssetEmit> emitted, String inputId) {
-        return emitted.stream()
-            .filter(e -> e.inputs().stream().anyMatch(i -> i.id().equals(inputId)))
-            .filter(e -> e.outputs().isEmpty())
-            .findFirst()
-            .orElse(null);
-    }
-
-    private static AssetEmit findEmitWithInputAndOutput(List<AssetEmit> emitted, String inputId, String outputId) {
-        return emitted.stream()
-            .filter(e -> e.inputs().stream().anyMatch(i -> i.id().equals(inputId)))
             .filter(e -> e.outputs().stream().anyMatch(o -> o.getId().equals(outputId)))
             .findFirst()
             .orElse(null);

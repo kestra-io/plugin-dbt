@@ -18,6 +18,7 @@ import io.kestra.core.http.client.HttpClientException;
 import io.kestra.core.http.client.HttpClientResponseException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
+import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
@@ -40,7 +41,6 @@ import lombok.experimental.SuperBuilder;
 
 import static io.kestra.core.utils.Rethrow.throwSupplier;
 import static java.lang.Math.max;
-import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -71,9 +71,9 @@ import io.kestra.core.models.annotations.PluginProperty;
 )
 public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckStatus.Output> {
     private static final Set<JobStatus> ENDED_STATUS = Set.of(
-        JobStatus.NUMBER_10,  // Success
-        JobStatus.NUMBER_20,  // Error
-        JobStatus.NUMBER_30   // Cancelled
+        JobStatus.NUMBER_10, // Success
+        JobStatus.NUMBER_20, // Error
+        JobStatus.NUMBER_30 // Cancelled
     );
 
     @Schema(
@@ -170,39 +170,52 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         // final response
         logSteps(logger, finalRunResponse);
 
-        if (!isSuccessful(finalRunResponse.getData())) {
+        boolean successful = isSuccessful(finalRunResponse.getData());
+
+        // Download and parse artifacts before failing on a non-successful run: dbt Cloud saves
+        // run_results.json for failed runs too, and parseRunResult is what emits the per-model
+        // dynamic taskruns/logs (issue #315) — those must land even though the task ends up throwing.
+        URI runResultsUri = null;
+        URI manifestUri = null;
+        try {
+            // Artifacts are uploaded asynchronously by dbt Cloud and manifest.json is absent for some
+            // run shapes (e.g. dbt source freshness). Tolerate 404 so a legitimate success is not
+            // reported as a failure.
+            Path runResultsArtifact = downloadArtifacts(runContext, runIdRendered, "run_results.json", RunResult.class);
+            Path manifestArtifact = downloadArtifacts(runContext, runIdRendered, "manifest.json", ManifestArtifact.class);
+
+            io.kestra.plugin.dbt.models.Manifest manifest = null;
+            if (manifestArtifact != null) {
+                ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestArtifact.toFile());
+                manifest = manifestResult.manifest();
+                manifestUri = manifestResult.uri();
+            }
+
+            if (runResultsArtifact != null) {
+                if (runContext.render(this.parseRunResults).as(Boolean.class).orElse(false)) {
+                    runResultsUri = ResultParser.parseRunResult(runContext, runResultsArtifact.toFile(), manifest);
+                } else {
+                    runResultsUri = runContext.storage().putFile(runResultsArtifact.toFile());
+                }
+            }
+        } catch (Exception e) {
+            if (successful) {
+                // On a successful run, a broken artifact download/parse is the only failure and must surface.
+                throw e;
+            }
+            logger.warn("Unable to download or parse artifacts for failed run '{}': {}", runIdRendered, e.getMessage(), e);
+        }
+
+        if (!successful) {
             throw new Exception(
                 "Failed run with status '" + finalRunResponse.getData().getStatusHumanized() +
                     "' after " + finalRunResponse.getData().getDurationHumanized() +
                     (finalRunResponse.getData().getStatusMessage() != null
                         ? ": " + finalRunResponse.getData().getStatusMessage()
-                        : "") +
+                        : "")
+                    +
                     ": " + finalRunResponse
             );
-        }
-
-        // Artifacts are uploaded asynchronously by dbt Cloud and manifest.json is absent for some
-        // run shapes (e.g. dbt source freshness). Tolerate 404 so a legitimate success is not
-        // reported as a failure.
-        Path runResultsArtifact = downloadArtifacts(runContext, runIdRendered, "run_results.json", RunResult.class);
-        Path manifestArtifact = downloadArtifacts(runContext, runIdRendered, "manifest.json", ManifestArtifact.class);
-
-        io.kestra.plugin.dbt.models.Manifest manifest = null;
-        URI manifestUri = null;
-        if (manifestArtifact != null) {
-            ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestArtifact.toFile());
-            manifest = manifestResult.manifest();
-            manifestUri = manifestResult.uri();
-        }
-
-        URI runResultsUri = null;
-
-        if (runResultsArtifact != null) {
-            if (runContext.render(this.parseRunResults).as(Boolean.class).orElse(false)) {
-                runResultsUri = ResultParser.parseRunResult(runContext, runResultsArtifact.toFile(), manifest);
-            } else {
-                runResultsUri = runContext.storage().putFile(runResultsArtifact.toFile());
-            }
         }
 
         return Output.builder()

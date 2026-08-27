@@ -48,77 +48,64 @@ class RunnerTest {
         assertThat("should emit exactly 8 model assets", allEmitted, hasSize(8));
 
         /*
-         * Expected lineage (inputs = upstream deps, outputs = downstream children):
+         * Each model emits one bundle: {its direct parents} -> {the model itself}. The model is the
+         * single output, so no downstream cartesian join is possible. Expected edges:
          *
-         * stg_customers: inputs=[] outputs=[int_customer_orders]
-         * stg_orders: inputs=[] outputs=[int_customer_orders, int_order_payments, int_daily_revenue]
-         * stg_payments: inputs=[] outputs=[int_order_payments, int_daily_revenue]
-         * int_customer_orders: inputs=[stg_customers, stg_orders] outputs=[fct_customer_summary]
-         * int_order_payments: inputs=[stg_orders, stg_payments] outputs=[fct_customer_summary]
-         * int_daily_revenue: inputs=[stg_orders, stg_payments] outputs=[fct_revenue_by_customer]
-         * fct_customer_summary: inputs=[int_customer_orders, int_order_payments] outputs=[fct_revenue_by_customer]
-         * fct_revenue_by_customer: inputs=[fct_customer_summary, int_daily_revenue] outputs=[]
+         * stg_customers parents=[] -> stg_customers
+         * stg_orders parents=[] -> stg_orders
+         * stg_payments parents=[] -> stg_payments
+         * int_customer_orders parents=[stg_customers, stg_orders] -> int_customer_orders
+         * int_order_payments parents=[stg_orders, stg_payments] -> int_order_payments
+         * int_daily_revenue parents=[stg_orders, stg_payments] -> int_daily_revenue
+         * fct_customer_summary parents=[int_customer_orders, int_order_payments] -> fct_customer_summary
+         * fct_revenue_by_customer parents=[fct_customer_summary, int_daily_revenue] -> fct_revenue_by_customer
          */
 
-        // Staging models: no inputs, outputs are the intermediate models they feed
-        assertEmission(
-            allEmitted, "stg_customers",
-            List.of(),
-            List.of("memory.main.int_customer_orders")
-        );
-        assertEmission(
-            allEmitted, "stg_orders",
-            List.of(),
-            List.of("memory.main.int_customer_orders", "memory.main.int_order_payments", "memory.main.int_daily_revenue")
-        );
-        assertEmission(
-            allEmitted, "stg_payments",
-            List.of(),
-            List.of("memory.main.int_order_payments", "memory.main.int_daily_revenue")
-        );
+        // Every event has exactly one output (the model itself).
+        assertThat(allEmitted.stream().allMatch(e -> e.outputs().size() == 1), is(true));
 
-        // Intermediate models: inputs from staging, outputs to marts
+        // Staging models: no parents.
+        assertEmission(allEmitted, "stg_customers", List.of());
+        assertEmission(allEmitted, "stg_orders", List.of());
+        assertEmission(allEmitted, "stg_payments", List.of());
+
+        // Intermediate models: parents are the staging models they read.
         assertEmission(
             allEmitted, "int_customer_orders",
-            List.of("memory.main.stg_customers", "memory.main.stg_orders"),
-            List.of("memory.main.fct_customer_summary")
+            List.of("memory.main.stg_customers", "memory.main.stg_orders")
         );
         assertEmission(
             allEmitted, "int_order_payments",
-            List.of("memory.main.stg_orders", "memory.main.stg_payments"),
-            List.of("memory.main.fct_customer_summary")
+            List.of("memory.main.stg_orders", "memory.main.stg_payments")
         );
         assertEmission(
             allEmitted, "int_daily_revenue",
-            List.of("memory.main.stg_orders", "memory.main.stg_payments"),
-            List.of("memory.main.fct_revenue_by_customer")
+            List.of("memory.main.stg_orders", "memory.main.stg_payments")
         );
 
-        // Mart models
+        // Mart models: parents are the intermediate/mart models they read.
         assertEmission(
             allEmitted, "fct_customer_summary",
-            List.of("memory.main.int_customer_orders", "memory.main.int_order_payments"),
-            List.of("memory.main.fct_revenue_by_customer")
+            List.of("memory.main.int_customer_orders", "memory.main.int_order_payments")
         );
         assertEmission(
             allEmitted, "fct_revenue_by_customer",
-            List.of("memory.main.fct_customer_summary", "memory.main.int_daily_revenue"),
-            List.of()
+            List.of("memory.main.fct_customer_summary", "memory.main.int_daily_revenue")
         );
     }
 
     /**
-     * Find the emission matching the expected inputs and outputs, then verify it.
+     * Assert exactly one emission exists whose single output is the given model and whose inputs are
+     * exactly the given parents.
      */
-    private static void assertEmission(List<AssetEmit> allEmitted, String modelName,
-        List<String> expectedInputIds, List<String> expectedOutputIds) {
-        // Find emission by matching expected inputs size and expected outputs
+    private static void assertEmission(List<AssetEmit> allEmitted, String modelName, List<String> expectedInputIds) {
+        String outputId = "memory.main." + modelName;
         AssetEmit matched = allEmitted.stream()
             .filter(emit ->
             {
-                Set<String> inputs = emit.inputs().stream().map(AssetIdentifier::id).collect(Collectors.toSet());
                 Set<String> outputs = emit.outputs().stream().map(Asset::getId).collect(Collectors.toSet());
-                return inputs.equals(Set.copyOf(expectedInputIds)) && outputs.equals(Set.copyOf(expectedOutputIds));
+                Set<String> inputs = emit.inputs().stream().map(AssetIdentifier::id).collect(Collectors.toSet());
+                return outputs.equals(Set.of(outputId)) && inputs.equals(Set.copyOf(expectedInputIds));
             })
             .findFirst()
             .orElse(null);
