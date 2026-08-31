@@ -15,6 +15,8 @@ import java.util.stream.Stream;
 
 import org.slf4j.Logger;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.client.HttpClientException;
@@ -106,23 +108,30 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     );
 
     // Prefix for the already-processed watermark, so the key is recognisable in the namespace KV UI.
-    private static final String PROCESSED_KEY_PREFIX = "dbt-cloud-last-run_";
+    private static final String PROCESSED_KEY_PREFIX = "dbt-cloud-last-run";
 
-    // KV keys allow alphanumerics, dots, underscores and hyphens only.
-    private static final Pattern UNSAFE_KEY_CHARS = Pattern.compile("[^a-zA-Z0-9._-]");
+    // Separator between the parts of that key. Dots are stripped from every part below, so a part can
+    // never contain one: without that, flow "a_b" + task "c" and flow "a" + task "b_c" would collide.
+    private static final String PROCESSED_KEY_SEPARATOR = ".";
+
+    // KV keys allow alphanumerics, dots, underscores and hyphens. Dots are excluded here because they
+    // are the separator.
+    private static final Pattern UNSAFE_KEY_CHARS = Pattern.compile("[^a-zA-Z0-9_-]");
 
     @Schema(
         title = "Run ID",
-        description = "dbt Cloud run identifier to monitor. Mutually exclusive with `jobId`."
+        description = "dbt Cloud run identifier to monitor. Mutually exclusive with `jobId` and `environmentId`."
     )
+    @PluginProperty(group = "main")
     Property<String> runId;
 
     @Schema(
         title = "Job ID",
         description = "dbt Cloud job identifier. Reads that job's most recent finished run instead of a run this flow started, "
             + "so lineage can be refreshed for runs triggered outside Kestra. Pair with `failOnUnsuccessful: false` when the "
-            + "resolved run may have failed. Mutually exclusive with `runId`."
+            + "resolved run may have failed. Mutually exclusive with `runId` and `environmentId`."
     )
+    @PluginProperty(group = "main")
     Property<String> jobId;
 
     @Schema(
@@ -132,9 +141,11 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             + "means any run in the environment refreshes the full lineage graph and several jobs give more chances at a "
             + "fresh one than a single job does. Mutually exclusive with `runId` and `jobId`."
     )
+    @PluginProperty(group = "main")
     Property<String> environmentId;
 
     @AssertTrue(message = "Exactly one of 'runId', 'jobId' or 'environmentId' must be provided.")
+    @JsonIgnore
     public boolean isValidRunSelector() {
         return Stream.of(runId, jobId, environmentId).filter(Objects::nonNull).count() == 1;
     }
@@ -166,7 +177,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         title = "Fail if the run ends in a non-successful state",
         description = "When true (default), a run ending in `Error` or `Cancelled` raises a task failure. "
             + "Set to false to read a finished run without failing the task, which a scheduled lineage refresh needs "
-            + "since it does not own the run it reads."
+            + "since it does not own the run it reads. Left true, a `jobId` or `environmentId` refresh fails once for a "
+            + "given failed run and then skips it, rather than failing on every tick."
     )
     @PluginProperty(group = "reliability")
     Property<Boolean> failOnUnsuccessful = Property.ofValue(Boolean.TRUE);
@@ -182,6 +194,11 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     @Override
     public CheckStatus.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
+
+        // One monitoring session per invocation. The dedup guard makes repeated run() calls on a single
+        // instance a designed-for path, and carrying these over would suppress a later run's status logs.
+        this.loggedStatus = new ArrayList<>();
+        this.loggedSteps = new HashMap<>();
 
         Long runIdRendered = resolveRunId(runContext);
 
@@ -253,6 +270,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         // dynamic taskruns/logs (issue #315) — those must land even though the task ends up throwing.
         URI runResultsUri = null;
         URI manifestUri = null;
+        boolean artifactsProcessed = false;
         try {
             // Artifacts are uploaded asynchronously by dbt Cloud and manifest.json is absent for some
             // run shapes (e.g. dbt source freshness). Tolerate 404 so a legitimate success is not
@@ -274,12 +292,22 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                     runResultsUri = runContext.storage().putFile(runResultsArtifact.toFile());
                 }
             }
+
+            artifactsProcessed = true;
         } catch (Exception e) {
             if (successful) {
                 // On a successful run, a broken artifact download/parse is the only failure and must surface.
                 throw e;
             }
             logger.warn("Unable to download or parse artifacts for failed run '{}': {}", runIdRendered, e.getMessage(), e);
+        }
+
+        // Recorded here, before the failure throw below, because the lineage for this run has already been
+        // emitted: a later execution resolving the same failed run must not emit it a second time. Gated on
+        // the artifact block completing, so a transient download or parse error is retried on the next
+        // execution instead of being skipped forever.
+        if (artifactsProcessed) {
+            rememberProcessed(runContext, processedKey, runIdRendered);
         }
 
         if (!successful) {
@@ -299,10 +327,6 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             // normally leaves the caller the run's data without failing a run this task does not own.
             logger.warn("{}", failure);
         }
-
-        // Recorded only once the artifacts are parsed and the lineage is emitted, so a failure part way
-        // through leaves no watermark and the next execution redoes the run instead of skipping it.
-        rememberProcessed(runContext, processedKey, runIdRendered);
 
         return Output.builder()
             .runId(runIdRendered)
@@ -405,11 +429,14 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
             RunSelector selector = runSelector(runContext);
 
-            return PROCESSED_KEY_PREFIX
-                + safeKeyPart(flowInfo.id())
-                + "_" + safeKeyPart(this.getId())
-                + "_" + safeKeyPart(selector.queryParam())
-                + "_" + safeKeyPart(selector.value());
+            return String.join(
+                PROCESSED_KEY_SEPARATOR,
+                PROCESSED_KEY_PREFIX,
+                safeKeyPart(flowInfo.id()),
+                safeKeyPart(this.getId()),
+                safeKeyPart(selector.queryParam()),
+                safeKeyPart(selector.value())
+            );
         } catch (Exception e) {
             // No flow context (or an unrenderable property) only means the guard cannot be scoped. Doing
             // the work again is the safe outcome, so fall through rather than failing the refresh.

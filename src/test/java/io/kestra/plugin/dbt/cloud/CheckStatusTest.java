@@ -1141,6 +1141,46 @@ class CheckStatusTest {
         assertThat(checkStatus.run(runContext).isSkipped(), is(false));
     }
 
+    /**
+     * Issue #318 acceptance: repeated refreshes must not accumulate duplicate lineage events. A failed
+     * run with failOnUnsuccessful left at its default still emits lineage before throwing, so the
+     * watermark has to be recorded even though the task fails. Otherwise every tick re-emits the same
+     * lineage for a run that has not changed.
+     */
+    @Test
+    void shouldRecordWatermarkForAFailedRunSoLineageIsNotReEmittedEveryTick() throws Exception {
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .withQueryParam("job_definition_id", equalTo("4328"))
+                .willReturn(okJson("""
+                        {
+                          "data": [
+                            {
+                              "id": 7795,
+                              "status": 20,
+                              "status_humanized": "Error",
+                              "finished_at": "2026-08-31 06:00:00.000000+00:00"
+                            }
+                          ]
+                        }
+                    """))
+        );
+        stubFinishedRun(7795, 20, "Error");
+
+        // failOnUnsuccessful deliberately left at its default of true.
+        CheckStatus checkStatus = refresherFor("4328").build();
+        RunContext runContext = mockRunContext(checkStatus);
+
+        // First tick reports the failed run.
+        var ex = assertThrows(Exception.class, () -> checkStatus.run(runContext));
+        assertThat(ex.getMessage(), containsString("Error"));
+
+        // Second tick skips it: the lineage was already emitted, so it must not be emitted again.
+        CheckStatus.Output second = checkStatus.run(runContext);
+        assertThat(second.isSkipped(), is(true));
+        assertThat(second.getRunId(), is(7795L));
+    }
+
     private CheckStatus.CheckStatusBuilder<?, ?> refresherFor(String jobId) {
         return CheckStatus.builder()
             // Random per test run: the watermark is keyed on the task id and outlives the JVM.
