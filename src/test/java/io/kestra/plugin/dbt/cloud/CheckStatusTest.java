@@ -15,8 +15,7 @@ import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.executions.LogEntry;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
-import io.kestra.core.queues.QueueFactoryInterface;
-import io.kestra.core.queues.QueueInterface;
+import io.kestra.core.queues.DispatchQueueInterface;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.runners.WorkerTaskResult;
@@ -24,8 +23,6 @@ import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
 
 import jakarta.inject.Inject;
-import jakarta.inject.Named;
-import reactor.core.publisher.Flux;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -43,8 +40,7 @@ class CheckStatusTest {
     private RunContextFactory runContextFactory;
 
     @Inject
-    @Named(QueueFactoryInterface.WORKERTASKLOG_NAMED)
-    private QueueInterface<LogEntry> logQueue;
+    private DispatchQueueInterface<LogEntry> logQueue;
 
     @Test
     void run() throws Exception {
@@ -313,7 +309,7 @@ class CheckStatusTest {
         RunContext runContext = mockRunContext(checkStatus);
 
         List<LogEntry> logs = new CopyOnWriteArrayList<>();
-        Flux<LogEntry> receive = TestsUtils.receive(logQueue, l -> logs.add(l.getLeft()));
+        logQueue.addListener(logs::add);
 
         // The run failed — the task must still throw, carrying the same message as before the fix.
         var ex = assertThrows(Exception.class, () -> checkStatus.run(runContext));
@@ -329,7 +325,6 @@ class CheckStatusTest {
         // And its failure message must have been logged under that model's own dynamic taskrun.
         String modelTaskRunId = modelTaskRuns.getFirst().getTaskRun().getId();
         TestsUtils.awaitLog(logs, l -> l.getTaskRunId() != null && l.getTaskRunId().equals(modelTaskRunId));
-        receive.blockLast();
 
         assertThat(
             logs.stream().anyMatch(l -> modelTaskRunId.equals(l.getTaskRunId()) && l.getMessage().contains("Database Error")),
@@ -551,13 +546,12 @@ class CheckStatusTest {
         RunContext runContext = mockRunContext(checkStatus);
 
         List<LogEntry> logs = new CopyOnWriteArrayList<>();
-        Flux<LogEntry> receive = TestsUtils.receive(logQueue, l -> logs.add(l.getLeft()));
+        logQueue.addListener(logs::add);
 
         // Must not throw despite the debug=true follow-up fetch failing with a 400.
         CheckStatus.Output output = checkStatus.run(runContext);
 
         TestsUtils.awaitLog(logs, l -> l.getMessage() != null && l.getMessage().contains("polled step output"));
-        receive.blockLast();
 
         assertThat(output, is(notNullValue()));
         assertThat(
@@ -628,12 +622,11 @@ class CheckStatusTest {
         RunContext runContext = mockRunContext(checkStatus);
 
         List<LogEntry> logs = new CopyOnWriteArrayList<>();
-        Flux<LogEntry> receive = TestsUtils.receive(logQueue, l -> logs.add(l.getLeft()));
+        logQueue.addListener(logs::add);
 
         CheckStatus.Output output = checkStatus.run(runContext);
 
         TestsUtils.awaitLog(logs, l -> l.getMessage() != null && l.getMessage().contains("fuller debug tail"));
-        receive.blockLast();
 
         assertThat(output, is(notNullValue()));
         // The fuller content only exists in the debug=true response — its presence in logs proves

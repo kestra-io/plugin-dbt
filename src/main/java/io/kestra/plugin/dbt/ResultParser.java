@@ -163,7 +163,7 @@ public abstract class ResultParser {
                         )
                     );
                 if (assets != null) {
-                    taskRunBuilder.assets(assets);
+                    taskRunBuilder.assetEmits(List.of(assets));
                 }
 
                 // Register the dynamic taskrun together with its log lines in one call: the run

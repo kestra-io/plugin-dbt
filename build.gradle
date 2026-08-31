@@ -23,7 +23,7 @@ repositories {
     }
 }
 
-final targetJavaVersion = JavaVersion.VERSION_21
+final targetJavaVersion = JavaVersion.VERSION_25
 
 java {
     sourceCompatibility = targetJavaVersion
@@ -94,6 +94,7 @@ dependencies {
     testImplementation group: "io.kestra", name: "repository-memory", version: kestraVersion
     testImplementation group: "io.kestra", name: "runner-memory", version: kestraVersion
     testImplementation group: "io.kestra", name: "storage-local", version: kestraVersion
+    testImplementation group: "io.kestra", name: "indexer", version: kestraVersion
 
     // test
     testImplementation "org.junit.jupiter:junit-jupiter-engine"
