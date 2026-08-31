@@ -45,33 +45,77 @@ public abstract class ResultParser {
     // dbt node resource types that map to a physical table dbt builds.
     private static final Set<String> PRODUCED_RESOURCE_TYPES = Set.of(RESOURCE_TYPE_MODEL, RESOURCE_TYPE_SEED, RESOURCE_TYPE_SNAPSHOT);
 
-    public record ManifestResult(Manifest manifest, URI uri) {
+    /**
+     * @param fullyEmitted true when every asset this manifest describes was emitted, or when emission was
+     *        not asked for. False when an emit failed part way, so a caller that records
+     *        "this run is done" can tell that the lineage did not fully land.
+     * @param assetIds the asset ids this manifest describes, populated whether or not lineage was emitted.
+     */
+    public record ManifestResult(Manifest manifest, URI uri, boolean fullyEmitted, List<String> assetIds) {
     }
 
     public static ManifestResult parseManifestWithAssets(RunContext runContext, File file) throws IOException, IllegalVariableEvaluationException {
+        return parseManifestWithAssets(runContext, file, true);
+    }
+
+    /**
+     * Parses the manifest and, when {@code emitLineage} is true, emits one lineage event per node it
+     * describes. A caller that has already emitted for this exact dbt run passes false: the run's
+     * artifacts are immutable, so re-emitting would only append identical lineage events (issue #318).
+     * The asset ids are returned either way, so an execution that did not emit can still report what
+     * the run covers.
+     */
+    public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, boolean emitLineage)
+        throws IOException, IllegalVariableEvaluationException {
         Manifest manifest = null;
+        boolean fullyEmitted = true;
+        List<String> assetIds = List.of();
 
         // Asset lineage is metadata about the run, not the run itself. dbt adds fields to the
         // manifest between schema versions, so a manifest this plugin cannot map must not turn a
         // successful dbt run into a failed task. Store the raw file and carry on without assets.
         try {
             manifest = MAPPER.readValue(file, Manifest.class);
-            emitAssets(runContext, manifest);
+
+            Map<String, ModelAsset> assetNodes = extractAssetNodes(manifest);
+            assetIds = assetNodes.values().stream()
+                .filter(ModelAsset::produced)
+                .map(ModelAsset::assetId)
+                .sorted()
+                .toList();
+
+            if (emitLineage) {
+                fullyEmitted = emitAssets(runContext, assetNodes);
+            } else {
+                runContext.logger().debug("Lineage for this run was already emitted, skipping {} assets", assetIds.size());
+            }
         } catch (Exception e) {
             manifest = null;
+            // An unreadable manifest means nothing was emitted, so the run must not be recorded as done.
+            fullyEmitted = false;
             runContext.logger().warn("Unable to read the dbt manifest, assets will not be emitted. The manifest is still stored as an output file.", e);
         }
 
-        return new ManifestResult(manifest, runContext.storage().putFile(file));
+        return new ManifestResult(manifest, runContext.storage().putFile(file), fullyEmitted, assetIds);
     }
 
     public static URI parseRunResult(RunContext runContext, File file, Manifest manifest) throws IOException, IllegalVariableEvaluationException {
+        return parseRunResult(runContext, file, manifest, true);
+    }
+
+    /**
+     * When {@code attachAssets} is false the per-model taskruns are still emitted, without their asset
+     * links: a taskrun's assets become lineage events too, so a caller that has already emitted for this
+     * run has to suppress both paths or the duplicates simply move (issue #318).
+     */
+    public static URI parseRunResult(RunContext runContext, File file, Manifest manifest, boolean attachAssets)
+        throws IOException, IllegalVariableEvaluationException {
         RunResult result = MAPPER.readValue(
             file,
             RunResult.class
         );
 
-        Map<String, ModelAsset> modelAssets = manifest == null ? Map.of() : extractAssetNodes(manifest);
+        Map<String, ModelAsset> modelAssets = (manifest == null || !attachAssets) ? Map.of() : extractAssetNodes(manifest);
 
         // Emit one dynamic taskrun per dbt model (the UI timeline "bars"), attaching that model's
         // own status/message/failures as logs riding with its taskrun so they render inline under
@@ -163,7 +207,7 @@ public abstract class ResultParser {
                         )
                     );
                 if (assets != null) {
-                    taskRunBuilder.assets(assets);
+                    taskRunBuilder.assetEmits(List.of(assets));
                 }
 
                 // Register the dynamic taskrun together with its log lines in one call: the run
@@ -226,9 +270,10 @@ public abstract class ResultParser {
         return new AssetsInOut(inputs, outputs);
     }
 
-    private static void emitAssets(RunContext runContext, Manifest manifest) throws IllegalVariableEvaluationException {
-        Map<String, ModelAsset> assetNodes = extractAssetNodes(manifest);
+    /** @return false if any asset failed to emit, so the caller never records a partial emit as complete. */
+    private static boolean emitAssets(RunContext runContext, Map<String, ModelAsset> assetNodes) throws IllegalVariableEvaluationException {
         runContext.logger().info("dbt assets extracted from manifest: {}", assetNodes.size());
+        boolean fullyEmitted = true;
 
         for (ModelAsset asset : assetNodes.values()) {
             if (!asset.produced()) {
@@ -245,9 +290,14 @@ public abstract class ResultParser {
                 runContext.logger().debug("Asset emission is not supported in this edition, skipping.");
                 break;
             } catch (QueueException e) {
+                // Logged and carried on so one bad asset does not drop the rest, but reported back so the
+                // caller does not mark the run as fully processed and skip the missing ones for good.
+                fullyEmitted = false;
                 runContext.logger().warn("Unable to emit dbt asset '{}'", asset.assetId(), e);
             }
         }
+
+        return fullyEmitted;
     }
 
     private static Asset selfAsset(ModelAsset asset) {

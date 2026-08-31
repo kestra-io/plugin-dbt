@@ -204,13 +204,13 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
         // Null unless the guard applies, so the runId path and TriggerRun never touch the KV store.
         String processedKey = alreadyProcessedKey(runContext);
-        if (processedKey != null && isAlreadyProcessed(runContext, processedKey, runIdRendered)) {
-            logger.info("Run '{}' has already been processed by this task, skipping", runIdRendered);
 
-            return Output.builder()
-                .runId(runIdRendered)
-                .skipped(true)
-                .build();
+        // A dbt run's artifacts are immutable, so lineage for a given run id only ever needs emitting once.
+        // The execution still does all of its work and returns its usual outputs: only the emit is skipped,
+        // so a repeated refresh adds no duplicate lineage events (issue #318) without turning into a no-op.
+        boolean alreadyEmitted = processedKey != null && isAlreadyProcessed(runContext, processedKey, runIdRendered);
+        if (alreadyEmitted) {
+            logger.info("Lineage for run '{}' was already emitted by this task, reading it without re-emitting", runIdRendered);
         }
 
         // wait for end
@@ -270,7 +270,11 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         // dynamic taskruns/logs (issue #315) — those must land even though the task ends up throwing.
         URI runResultsUri = null;
         URI manifestUri = null;
+        List<String> assets = List.of();
         boolean artifactsProcessed = false;
+        // False until a manifest is actually read and emitted, so a run whose artifacts have not been
+        // uploaded yet (dbt Cloud writes them asynchronously) is retried rather than recorded as done.
+        boolean lineageLanded = false;
         try {
             // Artifacts are uploaded asynchronously by dbt Cloud and manifest.json is absent for some
             // run shapes (e.g. dbt source freshness). Tolerate 404 so a legitimate success is not
@@ -280,14 +284,18 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
             io.kestra.plugin.dbt.models.Manifest manifest = null;
             if (manifestArtifact != null) {
-                ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestArtifact.toFile());
+                ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestArtifact.toFile(), !alreadyEmitted);
                 manifest = manifestResult.manifest();
                 manifestUri = manifestResult.uri();
+                assets = manifestResult.assetIds();
+                // Only a complete emit means this run is done. A partial one leaves no watermark so the
+                // next execution retries it, and assets upsert by id so the ones that landed do not double.
+                lineageLanded = manifestResult.fullyEmitted();
             }
 
             if (runResultsArtifact != null) {
                 if (runContext.render(this.parseRunResults).as(Boolean.class).orElse(false)) {
-                    runResultsUri = ResultParser.parseRunResult(runContext, runResultsArtifact.toFile(), manifest);
+                    runResultsUri = ResultParser.parseRunResult(runContext, runResultsArtifact.toFile(), manifest, !alreadyEmitted);
                 } else {
                     runResultsUri = runContext.storage().putFile(runResultsArtifact.toFile());
                 }
@@ -304,9 +312,9 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
         // Recorded here, before the failure throw below, because the lineage for this run has already been
         // emitted: a later execution resolving the same failed run must not emit it a second time. Gated on
-        // the artifact block completing, so a transient download or parse error is retried on the next
-        // execution instead of being skipped forever.
-        if (artifactsProcessed) {
+        // the lineage having actually landed in full, so a missing manifest, an unreadable one, or a partial
+        // emit is retried on the next execution instead of being skipped forever.
+        if (artifactsProcessed && lineageLanded) {
             rememberProcessed(runContext, processedKey, runIdRendered);
         }
 
@@ -330,6 +338,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
         return Output.builder()
             .runId(runIdRendered)
+            .lineageEmitted(!alreadyEmitted && lineageLanded)
+            .assets(assets)
             .runResults(runResultsUri)
             .manifest(manifestUri)
             .build();
@@ -566,7 +576,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             .uri(
                 URI.create(
                     runContext.render(this.baseUrl).as(String.class).orElseThrow() + "/api/v2/accounts/" + runContext.render(this.accountId).as(String.class).orElseThrow() + "/runs/" + id +
-                        "/?include_related=" + URLEncoder.encode("[\"trigger\",\"job\"," + (debug ? "\"debug_logs\"" : "") + ",\"run_steps\", \"environment\"]", StandardCharsets.UTF_8)
+                        "/?include_related=" + URLEncoder.encode("[\"trigger\",\"job\"" + (debug ? ",\"debug_logs\"" : "") + ",\"run_steps\",\"environment\"]", StandardCharsets.UTF_8)
                 )
             )
             .method("GET");
@@ -620,10 +630,17 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         private Long runId;
 
         @Schema(
-            title = "Skipped",
-            description = "True when the resolved run had already been processed and was not read again."
+            title = "Lineage emitted",
+            description = "True when this execution emitted the run's asset lineage. False when the same run had "
+                + "already been emitted, so only the emit was skipped and the run was still read."
         )
-        private boolean skipped;
+        private boolean lineageEmitted;
+
+        @Schema(
+            title = "Assets",
+            description = "Asset ids described by the run's manifest, reported whether or not lineage was emitted."
+        )
+        private List<String> assets;
 
         @Schema(
             title = "Run results URI",

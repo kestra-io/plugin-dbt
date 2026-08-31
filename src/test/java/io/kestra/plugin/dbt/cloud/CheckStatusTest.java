@@ -16,8 +16,7 @@ import io.kestra.core.models.executions.LogEntry;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.validations.ModelValidator;
-import io.kestra.core.queues.QueueFactoryInterface;
-import io.kestra.core.queues.QueueInterface;
+import io.kestra.core.queues.DispatchQueueInterface;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.runners.WorkerTaskResult;
@@ -25,11 +24,10 @@ import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
 
 import jakarta.inject.Inject;
-import jakarta.inject.Named;
-import reactor.core.publisher.Flux;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
@@ -47,8 +45,10 @@ class CheckStatusTest {
     private ModelValidator modelValidator;
 
     @Inject
-    @Named(QueueFactoryInterface.WORKERTASKLOG_NAMED)
-    private QueueInterface<LogEntry> logQueue;
+    private io.kestra.plugin.dbt.TestAssetManagerFactory assetManagerFactory;
+
+    @Inject
+    private DispatchQueueInterface<LogEntry> logQueue;
 
     @Test
     void run() throws Exception {
@@ -317,7 +317,7 @@ class CheckStatusTest {
         RunContext runContext = mockRunContext(checkStatus);
 
         List<LogEntry> logs = new CopyOnWriteArrayList<>();
-        Flux<LogEntry> receive = TestsUtils.receive(logQueue, l -> logs.add(l.getLeft()));
+        logQueue.addListener(logs::add);
 
         // The run failed — the task must still throw, carrying the same message as before the fix.
         var ex = assertThrows(Exception.class, () -> checkStatus.run(runContext));
@@ -333,7 +333,6 @@ class CheckStatusTest {
         // And its failure message must have been logged under that model's own dynamic taskrun.
         String modelTaskRunId = modelTaskRuns.getFirst().getTaskRun().getId();
         TestsUtils.awaitLog(logs, l -> l.getTaskRunId() != null && l.getTaskRunId().equals(modelTaskRunId));
-        receive.blockLast();
 
         assertThat(
             logs.stream().anyMatch(l -> modelTaskRunId.equals(l.getTaskRunId()) && l.getMessage().contains("Database Error")),
@@ -555,13 +554,12 @@ class CheckStatusTest {
         RunContext runContext = mockRunContext(checkStatus);
 
         List<LogEntry> logs = new CopyOnWriteArrayList<>();
-        Flux<LogEntry> receive = TestsUtils.receive(logQueue, l -> logs.add(l.getLeft()));
+        logQueue.addListener(logs::add);
 
         // Must not throw despite the debug=true follow-up fetch failing with a 400.
         CheckStatus.Output output = checkStatus.run(runContext);
 
         TestsUtils.awaitLog(logs, l -> l.getMessage() != null && l.getMessage().contains("polled step output"));
-        receive.blockLast();
 
         assertThat(output, is(notNullValue()));
         assertThat(
@@ -632,12 +630,11 @@ class CheckStatusTest {
         RunContext runContext = mockRunContext(checkStatus);
 
         List<LogEntry> logs = new CopyOnWriteArrayList<>();
-        Flux<LogEntry> receive = TestsUtils.receive(logQueue, l -> logs.add(l.getLeft()));
+        logQueue.addListener(logs::add);
 
         CheckStatus.Output output = checkStatus.run(runContext);
 
         TestsUtils.awaitLog(logs, l -> l.getMessage() != null && l.getMessage().contains("fuller debug tail"));
-        receive.blockLast();
 
         assertThat(output, is(notNullValue()));
         // The fuller content only exists in the debug=true response — its presence in logs proves
@@ -787,8 +784,13 @@ class CheckStatusTest {
         );
 
         stubFor(
-            get(urlMatching("/api/v2/accounts/123/runs/7777/artifacts/.*"))
+            get(urlEqualTo("/api/v2/accounts/123/runs/7777/artifacts/run_results.json"))
                 .willReturn(aResponse().withStatus(404).withBody("Not Found"))
+        );
+
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/7777/artifacts/manifest.json"))
+                .willReturn(okJson(MANIFEST_JSON))
         );
 
         RunContext runContext = runContextFactory.of(Map.of());
@@ -862,8 +864,13 @@ class CheckStatusTest {
         );
 
         stubFor(
-            get(urlMatching("/api/v2/accounts/123/runs/6667/artifacts/.*"))
+            get(urlEqualTo("/api/v2/accounts/123/runs/6667/artifacts/run_results.json"))
                 .willReturn(aResponse().withStatus(404).withBody("Not Found"))
+        );
+
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/6667/artifacts/manifest.json"))
+                .willReturn(okJson(MANIFEST_JSON))
         );
 
         RunContext runContext = runContextFactory.of(Map.of());
@@ -927,8 +934,13 @@ class CheckStatusTest {
         );
 
         stubFor(
-            get(urlMatching("/api/v2/accounts/123/runs/5555/artifacts/.*"))
+            get(urlEqualTo("/api/v2/accounts/123/runs/5555/artifacts/run_results.json"))
                 .willReturn(aResponse().withStatus(404).withBody("Not Found"))
+        );
+
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/5555/artifacts/manifest.json"))
+                .willReturn(okJson(MANIFEST_JSON))
         );
 
         RunContext runContext = runContextFactory.of(Map.of());
@@ -1028,10 +1040,10 @@ class CheckStatusTest {
 
         CheckStatus.Output first = checkStatus.run(runContext);
         assertThat(first.getRunId(), is(7790L));
-        assertThat(first.isSkipped(), is(false));
+        assertThat(first.isLineageEmitted(), is(true));
 
         // The skip guard covers the environment path too.
-        assertThat(checkStatus.run(runContext).isSkipped(), is(true));
+        assertThat(checkStatus.run(runContext).isLineageEmitted(), is(false));
     }
 
     /**
@@ -1059,7 +1071,7 @@ class CheckStatusTest {
         );
 
         CheckStatus byJob = refresherFor("4327").build();
-        assertThat(byJob.run(mockRunContext(byJob)).isSkipped(), is(false));
+        assertThat(byJob.run(mockRunContext(byJob)).isLineageEmitted(), is(true));
 
         CheckStatus byEnvironment = CheckStatus.builder()
             .id(IdUtils.create())
@@ -1073,15 +1085,16 @@ class CheckStatusTest {
             .build();
 
         // Same run id, different selector: must still be read.
-        assertThat(byEnvironment.run(mockRunContext(byEnvironment)).isSkipped(), is(false));
+        assertThat(byEnvironment.run(mockRunContext(byEnvironment)).isLineageEmitted(), is(true));
     }
 
     /**
-     * Issue #318: a scheduled refresh resolves the same run on every tick, so the second read must be
-     * skipped rather than appending an identical lineage event for a run that has not changed.
+     * Issue #318: a scheduled refresh resolves the same run on every tick. The second read must not
+     * append an identical lineage event, but it must still do its work and return its usual outputs, so
+     * a downstream task reading `outputs.x.manifest` sees the same contract on every tick.
      */
     @Test
-    void shouldSkipRunThatWasAlreadyProcessed() throws Exception {
+    void shouldNotReEmitLineageForAnUnchangedRunButStillReturnItsOutputs() throws Exception {
         stubLatestFinishedRun("4324", 7778);
 
         CheckStatus checkStatus = refresherFor("4324").build();
@@ -1089,12 +1102,78 @@ class CheckStatusTest {
 
         CheckStatus.Output first = checkStatus.run(runContext);
         assertThat(first.getRunId(), is(7778L));
-        assertThat(first.isSkipped(), is(false));
-        assertThat(first.getManifest(), is(nullValue()));
+        assertThat(first.isLineageEmitted(), is(true));
+        assertThat(first.getManifest(), is(notNullValue()));
+        assertThat(first.getAssets(), containsInAnyOrder("analytics.staging.stg_orders", "analytics.marts.fct_orders"));
 
         CheckStatus.Output second = checkStatus.run(runContext);
         assertThat(second.getRunId(), is(7778L));
-        assertThat(second.isSkipped(), is(true));
+
+        // The emit is suppressed...
+        assertThat(second.isLineageEmitted(), is(false));
+
+        // ...but the execution still ran and its output contract is unchanged, which an early return
+        // would have broken by handing downstream tasks a null manifest on every tick but the first.
+        assertThat(second.getManifest(), is(notNullValue()));
+        assertThat(second.getAssets(), containsInAnyOrder("analytics.staging.stg_orders", "analytics.marts.fct_orders"));
+    }
+
+    /**
+     * A missing manifest means no lineage landed, so the run must not be recorded as processed: dbt Cloud
+     * uploads artifacts asynchronously, so a tick that catches a run before they land has to retry.
+     */
+    @Test
+    void shouldNotRecordAsProcessedWhenTheManifestIsNotAvailableYet() throws Exception {
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
+                .withQueryParam("job_definition_id", equalTo("4329"))
+                .willReturn(okJson("""
+                        {
+                          "data": [
+                            {
+                              "id": 7796,
+                              "status": 10,
+                              "status_humanized": "Success",
+                              "finished_at": "2026-08-31 06:00:00.000000+00:00"
+                            }
+                          ]
+                        }
+                    """))
+        );
+        stubFor(
+            get(urlMatching("/api/v2/accounts/123/runs/7796/\\?.*"))
+                .willReturn(okJson("""
+                        {
+                          "data": {
+                            "id": 7796,
+                            "status": 10,
+                            "status_humanized": "Success",
+                            "duration_humanized": "1s",
+                            "run_steps": []
+                          }
+                        }
+                    """))
+        );
+        // Artifacts not uploaded yet.
+        stubFor(
+            get(urlMatching("/api/v2/accounts/123/runs/7796/artifacts/.*"))
+                .willReturn(aResponse().withStatus(404).withBody("Not Found"))
+        );
+
+        CheckStatus checkStatus = refresherFor("4329").build();
+        RunContext runContext = mockRunContext(checkStatus);
+
+        assertThat(checkStatus.run(runContext).isLineageEmitted(), is(false));
+
+        // No watermark was written, so once dbt finishes uploading the next tick emits rather than skipping.
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/7796/artifacts/manifest.json"))
+                .willReturn(okJson(MANIFEST_JSON))
+        );
+
+        CheckStatus.Output afterUpload = checkStatus.run(runContext);
+        assertThat(afterUpload.isLineageEmitted(), is(true));
+        assertThat(afterUpload.getAssets(), hasSize(2));
     }
 
     /**
@@ -1107,22 +1186,22 @@ class CheckStatusTest {
         CheckStatus checkStatus = refresherFor("4325").build();
         RunContext runContext = mockRunContext(checkStatus);
 
-        assertThat(checkStatus.run(runContext).isSkipped(), is(false));
-        assertThat(checkStatus.run(runContext).isSkipped(), is(true));
+        assertThat(checkStatus.run(runContext).isLineageEmitted(), is(true));
+        assertThat(checkStatus.run(runContext).isLineageEmitted(), is(false));
 
         // dbt Cloud finishes a newer run for the same job.
         stubLatestFinishedRun("4325", 7780);
 
         CheckStatus.Output afterNewRun = checkStatus.run(runContext);
         assertThat(afterNewRun.getRunId(), is(7780L));
-        assertThat(afterNewRun.isSkipped(), is(false));
+        assertThat(afterNewRun.isLineageEmitted(), is(true));
     }
 
     /**
-     * An explicit runId names one run to read, so the guard must never suppress it.
+     * An explicit runId names one run to read, so the guard must never suppress its emit.
      */
     @Test
-    void shouldNeverSkipWhenAnExplicitRunIdIsGiven() throws Exception {
+    void shouldAlwaysEmitWhenAnExplicitRunIdIsGiven() throws Exception {
         stubFinishedRun(7782, 10, "Success");
 
         CheckStatus checkStatus = CheckStatus.builder()
@@ -1137,15 +1216,15 @@ class CheckStatusTest {
             .build();
         RunContext runContext = mockRunContext(checkStatus);
 
-        assertThat(checkStatus.run(runContext).isSkipped(), is(false));
-        assertThat(checkStatus.run(runContext).isSkipped(), is(false));
+        assertThat(checkStatus.run(runContext).isLineageEmitted(), is(true));
+        assertThat(checkStatus.run(runContext).isLineageEmitted(), is(true));
     }
 
     /**
-     * Issue #318 acceptance: repeated refreshes must not accumulate duplicate lineage events. A failed
-     * run with failOnUnsuccessful left at its default still emits lineage before throwing, so the
-     * watermark has to be recorded even though the task fails. Otherwise every tick re-emits the same
-     * lineage for a run that has not changed.
+     * Issue #318 acceptance, asserted on the emitter itself rather than on an output. A failed run with
+     * failOnUnsuccessful at its default emits lineage and then throws, so the watermark has to be written
+     * before the throw. Otherwise every tick re-emits the same lineage for a run that has not changed.
+     * The task still fails on both ticks, which is what the flag asks for: only the emit is suppressed.
      */
     @Test
     void shouldRecordWatermarkForAFailedRunSoLineageIsNotReEmittedEveryTick() throws Exception {
@@ -1171,14 +1250,18 @@ class CheckStatusTest {
         CheckStatus checkStatus = refresherFor("4328").build();
         RunContext runContext = mockRunContext(checkStatus);
 
-        // First tick reports the failed run.
-        var ex = assertThrows(Exception.class, () -> checkStatus.run(runContext));
-        assertThat(ex.getMessage(), containsString("Error"));
+        assetManagerFactory.clear();
 
-        // Second tick skips it: the lineage was already emitted, so it must not be emitted again.
-        CheckStatus.Output second = checkStatus.run(runContext);
-        assertThat(second.isSkipped(), is(true));
-        assertThat(second.getRunId(), is(7795L));
+        // First tick reports the failed run, and emits its lineage on the way out.
+        var first = assertThrows(Exception.class, () -> checkStatus.run(runContext));
+        assertThat(first.getMessage(), containsString("Error"));
+        assertThat(assetManagerFactory.allEmitted(), hasSize(2));
+
+        // Second tick still fails, because the run is still unsuccessful and failOnUnsuccessful is on.
+        // But the lineage must not be emitted a second time for a run that has not changed.
+        var second = assertThrows(Exception.class, () -> checkStatus.run(runContext));
+        assertThat(second.getMessage(), containsString("Error"));
+        assertThat(assetManagerFactory.allEmitted(), hasSize(2));
     }
 
     private CheckStatus.CheckStatusBuilder<?, ?> refresherFor(String jobId) {
@@ -1232,10 +1315,45 @@ class CheckStatusTest {
         );
 
         stubFor(
-            get(urlMatching("/api/v2/accounts/123/runs/" + runId + "/artifacts/.*"))
+            get(urlEqualTo("/api/v2/accounts/123/runs/" + runId + "/artifacts/run_results.json"))
                 .willReturn(aResponse().withStatus(404).withBody("Not Found"))
         );
+
+        // A real manifest, so lineage actually lands. The watermark is only written on a complete emit,
+        // so stubbing this as a 404 would mean nothing is ever recorded as processed.
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/" + runId + "/artifacts/manifest.json"))
+                .willReturn(okJson(MANIFEST_JSON))
+        );
     }
+
+    private static final String MANIFEST_JSON = """
+        {
+          "metadata": { "adapter_type": "postgres" },
+          "nodes": {
+            "model.analytics.stg_orders": {
+              "resource_type": "model",
+              "database": "analytics",
+              "schema": "staging",
+              "name": "stg_orders",
+              "unique_id": "model.analytics.stg_orders",
+              "depends_on": { "nodes": [] }
+            },
+            "model.analytics.fct_orders": {
+              "resource_type": "model",
+              "database": "analytics",
+              "schema": "marts",
+              "name": "fct_orders",
+              "unique_id": "model.analytics.fct_orders",
+              "depends_on": { "nodes": ["model.analytics.stg_orders"] }
+            }
+          },
+          "parent_map": {
+            "model.analytics.stg_orders": [],
+            "model.analytics.fct_orders": ["model.analytics.stg_orders"]
+          }
+        }
+        """;
 
     private CheckStatus.CheckStatusBuilder<?, ?> checkStatusBuilder() {
         return CheckStatus.builder()

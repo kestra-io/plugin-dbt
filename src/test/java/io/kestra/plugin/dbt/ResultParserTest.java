@@ -14,8 +14,7 @@ import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.executions.LogEntry;
 import io.kestra.core.models.executions.TaskRun;
 import io.kestra.core.models.property.Property;
-import io.kestra.core.queues.QueueFactoryInterface;
-import io.kestra.core.queues.QueueInterface;
+import io.kestra.core.queues.DispatchQueueInterface;
 import io.kestra.core.runners.AssetEmit;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
@@ -25,8 +24,6 @@ import io.kestra.core.utils.TestsUtils;
 import io.kestra.plugin.dbt.cli.DbtCLI;
 
 import jakarta.inject.Inject;
-import jakarta.inject.Named;
-import reactor.core.publisher.Flux;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
@@ -37,8 +34,7 @@ class ResultParserTest {
     private RunContextFactory runContextFactory;
 
     @Inject
-    @Named(QueueFactoryInterface.WORKERTASKLOG_NAMED)
-    private QueueInterface<LogEntry> logQueue;
+    private DispatchQueueInterface<LogEntry> logQueue;
 
     // One model reading one source, shared by the source-lineage tests.
     private static final String SOURCE_MANIFEST_JSON = """
@@ -473,7 +469,7 @@ class ResultParserTest {
             """);
 
         List<LogEntry> logs = new CopyOnWriteArrayList<>();
-        Flux<LogEntry> receive = TestsUtils.receive(logQueue, l -> logs.add(l.getLeft()));
+        logQueue.addListener(logs::add);
 
         ResultParser.parseRunResult(runContext, runResultsFile.toFile(), null);
 
@@ -485,8 +481,9 @@ class ResultParserTest {
         assertThat(modelTaskRunIds, hasSize(2));
         assertThat(modelTaskRunIds, not(hasItem(parentTaskRunId)));
 
-        TestsUtils.awaitLog(logs, l -> l.getTaskRunId() != null && modelTaskRunIds.contains(l.getTaskRunId()));
-        receive.blockLast();
+        // 2.0 has no Flux to drain, so wait for each line asserted below before snapshotting.
+        TestsUtils.awaitLog(logs, l -> isModelLog(l, modelTaskRunIds, "success"));
+        TestsUtils.awaitLog(logs, l -> isModelLog(l, modelTaskRunIds, "Database Error"));
 
         List<LogEntry> modelLogs = List.copyOf(logs).stream()
             .filter(l -> l.getTaskRunId() != null && modelTaskRunIds.contains(l.getTaskRunId()))
@@ -563,16 +560,24 @@ class ResultParserTest {
         // the model's dynamic taskrun carries {source} -> {the model itself}
         TaskRun modelTaskRun = byTaskId.get("model.analytics.stg_orders");
         assertThat(modelTaskRun, is(notNullValue()));
-        assertThat(modelTaskRun.getAssets(), is(notNullValue()));
-        assertThat(modelTaskRun.getAssets().getOutputs(), hasSize(1));
-        assertThat(modelTaskRun.getAssets().getOutputs().getFirst().getId(), is("analytics.staging.stg_orders"));
-        assertThat(modelTaskRun.getAssets().getInputs(), hasSize(1));
-        assertThat(modelTaskRun.getAssets().getInputs().getFirst().id(), is("analytics.raw.orders"));
+        assertThat(modelTaskRun.getAssetEmits(), hasSize(1));
+        var modelBundle = modelTaskRun.getAssetEmits().getFirst();
+        assertThat(modelBundle.getOutputs(), hasSize(1));
+        assertThat(modelBundle.getOutputs().getFirst().getId(), is("analytics.staging.stg_orders"));
+        assertThat(modelBundle.getInputs(), hasSize(1));
+        assertThat(modelBundle.getInputs().getFirst().id(), is("analytics.raw.orders"));
 
         // the source-freshness taskrun must NOT claim it produced the source table
         TaskRun sourceTaskRun = byTaskId.get("source.analytics.raw.orders");
         assertThat(sourceTaskRun, is(notNullValue()));
-        assertThat(sourceTaskRun.getAssets(), is(nullValue()));
+        assertThat(sourceTaskRun.getAssetEmits(), is(nullValue()));
+    }
+
+    private static boolean isModelLog(LogEntry log, Set<String> modelTaskRunIds, String messagePart) {
+        return log.getTaskRunId() != null
+            && modelTaskRunIds.contains(log.getTaskRunId())
+            && log.getMessage() != null
+            && log.getMessage().contains(messagePart);
     }
 
     private static AssetEmit findEmitWithOutput(List<AssetEmit> emitted, String outputId) {
