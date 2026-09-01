@@ -59,7 +59,7 @@ import static java.lang.Math.max;
 @NoArgsConstructor
 @Schema(
     title = "Monitor a dbt Cloud run",
-    description = "Polls a dbt Cloud run until it ends, streaming step logs and downloading artifacts. Takes a `runId`, or a `jobId` or `environmentId` to read that job's or environment's most recent finished run so lineage stays fresh for runs Kestra did not trigger. Fails on non-successful statuses unless `failOnUnsuccessful` is false. When resolving by `jobId` or `environmentId`, a run that was already read is skipped, so a scheduled refresh does not repeat itself. Defaults to 5s polling and a 60m timeout, and can parse run results for node timings."
+    description = "Polls a dbt Cloud run until it ends, streaming step logs and downloading artifacts. Takes a `runId`, or a `jobId` or `environmentId` to read the most recent finished run of that job or environment, which keeps lineage fresh for runs Kestra did not trigger. Fails on non-successful statuses unless `failOnUnsuccessful` is false. Defaults to 5s polling and a 60m timeout."
 )
 @Plugin(
     examples = {
@@ -107,15 +107,11 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         JobStatus.NUMBER_30 // Cancelled
     );
 
-    // Prefix for the already-processed watermark, so the key is recognisable in the namespace KV UI.
     private static final String PROCESSED_KEY_PREFIX = "dbt-cloud-last-run";
 
-    // Separator between the parts of that key. Dots are stripped from every part below, so a part can
-    // never contain one: without that, flow "a_b" + task "c" and flow "a" + task "b_c" would collide.
+    // Dots are stripped from each key part so a part can never contain one, otherwise flow "a_b" with
+    // task "c" would collide with flow "a" with task "b_c".
     private static final String PROCESSED_KEY_SEPARATOR = ".";
-
-    // KV keys allow alphanumerics, dots, underscores and hyphens. Dots are excluded here because they
-    // are the separator.
     private static final Pattern UNSAFE_KEY_CHARS = Pattern.compile("[^a-zA-Z0-9_-]");
 
     @Schema(
@@ -127,9 +123,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
     @Schema(
         title = "Job ID",
-        description = "dbt Cloud job identifier. Reads that job's most recent finished run instead of a run this flow started, "
-            + "so lineage can be refreshed for runs triggered outside Kestra. Pair with `failOnUnsuccessful: false` when the "
-            + "resolved run may have failed. Mutually exclusive with `runId` and `environmentId`."
+        description = "dbt Cloud job identifier. Reads that job's most recent finished run, which refreshes lineage for "
+            + "runs triggered outside Kestra. Mutually exclusive with `runId` and `environmentId`."
     )
     @PluginProperty(group = "main")
     Property<String> jobId;
@@ -137,9 +132,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     @Schema(
         title = "Environment ID",
         description = "dbt Cloud environment identifier. Reads the most recent finished run anywhere in that environment, "
-            + "whichever job produced it. dbt writes `manifest.json` at parse time so it describes the whole project, which "
-            + "means any run in the environment refreshes the full lineage graph and several jobs give more chances at a "
-            + "fresh one than a single job does. Mutually exclusive with `runId` and `jobId`."
+            + "whichever job produced it. dbt's manifest covers the whole project, so any run refreshes the full graph. "
+            + "Mutually exclusive with `runId` and `jobId`."
     )
     @PluginProperty(group = "main")
     Property<String> environmentId;
@@ -176,9 +170,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     @Schema(
         title = "Fail if the run ends in a non-successful state",
         description = "When true (default), a run ending in `Error` or `Cancelled` raises a task failure. "
-            + "Set to false to read a finished run without failing the task, which a scheduled lineage refresh needs "
-            + "since it does not own the run it reads. Left true, a `jobId` or `environmentId` refresh fails once for a "
-            + "given failed run and then skips it, rather than failing on every tick."
+            + "Set to false to read a finished run without failing the task, which a scheduled refresh needs since it "
+            + "does not own the run it reads."
     )
     @PluginProperty(group = "reliability")
     Property<Boolean> failOnUnsuccessful = Property.ofValue(Boolean.TRUE);
@@ -195,19 +188,17 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     public CheckStatus.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
 
-        // One monitoring session per invocation. The dedup guard makes repeated run() calls on a single
-        // instance a designed-for path, and carrying these over would suppress a later run's status logs.
+        // Fresh per invocation: run() is called more than once on one instance, and stale entries here
+        // would suppress a later run's status logs.
         this.loggedStatus = new ArrayList<>();
         this.loggedSteps = new HashMap<>();
 
         Long runIdRendered = resolveRunId(runContext);
 
-        // Null unless the guard applies, so the runId path and TriggerRun never touch the KV store.
         String processedKey = alreadyProcessedKey(runContext);
 
-        // A dbt run's artifacts are immutable, so lineage for a given run id only ever needs emitting once.
-        // The execution still does all of its work and returns its usual outputs: only the emit is skipped,
-        // so a repeated refresh adds no duplicate lineage events (issue #318) without turning into a no-op.
+        // A run's artifacts are immutable, so its lineage only needs emitting once (issue #318). Everything
+        // else still runs, so the outputs are the same on every tick.
         boolean alreadyEmitted = processedKey != null && isAlreadyProcessed(runContext, processedKey, runIdRendered);
         if (alreadyEmitted) {
             logger.info("Lineage for run '{}' was already emitted by this task, reading it without re-emitting", runIdRendered);
@@ -272,8 +263,6 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         URI manifestUri = null;
         List<String> assets = List.of();
         boolean artifactsProcessed = false;
-        // False until a manifest is actually read and emitted, so a run whose artifacts have not been
-        // uploaded yet (dbt Cloud writes them asynchronously) is retried rather than recorded as done.
         boolean lineageLanded = false;
         try {
             // Artifacts are uploaded asynchronously by dbt Cloud and manifest.json is absent for some
@@ -288,8 +277,6 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                 manifest = manifestResult.manifest();
                 manifestUri = manifestResult.uri();
                 assets = manifestResult.assetIds();
-                // Only a complete emit means this run is done. A partial one leaves no watermark so the
-                // next execution retries it, and assets upsert by id so the ones that landed do not double.
                 lineageLanded = manifestResult.fullyEmitted();
             }
 
@@ -310,10 +297,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             logger.warn("Unable to download or parse artifacts for failed run '{}': {}", runIdRendered, e.getMessage(), e);
         }
 
-        // Recorded here, before the failure throw below, because the lineage for this run has already been
-        // emitted: a later execution resolving the same failed run must not emit it a second time. Gated on
-        // the lineage having actually landed in full, so a missing manifest, an unreadable one, or a partial
-        // emit is retried on the next execution instead of being skipped forever.
+        // Before the throw below, since the lineage is already emitted by this point. Gated on it having
+        // landed in full, so a missing manifest or a partial emit is retried rather than skipped for good.
         if (artifactsProcessed && lineageLanded) {
             rememberProcessed(runContext, processedKey, runIdRendered);
         }
@@ -331,8 +316,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                 throw new Exception(failure);
             }
 
-            // Artifacts and lineage were already emitted above, so reporting the status and returning
-            // normally leaves the caller the run's data without failing a run this task does not own.
+            // Artifacts and lineage already landed above, so the caller keeps the run's data.
             logger.warn("{}", failure);
         }
 
@@ -345,11 +329,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             .build();
     }
 
-    /**
-     * The run to read: either the explicit {@code runId}, or the most recent finished run of the given
-     * job or environment. Those paths exist so lineage can be refreshed for runs Kestra did not trigger,
-     * where no run id is known up front.
-     */
+    /** The explicit {@code runId}, or the most recent finished run of the given job or environment. */
     private Long resolveRunId(RunContext runContext) throws Exception {
         if (this.runId != null) {
             return Long.parseLong(runContext.render(this.runId).as(String.class).orElseThrow());
@@ -359,12 +339,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     }
 
     /**
-     * Newest finished run of the job. Restricted to terminal statuses because dbt Cloud only writes
-     * artifacts once a run ends, so an in-flight run would turn this fetch into an open-ended wait.
-     * Failed and cancelled runs are kept: dbt writes the manifest at parse time, so it describes the
-     * project just as accurately as a successful run's does, and skipping them would discard the
-     * fresher answer for no gain. Ordering by {@code -finished_at} with {@code limit=1} makes dbt Cloud
-     * do the selection, so only the one run being read is fetched.
+     * Terminal statuses only, because dbt Cloud writes artifacts only once a run ends. Failed and cancelled
+     * runs are kept: dbt writes the manifest at parse time, so it describes the project just as accurately.
      */
     private Long findLatestFinishedRun(RunContext runContext) throws Exception {
         RunSelector selector = runSelector(runContext);
@@ -400,7 +376,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         return resolved;
     }
 
-    /** Which dbt Cloud filter narrows the run list, and to what. Null when an explicit runId is given. */
+    /** Which dbt Cloud filter narrows the run list, and to what. */
     private RunSelector runSelector(RunContext runContext) throws IllegalVariableEvaluationException {
         if (this.jobId != null) {
             return new RunSelector("job_definition_id", runContext.render(this.jobId).as(String.class).orElseThrow());
@@ -420,11 +396,9 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     }
 
     /**
-     * KV key holding the last run this task processed, or null when the guard does not apply: an explicit
-     * {@code runId} (the caller named one specific run to read), or no flow context to scope the key with.
-     * To force a re-read, give the run id directly or delete the key from the namespace KV store. Scoped to flow, task and selector so two refreshers in one namespace,
-     * or one task iterating over several jobs, never share a watermark. The store is namespace-scoped
-     * already, so the namespace is not repeated in the key.
+     * KV key for the last run this task emitted, or null when an explicit {@code runId} was given or there is
+     * no flow context. Scoped to flow, task and selector so two refreshers never share a watermark. To force
+     * a re-emit, pass the run id directly or delete the key.
      */
     private String alreadyProcessedKey(RunContext runContext) {
         if (this.jobId == null && this.environmentId == null) {
@@ -448,14 +422,13 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                 safeKeyPart(selector.value())
             );
         } catch (Exception e) {
-            // No flow context (or an unrenderable property) only means the guard cannot be scoped. Doing
-            // the work again is the safe outcome, so fall through rather than failing the refresh.
+            // Without a scoped key the safe outcome is to emit again, not to fail the refresh.
             runContext.logger().debug("Could not build the already-processed key, running without the skip guard", e);
             return null;
         }
     }
 
-    /** True when this task last processed the same run. A KV read failure reports false, so the work is redone rather than lost. */
+    /** A read failure reports false, so the lineage is re-emitted rather than lost. */
     private boolean isAlreadyProcessed(RunContext runContext, String key, Long runId) {
         try {
             KVStore kv = runContext.namespaceKv(runContext.flowInfo().namespace());
@@ -472,7 +445,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         }
     }
 
-    /** Records the run as processed. A write failure only costs a duplicate on the next tick, so it must not fail a run already read. */
+    /** A write failure only costs a duplicate next tick, so it must not fail a run already read. */
     private void rememberProcessed(RunContext runContext, String key, Long runId) {
         if (key == null) {
             return;
@@ -496,7 +469,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         return value == null ? "" : UNSAFE_KEY_CHARS.matcher(value).replaceAll("_");
     }
 
-    /** dbt Cloud's `status__in` value for the terminal statuses, derived from {@link #ENDED_STATUS} so the two cannot drift. */
+    /** Derived from {@link #ENDED_STATUS} so the query and the ended check cannot drift apart. */
     private static String endedStatusFilter() {
         return ENDED_STATUS.stream()
             .map(JobStatus::toString)
@@ -625,20 +598,20 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     public static class Output implements io.kestra.core.models.tasks.Output {
         @Schema(
             title = "Run ID",
-            description = "Identifier of the dbt Cloud run that was read. Useful when it was resolved from `jobId`."
+            description = "Identifier of the dbt Cloud run that was read."
         )
         private Long runId;
 
         @Schema(
             title = "Lineage emitted",
-            description = "True when this execution emitted the run's asset lineage. False when the same run had "
-                + "already been emitted, so only the emit was skipped and the run was still read."
+            description = "True when this execution emitted the run's asset lineage, false when it had already been "
+                + "emitted for this run."
         )
         private boolean lineageEmitted;
 
         @Schema(
             title = "Assets",
-            description = "Asset ids described by the run's manifest, reported whether or not lineage was emitted."
+            description = "Asset ids described by the run's manifest, whether or not lineage was emitted."
         )
         private List<String> assets;
 

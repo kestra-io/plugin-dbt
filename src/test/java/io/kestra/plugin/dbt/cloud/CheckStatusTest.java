@@ -742,10 +742,7 @@ class CheckStatusTest {
         assertThat(ex.getResponse().getStatus().getCode(), is(404));
     }
 
-    /**
-     * Issue #318: with only a jobId, the task resolves that job's most recent finished run and reads it,
-     * so lineage can be refreshed for runs Kestra did not trigger.
-     */
+    /** Issue #318: with only a jobId, the task resolves that job's most recent finished run. */
     @Test
     void shouldResolveLatestFinishedRunFromJobId() throws Exception {
         stubFor(
@@ -841,10 +838,7 @@ class CheckStatusTest {
         assertThat(ex.getMessage(), containsString("4322"));
     }
 
-    /**
-     * Issue #318: a scheduled refresh does not own the run it reads, so a failed run must be reported
-     * without failing the task when failOnUnsuccessful is off.
-     */
+    /** A refresh does not own the run it reads, so with the flag off a failed run must not fail the task. */
     @Test
     void shouldNotThrowOnErrorStatusWhenFailOnUnsuccessfulIsFalse() throws Exception {
         stubFor(
@@ -893,10 +887,7 @@ class CheckStatusTest {
         assertThat(output.getRunId(), is(6667L));
     }
 
-    /**
-     * Issue #318: the lookup keeps failed and cancelled runs, since dbt writes the manifest at parse
-     * time and it describes the project just as well. That is the case failOnUnsuccessful exists for.
-     */
+    /** The lookup keeps failed runs: dbt writes the manifest at parse time, so it is still complete. */
     @Test
     void shouldResolveFailedRunFromJobIdWithoutThrowingWhenFailOnUnsuccessfulIsFalse() throws Exception {
         stubFor(
@@ -963,10 +954,7 @@ class CheckStatusTest {
         assertThat(output.getRunId(), is(5555L));
     }
 
-    /**
-     * runId and jobId select the run two different ways, so exactly one must be set. Caught at flow
-     * validation rather than at runtime.
-     */
+    /** Exactly one selector must be set, caught at flow validation rather than at runtime. */
     @Test
     void shouldRejectMoreThanOneRunSelector() {
         assertRejected(checkStatusBuilder().runId(Property.ofValue("1")).jobId(Property.ofValue("2")).build());
@@ -999,10 +987,7 @@ class CheckStatusTest {
         assertThat(validation.get().getMessage(), containsString("Exactly one of"));
     }
 
-    /**
-     * Issue #318: an environmentId reads the newest finished run anywhere in the environment. dbt writes
-     * the manifest at parse time so it covers the whole project, whichever job produced the run.
-     */
+    /** An environmentId reads the newest finished run anywhere in the environment. */
     @Test
     void shouldResolveLatestFinishedRunFromEnvironmentId() throws Exception {
         stubFor(
@@ -1046,10 +1031,7 @@ class CheckStatusTest {
         assertThat(checkStatus.run(runContext).isLineageEmitted(), is(false));
     }
 
-    /**
-     * The watermark is keyed on the selector, so a job and an environment resolving the same run id
-     * must not skip each other.
-     */
+    /** The watermark is keyed on the selector, so a job and an environment must not suppress each other. */
     @Test
     void shouldNotShareWatermarkBetweenJobAndEnvironmentSelectors() throws Exception {
         stubLatestFinishedRun("4327", 7791);
@@ -1089,9 +1071,8 @@ class CheckStatusTest {
     }
 
     /**
-     * Issue #318: a scheduled refresh resolves the same run on every tick. The second read must not
-     * append an identical lineage event, but it must still do its work and return its usual outputs, so
-     * a downstream task reading `outputs.x.manifest` sees the same contract on every tick.
+     * Issue #318: a refresh resolves the same run on every tick. The second read must not append an
+     * identical lineage event, but must still return its usual outputs.
      */
     @Test
     void shouldNotReEmitLineageForAnUnchangedRunButStillReturnItsOutputs() throws Exception {
@@ -1109,18 +1090,16 @@ class CheckStatusTest {
         CheckStatus.Output second = checkStatus.run(runContext);
         assertThat(second.getRunId(), is(7778L));
 
-        // The emit is suppressed...
         assertThat(second.isLineageEmitted(), is(false));
 
-        // ...but the execution still ran and its output contract is unchanged, which an early return
-        // would have broken by handing downstream tasks a null manifest on every tick but the first.
+        // The output contract is unchanged, which an early return would have broken.
         assertThat(second.getManifest(), is(notNullValue()));
         assertThat(second.getAssets(), containsInAnyOrder("analytics.staging.stg_orders", "analytics.marts.fct_orders"));
     }
 
     /**
-     * A missing manifest means no lineage landed, so the run must not be recorded as processed: dbt Cloud
-     * uploads artifacts asynchronously, so a tick that catches a run before they land has to retry.
+     * dbt Cloud uploads artifacts asynchronously, so a tick that catches a run before they land emitted
+     * nothing and must retry rather than record the run as done.
      */
     @Test
     void shouldNotRecordAsProcessedWhenTheManifestIsNotAvailableYet() throws Exception {
@@ -1177,7 +1156,7 @@ class CheckStatusTest {
     }
 
     /**
-     * A new run must still be read, otherwise the guard would freeze lineage at the first run it saw.
+     * A new run must still emit, otherwise lineage would freeze at the first run seen.
      */
     @Test
     void shouldReadRunAgainWhenTheJobHasANewerRun() throws Exception {
@@ -1221,10 +1200,8 @@ class CheckStatusTest {
     }
 
     /**
-     * Issue #318 acceptance, asserted on the emitter itself rather than on an output. A failed run with
-     * failOnUnsuccessful at its default emits lineage and then throws, so the watermark has to be written
-     * before the throw. Otherwise every tick re-emits the same lineage for a run that has not changed.
-     * The task still fails on both ticks, which is what the flag asks for: only the emit is suppressed.
+     * Asserted on the emitter, since this path throws. A failed run emits lineage then throws, so the
+     * watermark has to be written before the throw. The task still fails on both ticks.
      */
     @Test
     void shouldRecordWatermarkForAFailedRunSoLineageIsNotReEmittedEveryTick() throws Exception {
@@ -1319,8 +1296,7 @@ class CheckStatusTest {
                 .willReturn(aResponse().withStatus(404).withBody("Not Found"))
         );
 
-        // A real manifest, so lineage actually lands. The watermark is only written on a complete emit,
-        // so stubbing this as a 404 would mean nothing is ever recorded as processed.
+        // A real manifest, so lineage lands and the watermark is written.
         stubFor(
             get(urlEqualTo("/api/v2/accounts/123/runs/" + runId + "/artifacts/manifest.json"))
                 .willReturn(okJson(MANIFEST_JSON))

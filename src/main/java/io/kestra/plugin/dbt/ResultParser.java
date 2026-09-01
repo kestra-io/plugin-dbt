@@ -46,10 +46,9 @@ public abstract class ResultParser {
     private static final Set<String> PRODUCED_RESOURCE_TYPES = Set.of(RESOURCE_TYPE_MODEL, RESOURCE_TYPE_SEED, RESOURCE_TYPE_SNAPSHOT);
 
     /**
-     * @param fullyEmitted true when every asset this manifest describes was emitted, or when emission was
-     *        not asked for. False when an emit failed part way, so a caller that records
-     *        "this run is done" can tell that the lineage did not fully land.
-     * @param assetIds the asset ids this manifest describes, populated whether or not lineage was emitted.
+     * @param fullyEmitted false when an emit failed part way, so a caller recording "this run is done" can
+     *        tell that the lineage did not fully land.
+     * @param assetIds populated whether or not lineage was emitted.
      */
     public record ManifestResult(Manifest manifest, URI uri, boolean fullyEmitted, List<String> assetIds) {
     }
@@ -59,11 +58,9 @@ public abstract class ResultParser {
     }
 
     /**
-     * Parses the manifest and, when {@code emitLineage} is true, emits one lineage event per node it
-     * describes. A caller that has already emitted for this exact dbt run passes false: the run's
-     * artifacts are immutable, so re-emitting would only append identical lineage events (issue #318).
-     * The asset ids are returned either way, so an execution that did not emit can still report what
-     * the run covers.
+     * A caller that has already emitted for this dbt run passes {@code emitLineage} false: the run's
+     * artifacts are immutable, so re-emitting only appends identical lineage events (issue #318). The asset
+     * ids come back either way.
      */
     public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, boolean emitLineage)
         throws IOException, IllegalVariableEvaluationException {
@@ -87,11 +84,11 @@ public abstract class ResultParser {
             if (emitLineage) {
                 fullyEmitted = emitAssets(runContext, assetNodes);
             } else {
-                runContext.logger().debug("Lineage for this run was already emitted, skipping {} assets", assetIds.size());
+                runContext.logger().debug("Lineage already emitted for this run, skipping {} assets", assetIds.size());
             }
         } catch (Exception e) {
             manifest = null;
-            // An unreadable manifest means nothing was emitted, so the run must not be recorded as done.
+            // Nothing was emitted, so the run must not be recorded as done.
             fullyEmitted = false;
             runContext.logger().warn("Unable to read the dbt manifest, assets will not be emitted. The manifest is still stored as an output file.", e);
         }
@@ -104,9 +101,8 @@ public abstract class ResultParser {
     }
 
     /**
-     * When {@code attachAssets} is false the per-model taskruns are still emitted, without their asset
-     * links: a taskrun's assets become lineage events too, so a caller that has already emitted for this
-     * run has to suppress both paths or the duplicates simply move (issue #318).
+     * With {@code attachAssets} false the per-model taskruns are still emitted, without their asset links: a
+     * taskrun's assets become lineage events too, so both paths have to be suppressed together.
      */
     public static URI parseRunResult(RunContext runContext, File file, Manifest manifest, boolean attachAssets)
         throws IOException, IllegalVariableEvaluationException {
@@ -290,8 +286,8 @@ public abstract class ResultParser {
                 runContext.logger().debug("Asset emission is not supported in this edition, skipping.");
                 break;
             } catch (QueueException e) {
-                // Logged and carried on so one bad asset does not drop the rest, but reported back so the
-                // caller does not mark the run as fully processed and skip the missing ones for good.
+                // Carry on so one bad asset does not drop the rest, but report back so the caller does not
+                // mark the run done and skip the missing ones for good.
                 fullyEmitted = false;
                 runContext.logger().warn("Unable to emit dbt asset '{}'", asset.assetId(), e);
             }
