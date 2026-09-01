@@ -490,6 +490,11 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
         var rCommands = runContext.render(this.commands).asList(String.class);
 
+        var rEngine = runContext.render(this.engine).as(Engine.class).orElse(Engine.CORE);
+        if (rEngine == Engine.FUSION && rCommands.stream().anyMatch(command -> command.contains("--partial-parse") || command.contains("--no-partial-parse"))) {
+            logger.warn("The '--partial-parse' and '--no-partial-parse' flags are not supported by the FUSION engine and will be silently ignored by dbt.");
+        }
+
         LogFormat rLogFormat = runContext.render(this.logFormat).as(LogFormat.class).orElseThrow();
 
         final String logPathArg = " --log-path logs";
