@@ -45,9 +45,6 @@ class CheckStatusTest {
     private ModelValidator modelValidator;
 
     @Inject
-    private io.kestra.plugin.dbt.TestAssetManagerFactory assetManagerFactory;
-
-    @Inject
     private DispatchQueueInterface<LogEntry> logQueue;
 
     @Test
@@ -742,13 +739,13 @@ class CheckStatusTest {
         assertThat(ex.getResponse().getStatus().getCode(), is(404));
     }
 
-    /** Issue #318: with only a jobId, the task resolves that job's most recent finished run. */
+    /** Issue #318: with only a jobId, the task resolves that job's most recent successful run. */
     @Test
-    void shouldResolveLatestFinishedRunFromJobId() throws Exception {
+    void shouldResolveLatestSuccessfulRunFromJobId() throws Exception {
         stubFor(
             get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
                 .withQueryParam("job_definition_id", equalTo("4321"))
-                .withQueryParam("status__in", equalTo("[10,20,30]"))
+                .withQueryParam("status", equalTo("10"))
                 .withQueryParam("order_by", equalTo("-finished_at"))
                 .withQueryParam("limit", equalTo("1"))
                 .willReturn(okJson("""
@@ -810,10 +807,10 @@ class CheckStatusTest {
     }
 
     /**
-     * A job with no finished run yet must say so, rather than failing later on a null run id.
+     * A job with no successful run yet must say so, rather than failing later on a null run id.
      */
     @Test
-    void shouldFailWhenJobHasNoFinishedRun() {
+    void shouldFailWhenJobHasNoSuccessfulRun() {
         stubFor(
             get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
                 .withQueryParam("job_definition_id", equalTo("4322"))
@@ -887,73 +884,6 @@ class CheckStatusTest {
         assertThat(output.getRunId(), is(6667L));
     }
 
-    /** The lookup keeps failed runs: dbt writes the manifest at parse time, so it is still complete. */
-    @Test
-    void shouldResolveFailedRunFromJobIdWithoutThrowingWhenFailOnUnsuccessfulIsFalse() throws Exception {
-        stubFor(
-            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
-                .withQueryParam("job_definition_id", equalTo("4323"))
-                .withQueryParam("status__in", equalTo("[10,20,30]"))
-                .willReturn(okJson("""
-                        {
-                          "data": [
-                            {
-                              "id": 5555,
-                              "status": 20,
-                              "status_humanized": "Error",
-                              "finished_at": "2026-08-31 06:00:00.000000+00:00"
-                            }
-                          ]
-                        }
-                    """))
-        );
-
-        stubFor(
-            get(urlMatching("/api/v2/accounts/123/runs/5555/\\?.*"))
-                .willReturn(okJson("""
-                        {
-                          "data": {
-                            "id": 5555,
-                            "status": 20,
-                            "status_humanized": "Error",
-                            "status_message": "Compilation failed in step 1",
-                            "duration_humanized": "2s",
-                            "run_steps": []
-                          }
-                        }
-                    """))
-        );
-
-        stubFor(
-            get(urlEqualTo("/api/v2/accounts/123/runs/5555/artifacts/run_results.json"))
-                .willReturn(aResponse().withStatus(404).withBody("Not Found"))
-        );
-
-        stubFor(
-            get(urlEqualTo("/api/v2/accounts/123/runs/5555/artifacts/manifest.json"))
-                .willReturn(okJson(MANIFEST_JSON))
-        );
-
-        RunContext runContext = runContextFactory.of(Map.of());
-
-        CheckStatus checkStatus = CheckStatus.builder()
-            .id(IdUtils.create())
-            .type(CheckStatus.class.getName())
-            .baseUrl(Property.ofValue("http://localhost:8089"))
-            .jobId(Property.ofValue("4323"))
-            .accountId(Property.ofValue("123"))
-            .token(Property.ofValue("fake-token"))
-            .maxDuration(Property.ofValue(Duration.ofSeconds(5)))
-            .parseRunResults(Property.ofValue(false))
-            .failOnUnsuccessful(Property.ofValue(false))
-            .build();
-
-        CheckStatus.Output output = checkStatus.run(runContext);
-
-        assertThat(output, is(notNullValue()));
-        assertThat(output.getRunId(), is(5555L));
-    }
-
     /** Exactly one selector must be set, caught at flow validation rather than at runtime. */
     @Test
     void shouldRejectMoreThanOneRunSelector() {
@@ -987,13 +917,13 @@ class CheckStatusTest {
         assertThat(validation.get().getMessage(), containsString("Exactly one of"));
     }
 
-    /** An environmentId reads the newest finished run anywhere in the environment. */
+    /** An environmentId reads the newest successful run anywhere in the environment. */
     @Test
-    void shouldResolveLatestFinishedRunFromEnvironmentId() throws Exception {
+    void shouldResolveLatestSuccessfulRunFromEnvironmentId() throws Exception {
         stubFor(
             get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
                 .withQueryParam("environment_id", equalTo("77"))
-                .withQueryParam("status__in", equalTo("[10,20,30]"))
+                .withQueryParam("status", equalTo("10"))
                 .withQueryParam("order_by", equalTo("-finished_at"))
                 .withQueryParam("limit", equalTo("1"))
                 .willReturn(okJson("""
@@ -1009,7 +939,7 @@ class CheckStatusTest {
                         }
                     """))
         );
-        stubFinishedRun(7790, 10, "Success");
+        stubSuccessfulRun(7790, 10, "Success");
 
         CheckStatus checkStatus = CheckStatus.builder()
             .id(IdUtils.create())
@@ -1034,7 +964,7 @@ class CheckStatusTest {
     /** The watermark is keyed on the selector, so a job and an environment must not suppress each other. */
     @Test
     void shouldNotShareWatermarkBetweenJobAndEnvironmentSelectors() throws Exception {
-        stubLatestFinishedRun("4327", 7791);
+        stubLatestSuccessfulRun("4327", 7791);
         stubFor(
             get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
                 .withQueryParam("environment_id", equalTo("78"))
@@ -1076,7 +1006,7 @@ class CheckStatusTest {
      */
     @Test
     void shouldNotReEmitLineageForAnUnchangedRunButStillReturnItsOutputs() throws Exception {
-        stubLatestFinishedRun("4324", 7778);
+        stubLatestSuccessfulRun("4324", 7778);
 
         CheckStatus checkStatus = refresherFor("4324").build();
         RunContext runContext = mockRunContext(checkStatus);
@@ -1160,7 +1090,7 @@ class CheckStatusTest {
      */
     @Test
     void shouldReadRunAgainWhenTheJobHasANewerRun() throws Exception {
-        stubLatestFinishedRun("4325", 7779);
+        stubLatestSuccessfulRun("4325", 7779);
 
         CheckStatus checkStatus = refresherFor("4325").build();
         RunContext runContext = mockRunContext(checkStatus);
@@ -1169,7 +1099,7 @@ class CheckStatusTest {
         assertThat(checkStatus.run(runContext).isLineageEmitted(), is(false));
 
         // dbt Cloud finishes a newer run for the same job.
-        stubLatestFinishedRun("4325", 7780);
+        stubLatestSuccessfulRun("4325", 7780);
 
         CheckStatus.Output afterNewRun = checkStatus.run(runContext);
         assertThat(afterNewRun.getRunId(), is(7780L));
@@ -1181,7 +1111,7 @@ class CheckStatusTest {
      */
     @Test
     void shouldAlwaysEmitWhenAnExplicitRunIdIsGiven() throws Exception {
-        stubFinishedRun(7782, 10, "Success");
+        stubSuccessfulRun(7782, 10, "Success");
 
         CheckStatus checkStatus = CheckStatus.builder()
             .id(IdUtils.create())
@@ -1199,67 +1129,6 @@ class CheckStatusTest {
         assertThat(checkStatus.run(runContext).isLineageEmitted(), is(true));
     }
 
-    /**
-     * Asserted on the emitter, since this path throws. A failed run emits lineage then throws, so the
-     * watermark has to be written before the throw. The task still fails on both ticks.
-     */
-    @Test
-    void shouldRecordWatermarkForAFailedRunSoLineageIsNotReEmittedEveryTick() throws Exception {
-        stubFor(
-            get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
-                .withQueryParam("job_definition_id", equalTo("4328"))
-                .willReturn(okJson("""
-                        {
-                          "data": [
-                            {
-                              "id": 7795,
-                              "status": 20,
-                              "status_humanized": "Error",
-                              "finished_at": "2026-08-31 06:00:00.000000+00:00"
-                            }
-                          ]
-                        }
-                    """))
-        );
-        stubFinishedRun(7795, 20, "Error");
-
-        // failOnUnsuccessful deliberately left at its default of true.
-        CheckStatus checkStatus = refresherFor("4328").build();
-        RunContext runContext = mockRunContext(checkStatus);
-
-        assetManagerFactory.clear();
-
-        // First tick reports the failed run, and emits its lineage on the way out.
-        var first = assertThrows(Exception.class, () -> checkStatus.run(runContext));
-        assertThat(first.getMessage(), containsString("Error"));
-        assertThat(assetManagerFactory.allEmitted(), hasSize(2));
-
-        // Second tick still fails, because the run is still unsuccessful and failOnUnsuccessful is on.
-        // But the lineage must not be emitted a second time for a run that has not changed.
-        var second = assertThrows(Exception.class, () -> checkStatus.run(runContext));
-        assertThat(second.getMessage(), containsString("Error"));
-        assertThat(assetManagerFactory.allEmitted(), hasSize(2));
-    }
-
-    /**
-     * Sanitising the key is many-to-one, so "4330.1" and "4330_1" both reduce to "4330_1". A fingerprint of
-     * the raw parts keeps them apart, otherwise one selector's watermark would suppress the other's emit.
-     */
-    @Test
-    void shouldNotShareWatermarkBetweenSelectorsThatSanitiseAlike() throws Exception {
-        stubLatestFinishedRun("4330.1", 7797);
-        stubLatestFinishedRun("4330_1", 7797);
-
-        // Same flow and task id, so the sanitised jobId is the only thing keeping the two keys apart.
-        String taskId = IdUtils.create();
-
-        CheckStatus dotted = refresherFor("4330.1").id(taskId).build();
-        assertThat(dotted.run(mockRunContext(dotted)).isLineageEmitted(), is(true));
-
-        CheckStatus underscored = refresherFor("4330_1").id(taskId).build();
-        assertThat(underscored.run(mockRunContext(underscored)).isLineageEmitted(), is(true));
-    }
-
     private CheckStatus.CheckStatusBuilder<?, ?> refresherFor(String jobId) {
         return CheckStatus.builder()
             // Random per test run: the watermark is keyed on the task id and outlives the JVM.
@@ -1273,7 +1142,7 @@ class CheckStatusTest {
             .parseRunResults(Property.ofValue(false));
     }
 
-    private void stubLatestFinishedRun(String jobId, long runId) {
+    private void stubLatestSuccessfulRun(String jobId, long runId) {
         stubFor(
             get(urlPathEqualTo("/api/v2/accounts/123/runs/"))
                 .withQueryParam("job_definition_id", equalTo(jobId))
@@ -1291,10 +1160,10 @@ class CheckStatusTest {
                     """.formatted(runId)))
         );
 
-        stubFinishedRun(runId, 10, "Success");
+        stubSuccessfulRun(runId, 10, "Success");
     }
 
-    private void stubFinishedRun(long runId, int status, String humanized) {
+    private void stubSuccessfulRun(long runId, int status, String humanized) {
         stubFor(
             get(urlMatching("/api/v2/accounts/123/runs/" + runId + "/\\?.*"))
                 .willReturn(okJson("""

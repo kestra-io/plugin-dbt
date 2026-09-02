@@ -13,7 +13,6 @@ import java.time.Duration;
 import java.util.*;
 import java.util.HexFormat;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.slf4j.Logger;
@@ -64,7 +63,7 @@ import static java.lang.Math.max;
     title = "Monitor a dbt Cloud run",
     description = """
         Polls a dbt Cloud run until it ends, streaming step logs and downloading artifacts.
-        Takes a `runId`, or a `jobId` or `environmentId` to read the most recent finished run of that job or
+        Takes a `runId`, or a `jobId` or `environmentId` to read the most recent successful run of that job or
         environment, which keeps lineage fresh for runs Kestra did not trigger.
         Fails on non-successful statuses unless `failOnUnsuccessful` is false.
         Defaults to 5s polling and a 60m timeout.
@@ -104,7 +103,6 @@ import static java.lang.Math.max;
                     accountId: "12345"
                     token: "{{ secret('DBT_TOKEN') }}"
                     jobId: "4321"
-                    failOnUnsuccessful: false
                 """
         )
     }
@@ -115,13 +113,6 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         JobStatus.NUMBER_20, // Error
         JobStatus.NUMBER_30 // Cancelled
     );
-
-    // dbt Cloud's `status__in` value, derived from ENDED_STATUS so the query and the ended check
-    // cannot drift apart.
-    private static final String ENDED_STATUS_FILTER = ENDED_STATUS.stream()
-        .map(JobStatus::toString)
-        .sorted()
-        .collect(Collectors.joining(",", "[", "]"));
 
     private static final String PROCESSED_KEY_PREFIX = "dbt-cloud-last-run";
 
@@ -143,7 +134,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     @Schema(
         title = "Job ID",
         description = """
-            dbt Cloud job identifier. Reads that job's most recent finished run, which refreshes lineage for
+            dbt Cloud job identifier. Reads that job's most recent successful run, which refreshes lineage for
             runs triggered outside Kestra.
             Mutually exclusive with `runId` and `environmentId`.
             """
@@ -154,7 +145,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     @Schema(
         title = "Environment ID",
         description = """
-            dbt Cloud environment identifier. Reads the most recent finished run anywhere in that environment,
+            dbt Cloud environment identifier. Reads the most recent successful run anywhere in that environment,
             whichever job produced it. dbt's manifest covers the whole project, so any run refreshes the full graph.
             Mutually exclusive with `runId` and `jobId`.
             """
@@ -195,8 +186,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         title = "Fail if the run ends in a non-successful state",
         description = """
             When true (default), a run ending in `Error` or `Cancelled` raises a task failure.
-            Set to false to read a finished run without failing the task, which a scheduled refresh needs since
-            it does not own the run it reads.
+            Set to false to read a run without failing the task, which matters when a `runId` is pinned on a
+            schedule. `jobId` and `environmentId` resolve successful runs only, so it does not apply there.
             """
     )
     @PluginProperty(group = "reliability")
@@ -327,8 +318,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             logger.warn("Unable to download or parse artifacts for failed run '{}': {}", runIdRendered, e.getMessage(), e);
         }
 
-        // Before the throw below, since the lineage is already emitted by this point. Gated on it having
-        // landed in full, so a missing manifest or a partial emit is retried rather than skipped for good.
+        // Gated on the lineage having landed in full, so a missing manifest or a partial emit is retried
+        // on the next execution rather than skipped for good.
         if (!alreadyEmitted && artifactsProcessed && lineageLanded) {
             rememberProcessed(runContext, processedKey, runIdRendered);
         }
@@ -359,20 +350,21 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             .build();
     }
 
-    /** The explicit {@code runId}, or the most recent finished run of the given job or environment. */
+    /** The explicit {@code runId}, or the most recent successful run of the given job or environment. */
     private Long resolveRunId(RunContext runContext) throws Exception {
         if (this.runId != null) {
             return Long.parseLong(runContext.render(this.runId).as(String.class).orElseThrow());
         }
 
-        return findLatestFinishedRun(runContext);
+        return findLatestSuccessfulRun(runContext);
     }
 
     /**
-     * Terminal statuses only, because dbt Cloud writes artifacts only once a run ends. Failed and cancelled
-     * runs are kept: dbt writes the manifest at parse time, so it describes the project just as accurately.
+     * Successful runs only. A failed run's manifest is usually complete, since dbt writes it at parse time,
+     * but a run that dies before parsing has no manifest at all, and resolving one would leave the task with
+     * nothing to emit and empty outputs until dbt produced another run.
      */
-    private Long findLatestFinishedRun(RunContext runContext) throws Exception {
+    private Long findLatestSuccessfulRun(RunContext runContext) throws Exception {
         RunSelector selector = runSelector(runContext);
 
         HttpRequest.HttpRequestBuilder requestBuilder = HttpRequest.builder()
@@ -381,7 +373,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                     runContext.render(this.baseUrl).as(String.class).orElseThrow()
                         + "/api/v2/accounts/" + runContext.render(this.accountId).as(String.class).orElseThrow()
                         + "/runs/?" + selector.queryParam() + "=" + URLEncoder.encode(selector.value(), StandardCharsets.UTF_8)
-                        + "&status__in=" + URLEncoder.encode(ENDED_STATUS_FILTER, StandardCharsets.UTF_8)
+                        + "&status=" + JobStatus.NUMBER_10
                         + "&order_by=" + URLEncoder.encode("-finished_at", StandardCharsets.UTF_8)
                         + "&limit=1"
                 )
@@ -392,8 +384,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
         if (response == null || response.getData() == null || response.getData().isEmpty()) {
             throw new IllegalStateException(
-                "No finished run found for dbt Cloud " + selector.describe() + ". " +
-                    "It may never have run to completion, or the token may not have access to it."
+                "No successful run found for dbt Cloud " + selector.describe() + ". " +
+                    "It may never have completed successfully, or the token may not have access to it."
             );
         }
 
@@ -402,7 +394,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             throw new IllegalStateException("dbt Cloud returned a run without an id for " + selector.describe());
         }
 
-        runContext.logger().info("Resolved run '{}' as the most recent finished run of {}", resolved, selector.describe());
+        runContext.logger().info("Resolved run '{}' as the most recent successful run of {}", resolved, selector.describe());
         return resolved;
     }
 
