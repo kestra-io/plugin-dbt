@@ -49,6 +49,15 @@ public abstract class ResultParser {
     }
 
     public static ManifestResult parseManifestWithAssets(RunContext runContext, File file) throws IOException, IllegalVariableEvaluationException {
+        return parseManifestWithAssets(runContext, file, Map.of());
+    }
+
+    /**
+     * {@code assetMetadata} is merged into every asset this manifest produces. Used to carry facts about the
+     * producing run that the manifest itself does not know, such as the dbt Cloud job's schedule (issue #323).
+     */
+    public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, Map<String, Object> assetMetadata)
+        throws IOException, IllegalVariableEvaluationException {
         Manifest manifest = null;
 
         // Asset lineage is metadata about the run, not the run itself. dbt adds fields to the
@@ -56,7 +65,7 @@ public abstract class ResultParser {
         // successful dbt run into a failed task. Store the raw file and carry on without assets.
         try {
             manifest = MAPPER.readValue(file, Manifest.class);
-            emitAssets(runContext, manifest);
+            emitAssets(runContext, manifest, assetMetadata);
         } catch (Exception e) {
             manifest = null;
             runContext.logger().warn("Unable to read the dbt manifest, assets will not be emitted. The manifest is still stored as an output file.", e);
@@ -226,7 +235,7 @@ public abstract class ResultParser {
         return new AssetsInOut(inputs, outputs);
     }
 
-    private static void emitAssets(RunContext runContext, Manifest manifest) throws IllegalVariableEvaluationException {
+    private static void emitAssets(RunContext runContext, Manifest manifest, Map<String, Object> assetMetadata) throws IllegalVariableEvaluationException {
         Map<String, ModelAsset> assetNodes = extractAssetNodes(manifest);
         runContext.logger().info("dbt assets extracted from manifest: {}", assetNodes.size());
 
@@ -237,7 +246,7 @@ public abstract class ResultParser {
 
             // Bundle is {parents} -> {this node} only (never children) so each event is self-contained, no cartesian join.
             List<AssetIdentifier> inputs = inputIdentifiers(asset, assetNodes);
-            List<Asset> outputs = List.of(selfAsset(asset));
+            List<Asset> outputs = List.of(selfAsset(asset, assetMetadata));
             try {
                 runContext.assets().emit(new AssetEmit(inputs, outputs));
             } catch (UnsupportedOperationException e) {
@@ -251,10 +260,17 @@ public abstract class ResultParser {
     }
 
     private static Asset selfAsset(ModelAsset asset) {
+        return selfAsset(asset, Map.of());
+    }
+
+    private static Asset selfAsset(ModelAsset asset, Map<String, Object> assetMetadata) {
+        Map<String, Object> metadata = new HashMap<>(asset.metadata());
+        metadata.putAll(assetMetadata);
+
         return Custom.builder()
             .id(asset.assetId())
             .type(TABLE_ASSET_TYPE)
-            .metadata(asset.metadata())
+            .metadata(metadata)
             .build();
     }
 
