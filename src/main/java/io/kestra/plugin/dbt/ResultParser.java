@@ -3,6 +3,7 @@ package io.kestra.plugin.dbt;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 
@@ -19,6 +20,7 @@ import io.kestra.core.models.assets.Custom;
 import io.kestra.core.models.executions.TaskRun;
 import io.kestra.core.models.executions.TaskRunAttempt;
 import io.kestra.core.models.executions.metrics.Counter;
+import io.kestra.core.models.executions.metrics.Timer;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.queues.QueueException;
 import io.kestra.core.runners.AssetEmit;
@@ -31,6 +33,7 @@ import io.kestra.plugin.dbt.models.Manifest;
 import io.kestra.plugin.dbt.models.RunResult;
 
 import static io.kestra.core.utils.Rethrow.throwConsumer;
+import static java.lang.Math.max;
 
 public abstract class ResultParser {
     static final protected ObjectMapper MAPPER = JacksonMapper.ofJson(false)
@@ -113,24 +116,46 @@ public abstract class ResultParser {
                         );
                     });
 
-                r.getTiming()
+                // The terminal date is anchored on dbt's own execution_time rather than the end of the last
+                // timing phase (issue #316). execution_time is the whole cost of the node, while the phases
+                // cover only compile and execute, so the phase span understates the node and the Gantt showed
+                // every model as near-instantaneous. Never earlier than the last phase ended, so the history
+                // cannot invert if the two disagree.
+                OptionalLong firstStartedAt = r.getTiming()
+                    .stream()
+                    .mapToLong(timing -> timing.getStartedAt().toEpochMilli())
+                    .min();
+                OptionalLong lastCompletedAt = r.getTiming()
                     .stream()
                     .mapToLong(timing -> timing.getCompletedAt().toEpochMilli())
-                    .max()
-                    .ifPresent(value ->
-                    {
-                        histories.add(
-                            new State.History(
-                                r.state(),
-                                Instant.ofEpochMilli(value)
-                            )
-                        );
-                    });
+                    .max();
+
+                if (lastCompletedAt.isPresent()) {
+                    long terminalAt = lastCompletedAt.getAsLong();
+
+                    if (r.getExecutionTime() != null && firstStartedAt.isPresent()) {
+                        long fromExecutionTime = firstStartedAt.getAsLong() + Math.round(r.getExecutionTime() * 1000);
+                        terminalAt = max(terminalAt, fromExecutionTime);
+                    }
+
+                    histories.add(
+                        new State.History(
+                            r.state(),
+                            Instant.ofEpochMilli(terminalAt)
+                        )
+                    );
+                }
 
                 State state = State.of(
                     r.state(),
                     histories
                 );
+
+                if (r.getExecutionTime() != null) {
+                    runContext.metric(
+                        Timer.of("node.execution.duration", Duration.ofMillis(Math.round(r.getExecutionTime() * 1000)), "node", r.getUniqueId())
+                    );
+                }
 
                 r.getAdapterResponse()
                     .entrySet()
