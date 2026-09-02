@@ -12,6 +12,7 @@ import com.github.tomakehurst.wiremock.stubbing.Scenario;
 
 import io.kestra.core.http.client.HttpClientResponseException;
 import io.kestra.core.junit.annotations.KestraTest;
+import io.kestra.core.models.assets.Custom;
 import io.kestra.core.models.executions.LogEntry;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
@@ -1273,7 +1274,7 @@ class CheckStatusTest {
     private Map<String, Object> emittedMetadata(RunContext runContext) throws Exception {
         var emitted = runContext.assets().emitted();
         assertThat(emitted, hasSize(1));
-        return ((io.kestra.core.models.assets.Custom) emitted.getFirst().outputs().getFirst()).getMetadata();
+        return ((Custom) emitted.getFirst().outputs().getFirst()).getMetadata();
     }
 
     private CheckStatus readerFor(long runId) {
@@ -1332,6 +1333,25 @@ class CheckStatusTest {
         Map<String, Object> metadata = emittedMetadata(runContext);
         assertThat(metadata.containsKey("dbtCloudJobSchedule"), is(false));
         assertThat(metadata.get("dbtCloudJobScheduled"), is(false));
+    }
+
+    /** A scheduled job with no cron must still not claim a cadence. */
+    @Test
+    void shouldNotReportACadenceWhenAScheduledJobHasNoCron() throws Exception {
+        stubRunWithJob(9103, """
+            {
+              "id": 4323,
+              "triggers": {"schedule": true}
+            }
+            """);
+
+        CheckStatus checkStatus = readerFor(9103);
+        RunContext runContext = mockRunContext(checkStatus);
+        checkStatus.run(runContext);
+
+        Map<String, Object> metadata = emittedMetadata(runContext);
+        assertThat(metadata.containsKey("dbtCloudJobSchedule"), is(false));
+        assertThat(metadata.get("dbtCloudJobScheduled"), is(true));
     }
 
     /** No job on the response at all is distinct from a disabled schedule: neither key is claimed. */
