@@ -76,6 +76,7 @@ public abstract class AbstractDbtCloud extends Task {
     )
     @NotNull
     @PluginProperty(group = "main", secret = true)
+    @ToString.Exclude
     Property<String> token;
 
     @Schema(title = "The HTTP client configuration")

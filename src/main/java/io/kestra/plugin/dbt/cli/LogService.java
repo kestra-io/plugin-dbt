@@ -17,6 +17,9 @@ class LogService {
 
     @SuppressWarnings("unchecked")
     protected static void parse(RunContext runContext, String line, AtomicBoolean hasWarning) {
+        if (line == null) {
+            return;
+        }
         try {
             Map<String, Object> jsonLog = (Map<String, Object>) MAPPER.readValue(line, Object.class);
 
@@ -28,6 +31,7 @@ class LogService {
             HashMap<String, Object> additional = new HashMap<>();
 
             if (jsonLog.containsKey("info")) {
+                // Classic dbt JSON log format: { "info": { "level": ..., "ts": ..., ... }, "data": { ... } }
                 Map<String, Object> infoLog = (Map<String, Object>) jsonLog.get("info");
 
                 level = (String) infoLog.get("level");
@@ -37,7 +41,16 @@ class LogService {
                 msg = (String) infoLog.get("msg");
 
                 additional.putAll(infoLog);
+            } else if (jsonLog.containsKey("message")) {
+                // Fusion v2.0 JSON log format: { "level": ..., "ts": ..., "message": ..., ... }
+                level = normalizeLevel((String) jsonLog.get("level"));
+                ts = (String) jsonLog.get("ts");
+                thread = (String) jsonLog.get("thread_name");
+                type = (String) jsonLog.get("name");
+                msg = (String) jsonLog.get("message");
+                additional.putAll(jsonLog);
             } else {
+                // Legacy flat JSON log format
                 level = (String) jsonLog.get("level");
                 ts = (String) jsonLog.get("ts");
                 thread = (String) jsonLog.get("thread_name");
@@ -50,8 +63,8 @@ class LogService {
             additional.remove("invocation_id");
             additional.remove("level");
             additional.remove("log_version");
-            additional.remove("code");
             additional.remove("msg");
+            additional.remove("message");
             additional.remove("thread");
             additional.remove("thread_name");
             additional.remove("type");
@@ -79,6 +92,11 @@ class LogService {
                 }
             }
 
+            if (level == null) {
+                runContext.logger().info(format, (Object[]) args);
+                return;
+            }
+
             switch (level) {
                 case "debug":
                     runContext.logger().debug(format, (Object[]) args);
@@ -96,5 +114,20 @@ class LogService {
         } catch (Throwable e) {
             runContext.logger().info(line.trim());
         }
+    }
+
+    /**
+     * Fusion v2.0 may emit numeric or uppercase level strings; normalize to lowercase dbt-classic values.
+     */
+    private static String normalizeLevel(String level) {
+        if (level == null) {
+            return null;
+        }
+        return switch (level.toLowerCase()) {
+            case "warning" -> "warn";
+            case "error", "critical" -> "error";
+            case "debug", "trace" -> "debug";
+            default -> level.toLowerCase();
+        };
     }
 }
