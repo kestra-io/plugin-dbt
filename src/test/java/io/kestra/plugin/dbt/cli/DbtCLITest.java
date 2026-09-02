@@ -249,14 +249,18 @@ class DbtCLITest {
 
         if (credentialsPath != null && !credentialsPath.isBlank()) {
             Path credFile = Path.of(credentialsPath);
-            Assumptions.assumeTrue(Files.exists(credFile) && Files.size(credFile) > 0,
-                "GOOGLE_APPLICATION_CREDENTIALS file does not exist or is empty");
+            Assumptions.assumeTrue(
+                Files.exists(credFile) && Files.size(credFile) > 0,
+                "GOOGLE_APPLICATION_CREDENTIALS file does not exist or is empty"
+            );
             Files.copy(credFile, workingDirSa);
             return;
         }
 
-        Assumptions.assumeTrue(encodedServiceAccount != null && !encodedServiceAccount.isBlank(),
-            "GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_SERVICE_ACCOUNT must be set");
+        Assumptions.assumeTrue(
+            encodedServiceAccount != null && !encodedServiceAccount.isBlank(),
+            "GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_SERVICE_ACCOUNT must be set"
+        );
 
         byte[] decoded;
         try {
@@ -283,7 +287,7 @@ class DbtCLITest {
                         "dbt deps",
                         "mkdir -p models",
                         "echo 'SELECT * FROM definitely_non_existent_table_12345' > models/failing_test_model.sql",
-                        "dbt run --models failing_test_model"
+                        "dbt run --select failing_test_model"
                     )
                 )
             )

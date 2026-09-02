@@ -33,7 +33,6 @@ import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.plugin.dbt.ResultParser;
 import io.kestra.plugin.dbt.models.Manifest;
 import io.kestra.plugin.scripts.exec.AbstractExecScript;
-import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.plugin.scripts.exec.scripts.runners.CommandsWrapper;
 import io.kestra.plugin.scripts.runner.docker.Docker;
@@ -230,10 +229,10 @@ import lombok.experimental.SuperBuilder;
                   - id: dbt_command
                     type: SELECT
                     allowCustomValue: true
-                    defaults: dbt build --project-dir dbt --target prod --no-partial-parse
+                    defaults: dbt build --project-dir dbt --target prod
                     values:
-                      - dbt build --target prod --no-partial-parse
-                      - dbt build --target prod --no-partial-parse --select state:modified+ --defer --state ./target
+                      - dbt build --target prod
+                      - dbt build --target prod --select state:modified+ --defer --state ./target
 
                 tasks:
                   - id: dbt
@@ -276,6 +275,40 @@ import lombok.experimental.SuperBuilder;
                                 fixed_retries: 1
                                 threads: 16
                                 timeout_seconds: 300
+                            target: dev
+                """
+        ),
+        @Example(
+            title = "Run dbt build using the Fusion engine (dbt Core v2.0). The `engine: FUSION` property selects the `ghcr.io/kestra-io/dbt-fusion` image automatically when no `containerImage` is set. Note that `--no-partial-parse` / `--partial-parse` flags are not supported by Fusion and should be omitted from commands. With the `duckdb` adapter, Fusion requires an explicit `database` in the profile (unlike dbt Core, which infers it from the `:memory:` path).",
+            full = true,
+            code = """
+                id: dbt_fusion_build
+                namespace: company.team
+
+                tasks:
+                  - id: dbt
+                    type: io.kestra.plugin.core.flow.WorkingDirectory
+                    tasks:
+                      - id: clone_repository
+                        type: io.kestra.plugin.git.Clone
+                        url: https://github.com/kestra-io/dbt-example
+                        branch: main
+
+                      - id: dbt_build
+                        type: io.kestra.plugin.dbt.cli.DbtCLI
+                        engine: FUSION
+                        taskRunner:
+                          type: io.kestra.plugin.scripts.runner.docker.Docker
+                        commands:
+                          - dbt deps
+                          - dbt build
+                        profiles: |
+                          my_dbt_project:
+                            outputs:
+                              dev:
+                                type: duckdb
+                                path: ":memory:"
+                                database: memory
                             target: dev
                 """
         )
@@ -347,10 +380,9 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         .entryPoint(new ArrayList<>())
         .build();
 
-    @Builder.Default
     @PluginProperty(group = "execution")
     @Schema(title = "The task runner container image, only used if the task runner is container-based.")
-    protected Property<String> containerImage = Property.ofValue(CORE_IMAGE);
+    protected Property<String> containerImage;
 
     @Schema(
         title = "Store manifest",
@@ -376,36 +408,15 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
     @Schema(
         title = "dbt engine",
-        description = "Selects the fallback image when none is set on the task or runner: CORE → `ghcr.io/kestra-io/dbt` (default), FUSION → `ghcr.io/kestra-io/dbt-fusion`."
+        description = """
+            Selects the fallback image when none is set on the task or runner: \
+            CORE → `ghcr.io/kestra-io/dbt` (default), FUSION → `ghcr.io/kestra-io/dbt-fusion`.
+            When using FUSION (dbt Core v2.0), the `--no-partial-parse` and `--partial-parse` \
+            flags are silently ignored and should be omitted from commands."""
     )
     @Builder.Default
     @PluginProperty(group = "advanced")
     private Property<Engine> engine = Property.ofValue(Engine.CORE);
-
-    @Override
-    protected DockerOptions injectDefaults(RunContext runContext, DockerOptions original) throws IllegalVariableEvaluationException {
-        if (original == null) {
-            return null;
-        }
-
-        var builder = original.toBuilder();
-        if (original.getImage() == null) {
-            var rContainerImage = runContext.render(this.containerImage).as(String.class).orElse(null);
-
-            if (rContainerImage != null) {
-                builder.image(rContainerImage);
-            } else {
-                var rEngine = runContext.render(this.engine).as(Engine.class).orElse(Engine.CORE);
-                builder.image(rEngine == Engine.FUSION ? FUSION_IMAGE : CORE_IMAGE);
-            }
-        }
-
-        if (original.getEntryPoint() == null) {
-            builder.entryPoint(new ArrayList<>());
-        }
-
-        return builder.build();
-    }
 
     @Override
     public Output run(RunContext runContext) throws Exception {
@@ -423,9 +434,15 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
             );
         }
 
-        CommandsWrapper commandsWrapper = this.commands(runContext)
+        var rEngine = runContext.render(this.engine).as(Engine.class).orElse(Engine.CORE);
+
+        CommandsWrapper builtCommandsWrapper = this.commands(runContext)
             .withEnableOutputDirectory(true) // force the output dir, so we can get the run_results.json and manifest.json files on each task runners
             .withLogConsumer(new DbtLogConsumer(runContext, hasWarning));
+
+        final CommandsWrapper commandsWrapper = builtCommandsWrapper.getContainerImage() == null
+            ? builtCommandsWrapper.withContainerImage(rEngine == Engine.FUSION ? FUSION_IMAGE : CORE_IMAGE)
+            : builtCommandsWrapper;
 
         var rProjectDir = runContext.render(projectDir).as(String.class);
         Path projectWorkingDirectory = rProjectDir
@@ -452,6 +469,10 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         }
 
         var rCommands = runContext.render(this.commands).asList(String.class);
+
+        if (rEngine == Engine.FUSION && rCommands.stream().anyMatch(command -> command.contains("--partial-parse") || command.contains("--no-partial-parse"))) {
+            logger.warn("The '--partial-parse' and '--no-partial-parse' flags are not supported by the FUSION engine and will be silently ignored by dbt.");
+        }
 
         LogFormat rLogFormat = runContext.render(this.logFormat).as(LogFormat.class).orElseThrow();
 

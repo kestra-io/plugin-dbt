@@ -589,6 +589,96 @@ class ResultParserTest {
             .orElse(null);
     }
 
+    private static AssetEmit findEmitWithInput(List<AssetEmit> emitted, String inputId) {
+        return emitted.stream()
+            .filter(e -> e.inputs().stream().anyMatch(i -> i.id().equals(inputId)))
+            .filter(e -> e.outputs().isEmpty())
+            .findFirst()
+            .orElse(null);
+    }
+
+    private static AssetEmit findEmitWithInputAndOutput(List<AssetEmit> emitted, String inputId, String outputId) {
+        return emitted.stream()
+            .filter(e -> e.inputs().stream().anyMatch(i -> i.id().equals(inputId)))
+            .filter(e -> e.outputs().stream().anyMatch(o -> o.getId().equals(outputId)))
+            .findFirst()
+            .orElse(null);
+    }
+
+    @Test
+    void parseRunResult_withFusionRunStatus_shouldSucceed() throws Exception {
+        var runContext = mockRunContext();
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        // Fusion v2.0 emits "run" as the status for a successfully executed model
+        Files.writeString(runResultsFile, """
+            {
+              "metadata": {
+                "dbt_schema_version": "https://schemas.getdbt.com/dbt/run-results/v6/run-results.json",
+                "dbt_version": "2.0.0"
+              },
+              "results": [
+                {
+                  "status": "run",
+                  "unique_id": "model.my_project.my_model",
+                  "timing": [
+                    {
+                      "name": "compile",
+                      "started_at": "2024-01-01T00:00:00.000000Z",
+                      "completed_at": "2024-01-01T00:00:01.000000Z"
+                    },
+                    {
+                      "name": "execute",
+                      "started_at": "2024-01-01T00:00:01.000000Z",
+                      "completed_at": "2024-01-01T00:00:02.000000Z"
+                    }
+                  ],
+                  "thread_id": "Thread-1",
+                  "execution_time": 2.0,
+                  "adapter_response": {},
+                  "message": "OK",
+                  "failures": null
+                }
+              ],
+              "elapsed_time": 2.5
+            }
+            """);
+
+        var uri = ResultParser.parseRunResult(runContext, runResultsFile.toFile(), null);
+
+        assertThat(uri, is(notNullValue()));
+    }
+
+    @Test
+    void parseRunResult_withUnknownTopLevelFields_shouldNotFail() throws Exception {
+        var runContext = mockRunContext();
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        // Fusion may add unknown top-level fields; @JsonIgnoreProperties ensures stability
+        Files.writeString(runResultsFile, """
+            {
+              "metadata": {},
+              "results": [
+                {
+                  "status": "success",
+                  "unique_id": "model.my_project.stg_orders",
+                  "timing": [],
+                  "thread_id": "Thread-1",
+                  "execution_time": 1.0,
+                  "adapter_response": {},
+                  "message": null,
+                  "failures": null,
+                  "fusion_extra_field": "ignored"
+                }
+              ],
+              "elapsed_time": 1.0,
+              "fusion_run_id": "some-uuid-from-fusion"
+            }
+            """);
+
+        var uri = ResultParser.parseRunResult(runContext, runResultsFile.toFile(), null);
+
+        assertThat(uri, is(notNullValue()));
+    }
+
     /**
      * Issue #316: the Gantt showed every model as near-instantaneous because the terminal date came from the
      * end of the last timing phase, and those phases cover only compile and execute. dbt's execution_time is

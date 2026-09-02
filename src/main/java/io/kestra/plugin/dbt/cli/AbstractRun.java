@@ -36,7 +36,10 @@ public abstract class AbstractRun extends AbstractDbt {
     Property<String> target;
 
     @Schema(
-        title = "The selector name to use, as defined in selectors.yml"
+        title = "The selector name to use, as defined in selectors.yml",
+        description = """
+            Prior to v1.6.2, this property incorrectly passed the `target` value to `--selector` instead of the selector \
+            value — if your flow relied on that broken behavior, update it to use the `target` property instead."""
     )
     Property<String> selector;
 
@@ -74,7 +77,7 @@ public abstract class AbstractRun extends AbstractDbt {
         }
 
         if (runContext.render(this.selector).as(String.class).isPresent()) {
-            commands.add("--selector " + runContext.render(this.target).as(String.class).get());
+            commands.add("--selector " + runContext.render(this.selector).as(String.class).get());
         }
 
         if (!runContext.render(this.select).asList(String.class).isEmpty()) {
