@@ -1,6 +1,8 @@
 package io.kestra.plugin.dbt;
 
 import java.nio.file.Files;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -675,6 +677,58 @@ class ResultParserTest {
         var uri = ResultParser.parseRunResult(runContext, runResultsFile.toFile(), null);
 
         assertThat(uri, is(notNullValue()));
+    }
+
+    /**
+     * Issue #316: the Gantt showed every model as near-instantaneous because the terminal date came from the
+     * end of the last timing phase, and those phases cover only compile and execute. dbt's execution_time is
+     * the whole cost of the node, so the duration is anchored on that instead.
+     */
+    @Test
+    void parseRunResult_shouldReportDbtExecutionTimeAsTheTaskRunDuration() throws Exception {
+        var runContext = mockRunContext();
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        Files.writeString(runResultsFile, """
+            {
+              "metadata": {"dbt_version": "1.8.0"},
+              "results": [
+                {
+                  "status": "success",
+                  "unique_id": "model.p.slow_model",
+                  "execution_time": 5.0,
+                  "adapter_response": {},
+                  "timing": [
+                    {"name": "compile", "started_at": "2024-01-01T00:00:00Z", "completed_at": "2024-01-01T00:00:01Z"},
+                    {"name": "execute", "started_at": "2024-01-01T00:00:01Z", "completed_at": "2024-01-01T00:00:02Z"}
+                  ]
+                },
+                {
+                  "status": "success",
+                  "unique_id": "model.p.no_execution_time",
+                  "adapter_response": {},
+                  "timing": [
+                    {"name": "compile", "started_at": "2024-01-01T00:00:00Z", "completed_at": "2024-01-01T00:00:01Z"},
+                    {"name": "execute", "started_at": "2024-01-01T00:00:01Z", "completed_at": "2024-01-01T00:00:02Z"}
+                  ]
+                }
+              ]
+            }
+            """);
+
+        ResultParser.parseRunResult(runContext, runResultsFile.toFile(), null);
+
+        Map<String, TaskRun> byTaskId = runContext.dynamicWorkerResults().stream()
+            .map(WorkerTaskResult::getTaskRun)
+            .collect(Collectors.toMap(TaskRun::getTaskId, tr -> tr));
+
+        // The phases span 2s, but dbt charged the node 5s, so the taskrun reports 5s.
+        TaskRun slow = byTaskId.get("model.p.slow_model");
+        assertThat(slow.getState().getStartDate(), is(Instant.parse("2024-01-01T00:00:00Z")));
+        assertThat(slow.getState().getDuration().orElseThrow(), is(Duration.ofSeconds(5)));
+
+        // Without execution_time it still falls back to the end of the last phase.
+        TaskRun fallback = byTaskId.get("model.p.no_execution_time");
+        assertThat(fallback.getState().getDuration().orElseThrow(), is(Duration.ofSeconds(2)));
     }
 
     private RunContext mockRunContext() {
