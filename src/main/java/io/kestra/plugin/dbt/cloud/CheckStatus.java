@@ -7,8 +7,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.*;
+import java.util.HexFormat;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -59,7 +62,13 @@ import static java.lang.Math.max;
 @NoArgsConstructor
 @Schema(
     title = "Monitor a dbt Cloud run",
-    description = "Polls a dbt Cloud run until it ends, streaming step logs and downloading artifacts. Takes a `runId`, or a `jobId` or `environmentId` to read the most recent finished run of that job or environment, which keeps lineage fresh for runs Kestra did not trigger. Fails on non-successful statuses unless `failOnUnsuccessful` is false. Defaults to 5s polling and a 60m timeout."
+    description = """
+        Polls a dbt Cloud run until it ends, streaming step logs and downloading artifacts.
+        Takes a `runId`, or a `jobId` or `environmentId` to read the most recent finished run of that job or
+        environment, which keeps lineage fresh for runs Kestra did not trigger.
+        Fails on non-successful statuses unless `failOnUnsuccessful` is false.
+        Defaults to 5s polling and a 60m timeout.
+        """
 )
 @Plugin(
     examples = {
@@ -107,6 +116,13 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         JobStatus.NUMBER_30 // Cancelled
     );
 
+    // dbt Cloud's `status__in` value, derived from ENDED_STATUS so the query and the ended check
+    // cannot drift apart.
+    private static final String ENDED_STATUS_FILTER = ENDED_STATUS.stream()
+        .map(JobStatus::toString)
+        .sorted()
+        .collect(Collectors.joining(",", "[", "]"));
+
     private static final String PROCESSED_KEY_PREFIX = "dbt-cloud-last-run";
 
     // Dots are stripped from each key part so a part can never contain one, otherwise flow "a_b" with
@@ -116,24 +132,32 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
     @Schema(
         title = "Run ID",
-        description = "dbt Cloud run identifier to monitor. Mutually exclusive with `jobId` and `environmentId`."
+        description = """
+            dbt Cloud run identifier to monitor.
+            Mutually exclusive with `jobId` and `environmentId`.
+            """
     )
     @PluginProperty(group = "main")
     Property<String> runId;
 
     @Schema(
         title = "Job ID",
-        description = "dbt Cloud job identifier. Reads that job's most recent finished run, which refreshes lineage for "
-            + "runs triggered outside Kestra. Mutually exclusive with `runId` and `environmentId`."
+        description = """
+            dbt Cloud job identifier. Reads that job's most recent finished run, which refreshes lineage for
+            runs triggered outside Kestra.
+            Mutually exclusive with `runId` and `environmentId`.
+            """
     )
     @PluginProperty(group = "main")
     Property<String> jobId;
 
     @Schema(
         title = "Environment ID",
-        description = "dbt Cloud environment identifier. Reads the most recent finished run anywhere in that environment, "
-            + "whichever job produced it. dbt's manifest covers the whole project, so any run refreshes the full graph. "
-            + "Mutually exclusive with `runId` and `jobId`."
+        description = """
+            dbt Cloud environment identifier. Reads the most recent finished run anywhere in that environment,
+            whichever job produced it. dbt's manifest covers the whole project, so any run refreshes the full graph.
+            Mutually exclusive with `runId` and `jobId`.
+            """
     )
     @PluginProperty(group = "main")
     Property<String> environmentId;
@@ -169,19 +193,25 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     @Builder.Default
     @Schema(
         title = "Fail if the run ends in a non-successful state",
-        description = "When true (default), a run ending in `Error` or `Cancelled` raises a task failure. "
-            + "Set to false to read a finished run without failing the task, which a scheduled refresh needs since it "
-            + "does not own the run it reads."
+        description = """
+            When true (default), a run ending in `Error` or `Cancelled` raises a task failure.
+            Set to false to read a finished run without failing the task, which a scheduled refresh needs since
+            it does not own the run it reads.
+            """
     )
     @PluginProperty(group = "reliability")
     Property<Boolean> failOnUnsuccessful = Property.ofValue(Boolean.TRUE);
 
     @Builder.Default
     @Getter(AccessLevel.NONE)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private transient List<JobStatusHumanizedEnum> loggedStatus = new ArrayList<>();
 
     @Builder.Default
     @Getter(AccessLevel.NONE)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private transient Map<Long, Long> loggedSteps = new HashMap<>();
 
     @Override
@@ -299,7 +329,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
         // Before the throw below, since the lineage is already emitted by this point. Gated on it having
         // landed in full, so a missing manifest or a partial emit is retried rather than skipped for good.
-        if (artifactsProcessed && lineageLanded) {
+        if (!alreadyEmitted && artifactsProcessed && lineageLanded) {
             rememberProcessed(runContext, processedKey, runIdRendered);
         }
 
@@ -351,7 +381,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                     runContext.render(this.baseUrl).as(String.class).orElseThrow()
                         + "/api/v2/accounts/" + runContext.render(this.accountId).as(String.class).orElseThrow()
                         + "/runs/?" + selector.queryParam() + "=" + URLEncoder.encode(selector.value(), StandardCharsets.UTF_8)
-                        + "&status__in=" + URLEncoder.encode(endedStatusFilter(), StandardCharsets.UTF_8)
+                        + "&status__in=" + URLEncoder.encode(ENDED_STATUS_FILTER, StandardCharsets.UTF_8)
                         + "&order_by=" + URLEncoder.encode("-finished_at", StandardCharsets.UTF_8)
                         + "&limit=1"
                 )
@@ -412,14 +442,16 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             }
 
             RunSelector selector = runSelector(runContext);
+            String[] parts = { flowInfo.id(), this.getId(), selector.queryParam(), selector.value() };
 
             return String.join(
                 PROCESSED_KEY_SEPARATOR,
                 PROCESSED_KEY_PREFIX,
-                safeKeyPart(flowInfo.id()),
-                safeKeyPart(this.getId()),
-                safeKeyPart(selector.queryParam()),
-                safeKeyPart(selector.value())
+                safeKeyPart(parts[0]),
+                safeKeyPart(parts[1]),
+                safeKeyPart(parts[2]),
+                safeKeyPart(parts[3]),
+                fingerprint(parts)
             );
         } catch (Exception e) {
             // Without a scoped key the safe outcome is to emit again, not to fail the refresh.
@@ -469,12 +501,25 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         return value == null ? "" : UNSAFE_KEY_CHARS.matcher(value).replaceAll("_");
     }
 
-    /** Derived from {@link #ENDED_STATUS} so the query and the ended check cannot drift apart. */
-    private static String endedStatusFilter() {
-        return ENDED_STATUS.stream()
-            .map(JobStatus::toString)
-            .sorted()
-            .collect(Collectors.joining(",", "[", "]"));
+    /**
+     * Short digest of the raw parts, appended so two tuples that sanitise to the same text still get
+     * distinct keys. Substitution is many-to-one, and length-prefixing does not fix that: "a.b" and "a_b"
+     * are both three characters and both sanitise to "a_b".
+     */
+    private static String fingerprint(String... parts) {
+        StringBuilder raw = new StringBuilder();
+        for (String part : parts) {
+            String value = part == null ? "" : part;
+            raw.append(value.length()).append(':').append(value);
+        }
+
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(raw.toString().getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest, 0, 4);
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is required of every JVM, so this cannot happen.
+            throw new IllegalStateException(e);
+        }
     }
 
     // Precedence: integer status → is_complete → status_humanized
@@ -598,20 +643,26 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     public static class Output implements io.kestra.core.models.tasks.Output {
         @Schema(
             title = "Run ID",
-            description = "Identifier of the dbt Cloud run that was read."
+            description = """
+                Identifier of the dbt Cloud run that was read.
+                """
         )
         private Long runId;
 
         @Schema(
             title = "Lineage emitted",
-            description = "True when this execution emitted the run's asset lineage, false when it had already been "
-                + "emitted for this run."
+            description = """
+                True when this execution emitted the run's asset lineage, false when it had already been
+                emitted for this run.
+                """
         )
         private boolean lineageEmitted;
 
         @Schema(
             title = "Assets",
-            description = "Asset ids described by the run's manifest, whether or not lineage was emitted."
+            description = """
+                Asset ids described by the run's manifest, whether or not lineage was emitted.
+                """
         )
         private List<String> assets;
 

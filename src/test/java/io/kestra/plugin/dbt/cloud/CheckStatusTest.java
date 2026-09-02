@@ -1241,6 +1241,25 @@ class CheckStatusTest {
         assertThat(assetManagerFactory.allEmitted(), hasSize(2));
     }
 
+    /**
+     * Sanitising the key is many-to-one, so "4330.1" and "4330_1" both reduce to "4330_1". A fingerprint of
+     * the raw parts keeps them apart, otherwise one selector's watermark would suppress the other's emit.
+     */
+    @Test
+    void shouldNotShareWatermarkBetweenSelectorsThatSanitiseAlike() throws Exception {
+        stubLatestFinishedRun("4330.1", 7797);
+        stubLatestFinishedRun("4330_1", 7797);
+
+        // Same flow and task id, so the sanitised jobId is the only thing keeping the two keys apart.
+        String taskId = IdUtils.create();
+
+        CheckStatus dotted = refresherFor("4330.1").id(taskId).build();
+        assertThat(dotted.run(mockRunContext(dotted)).isLineageEmitted(), is(true));
+
+        CheckStatus underscored = refresherFor("4330_1").id(taskId).build();
+        assertThat(underscored.run(mockRunContext(underscored)).isLineageEmitted(), is(true));
+    }
+
     private CheckStatus.CheckStatusBuilder<?, ?> refresherFor(String jobId) {
         return CheckStatus.builder()
             // Random per test run: the watermark is keyed on the task id and outlives the JVM.

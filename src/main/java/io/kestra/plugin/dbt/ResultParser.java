@@ -282,9 +282,10 @@ public abstract class ResultParser {
             try {
                 runContext.assets().emit(new AssetEmit(inputs, outputs));
             } catch (UnsupportedOperationException e) {
-                // OSS edition or tests where EE assets are not available — silently skip.
+                // OSS edition or tests where EE assets are not available — silently skip. Reported as an
+                // incomplete emit so the caller never claims lineage landed nor records the run as done.
                 runContext.logger().debug("Asset emission is not supported in this edition, skipping.");
-                break;
+                return false;
             } catch (QueueException e) {
                 // Carry on so one bad asset does not drop the rest, but report back so the caller does not
                 // mark the run done and skip the missing ones for good.
