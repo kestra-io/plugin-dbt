@@ -54,15 +54,23 @@ public abstract class ResultParser {
     }
 
     public static ManifestResult parseManifestWithAssets(RunContext runContext, File file) throws IOException, IllegalVariableEvaluationException {
-        return parseManifestWithAssets(runContext, file, true);
+        return parseManifestWithAssets(runContext, file, true, Map.of());
+    }
+
+    public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, boolean emitLineage)
+        throws IOException, IllegalVariableEvaluationException {
+        return parseManifestWithAssets(runContext, file, emitLineage, Map.of());
     }
 
     /**
      * A caller that has already emitted for this dbt run passes {@code emitLineage} false: the run's
      * artifacts are immutable, so re-emitting only appends identical lineage events (issue #318). The asset
      * ids come back either way.
+     *
+     * {@code assetMetadata} is merged into every asset produced, carrying facts the manifest does not know,
+     * such as the producing dbt Cloud job's schedule (issue #323).
      */
-    public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, boolean emitLineage)
+    public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, boolean emitLineage, Map<String, Object> assetMetadata)
         throws IOException, IllegalVariableEvaluationException {
         Manifest manifest = null;
         boolean fullyEmitted = true;
@@ -82,7 +90,7 @@ public abstract class ResultParser {
                 .toList();
 
             if (emitLineage) {
-                fullyEmitted = emitAssets(runContext, assetNodes);
+                fullyEmitted = emitAssets(runContext, assetNodes, assetMetadata);
             } else {
                 runContext.logger().debug("Lineage already emitted for this run, skipping {} assets", assetIds.size());
             }
@@ -267,7 +275,7 @@ public abstract class ResultParser {
     }
 
     /** @return false if any asset failed to emit, so the caller never records a partial emit as complete. */
-    private static boolean emitAssets(RunContext runContext, Map<String, ModelAsset> assetNodes) throws IllegalVariableEvaluationException {
+    private static boolean emitAssets(RunContext runContext, Map<String, ModelAsset> assetNodes, Map<String, Object> assetMetadata) throws IllegalVariableEvaluationException {
         runContext.logger().info("dbt assets extracted from manifest: {}", assetNodes.size());
         boolean fullyEmitted = true;
 
@@ -278,7 +286,7 @@ public abstract class ResultParser {
 
             // Bundle is {parents} -> {this node} only (never children) so each event is self-contained, no cartesian join.
             List<AssetIdentifier> inputs = inputIdentifiers(asset, assetNodes);
-            List<Asset> outputs = List.of(selfAsset(asset));
+            List<Asset> outputs = List.of(selfAsset(asset, assetMetadata));
             try {
                 runContext.assets().emit(new AssetEmit(inputs, outputs));
             } catch (UnsupportedOperationException e) {
@@ -298,10 +306,17 @@ public abstract class ResultParser {
     }
 
     private static Asset selfAsset(ModelAsset asset) {
+        return selfAsset(asset, Map.of());
+    }
+
+    private static Asset selfAsset(ModelAsset asset, Map<String, Object> assetMetadata) {
+        Map<String, Object> metadata = new HashMap<>(asset.metadata());
+        metadata.putAll(assetMetadata);
+
         return Custom.builder()
             .id(asset.assetId())
             .type(TABLE_ASSET_TYPE)
-            .metadata(asset.metadata())
+            .metadata(metadata)
             .build();
     }
 

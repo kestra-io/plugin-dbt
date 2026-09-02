@@ -11,7 +11,6 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
-import io.kestra.plugin.dbt.cli.DbtCLI;
 
 import jakarta.inject.Inject;
 
@@ -30,7 +29,8 @@ class LogServiceTest {
         // Classic dbt JSON log format with nested "info" block
         var line = """
             {"info":{"category":"","code":"Q011","invocation_id":"abc","level":"info","log_version":3,"msg":"Found 1 model","name":"MainReportArgs","pid":1,"thread":null,"ts":"2024-01-01T00:00:00Z"},"data":{}}
-            """.trim();
+            """
+            .trim();
 
         LogService.parse(runContext, line, hasWarning);
 
@@ -43,7 +43,8 @@ class LogServiceTest {
         var hasWarning = new AtomicBoolean(false);
         var line = """
             {"info":{"category":"","code":"W001","invocation_id":"abc","level":"warn","log_version":3,"msg":"Deprecation warning","name":"DeprecatedModel","pid":1,"thread":null,"ts":"2024-01-01T00:00:00Z"},"data":{}}
-            """.trim();
+            """
+            .trim();
 
         LogService.parse(runContext, line, hasWarning);
 

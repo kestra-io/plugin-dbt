@@ -12,6 +12,7 @@ import com.github.tomakehurst.wiremock.stubbing.Scenario;
 
 import io.kestra.core.http.client.HttpClientResponseException;
 import io.kestra.core.junit.annotations.KestraTest;
+import io.kestra.core.models.assets.Custom;
 import io.kestra.core.models.executions.LogEntry;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
@@ -1225,6 +1226,146 @@ class CheckStatusTest {
             .type(CheckStatus.class.getName())
             .accountId(Property.ofValue("123"))
             .token(Property.ofValue("fake-token"));
+    }
+
+    private static final String JOB_MANIFEST = """
+        {
+          "metadata": {"adapter_type": "postgres"},
+          "nodes": {
+            "model.p.orders": {
+              "resource_type": "model",
+              "database": "analytics",
+              "schema": "marts",
+              "name": "orders",
+              "unique_id": "model.p.orders",
+              "depends_on": {"nodes": []}
+            }
+          },
+          "parent_map": {"model.p.orders": []}
+        }
+        """;
+
+    private void stubRunWithJob(long runId, String jobJson) {
+        stubFor(
+            get(urlMatching("/api/v2/accounts/123/runs/" + runId + "/\\?.*"))
+                .willReturn(okJson("""
+                        {
+                          "data": {
+                            "id": %d,
+                            "status": 10,
+                            "status_humanized": "Success",
+                            "duration_humanized": "1s",
+                            "run_steps": [],
+                            "job": %s
+                          }
+                        }
+                    """.formatted(runId, jobJson)))
+        );
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/" + runId + "/artifacts/run_results.json"))
+                .willReturn(aResponse().withStatus(404).withBody("Not Found"))
+        );
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/" + runId + "/artifacts/manifest.json"))
+                .willReturn(okJson(JOB_MANIFEST))
+        );
+    }
+
+    private Map<String, Object> emittedMetadata(RunContext runContext) throws Exception {
+        var emitted = runContext.assets().emitted();
+        assertThat(emitted, hasSize(1));
+        return ((Custom) emitted.getFirst().outputs().getFirst()).getMetadata();
+    }
+
+    private CheckStatus readerFor(long runId) {
+        return CheckStatus.builder()
+            .id(IdUtils.create())
+            .type(CheckStatus.class.getName())
+            .baseUrl(Property.ofValue("http://localhost:8089"))
+            .runId(Property.ofValue(String.valueOf(runId)))
+            .accountId(Property.ofValue("123"))
+            .token(Property.ofValue("fake-token"))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(5)))
+            .parseRunResults(Property.ofValue(false))
+            .build();
+    }
+
+    /** Issue #323: freshness needs a cadence, and for a dbt-Cloud-scheduled job the job itself is the source. */
+    @Test
+    void shouldCarryTheProducingJobScheduleOnEmittedAssets() throws Exception {
+        stubRunWithJob(9100, """
+            {
+              "id": 4321,
+              "name": "nightly marts",
+              "triggers": {"schedule": true},
+              "schedule": {"cron": "7 */12 * * *"}
+            }
+            """);
+
+        CheckStatus checkStatus = readerFor(9100);
+        RunContext runContext = mockRunContext(checkStatus);
+        checkStatus.run(runContext);
+
+        Map<String, Object> metadata = emittedMetadata(runContext);
+        assertThat(metadata.get("dbtCloudJobSchedule"), is("7 */12 * * *"));
+        assertThat(metadata.get("dbtCloudJobScheduled"), is(true));
+        assertThat(metadata.get("dbtCloudJobId"), is("4321"));
+        assertThat(metadata.get("dbtCloudJobName"), is("nightly marts"));
+        // the manifest's own facts survive alongside
+        assertThat(metadata.get("name"), is("orders"));
+    }
+
+    /** A job keeps its cron when its schedule trigger is off. That is not a cadence and must not read as one. */
+    @Test
+    void shouldNotReportACadenceWhenTheJobScheduleIsDisabled() throws Exception {
+        stubRunWithJob(9101, """
+            {
+              "id": 4322,
+              "triggers": {"schedule": false},
+              "schedule": {"cron": "7 */12 * * *"}
+            }
+            """);
+
+        CheckStatus checkStatus = readerFor(9101);
+        RunContext runContext = mockRunContext(checkStatus);
+        checkStatus.run(runContext);
+
+        Map<String, Object> metadata = emittedMetadata(runContext);
+        assertThat(metadata.containsKey("dbtCloudJobSchedule"), is(false));
+        assertThat(metadata.get("dbtCloudJobScheduled"), is(false));
+    }
+
+    /** A scheduled job with no cron must still not claim a cadence. */
+    @Test
+    void shouldNotReportACadenceWhenAScheduledJobHasNoCron() throws Exception {
+        stubRunWithJob(9103, """
+            {
+              "id": 4323,
+              "triggers": {"schedule": true}
+            }
+            """);
+
+        CheckStatus checkStatus = readerFor(9103);
+        RunContext runContext = mockRunContext(checkStatus);
+        checkStatus.run(runContext);
+
+        Map<String, Object> metadata = emittedMetadata(runContext);
+        assertThat(metadata.containsKey("dbtCloudJobSchedule"), is(false));
+        assertThat(metadata.get("dbtCloudJobScheduled"), is(true));
+    }
+
+    /** No job on the response at all is distinct from a disabled schedule: neither key is claimed. */
+    @Test
+    void shouldClaimNoScheduleFactsWhenTheRunCarriesNoJob() throws Exception {
+        stubRunWithJob(9102, "null");
+
+        CheckStatus checkStatus = readerFor(9102);
+        RunContext runContext = mockRunContext(checkStatus);
+        checkStatus.run(runContext);
+
+        Map<String, Object> metadata = emittedMetadata(runContext);
+        assertThat(metadata.containsKey("dbtCloudJobSchedule"), is(false));
+        assertThat(metadata.containsKey("dbtCloudJobScheduled"), is(false));
     }
 
     private RunContext mockRunContext(CheckStatus task) {

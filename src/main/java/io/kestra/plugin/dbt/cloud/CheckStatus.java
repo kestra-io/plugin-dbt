@@ -37,6 +37,7 @@ import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.core.utils.Await;
 import io.kestra.core.utils.RetryUtils;
 import io.kestra.plugin.dbt.ResultParser;
+import io.kestra.plugin.dbt.cloud.models.Job;
 import io.kestra.plugin.dbt.cloud.models.JobStatus;
 import io.kestra.plugin.dbt.cloud.models.JobStatusHumanizedEnum;
 import io.kestra.plugin.dbt.cloud.models.ManifestArtifact;
@@ -294,7 +295,9 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
             io.kestra.plugin.dbt.models.Manifest manifest = null;
             if (manifestArtifact != null) {
-                ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestArtifact.toFile(), !alreadyEmitted);
+                ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(
+                    runContext, manifestArtifact.toFile(), !alreadyEmitted, producerMetadata(finalRunResponse.getData())
+                );
                 manifest = manifestResult.manifest();
                 manifestUri = manifestResult.uri();
                 assets = manifestResult.assetIds();
@@ -348,6 +351,48 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             .runResults(runResultsUri)
             .manifest(manifestUri)
             .build();
+    }
+
+    /**
+     * Facts about the producing dbt Cloud job, merged into every asset the run emits (issue #323). Freshness
+     * needs a cadence, and for a job on dbt Cloud's own schedule the only source of it is the job itself.
+     * The run response already carries the job, so this costs no extra call.
+     *
+     * A job whose schedule trigger is off is reported as such rather than as having no schedule, since a
+     * disabled cron is not a cadence and must not be mistaken for one.
+     */
+    private static Map<String, Object> producerMetadata(Run run) {
+        if (run == null || run.getJob() == null) {
+            return Map.of();
+        }
+
+        Job job = run.getJob();
+        Map<String, Object> metadata = new HashMap<>();
+
+        if (job.getId() != null) {
+            metadata.put("dbtCloudJobId", String.valueOf(job.getId()));
+        }
+        if (hasText(job.getName())) {
+            metadata.put("dbtCloudJobName", job.getName());
+        }
+
+        boolean scheduled = job.getTriggers() != null && Boolean.TRUE.equals(job.getTriggers().getSchedule());
+        String cron = job.getSchedule() == null ? null : job.getSchedule().getCron();
+
+        // Only claim a cadence when the job is actually scheduled: dbt Cloud keeps the cron on a job whose
+        // schedule trigger is disabled, and that job only ever runs when something calls the API.
+        if (scheduled && hasText(cron)) {
+            metadata.put("dbtCloudJobSchedule", cron);
+            metadata.put("dbtCloudJobScheduled", true);
+        } else if (job.getTriggers() != null) {
+            metadata.put("dbtCloudJobScheduled", scheduled);
+        }
+
+        return metadata;
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     /** The explicit {@code runId}, or the most recent successful run of the given job or environment. */

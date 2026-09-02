@@ -20,17 +20,19 @@ class RunResultTest {
     }
 
     @ParameterizedTest
-    @CsvSource({
-        "success, SUCCESS",
-        "pass, SUCCESS",
-        // Fusion v2.0 emits "run" for a successfully executed model
-        "run, SUCCESS",
-        "error, FAILED",
-        "fail, FAILED",
-        "runtime_error, FAILED",
-        "warn, WARNING",
-        "skipped, SKIPPED"
-    })
+    @CsvSource(
+        {
+            "success, SUCCESS",
+            "pass, SUCCESS",
+            // Fusion v2.0 emits "run" for a successfully executed model
+            "run, SUCCESS",
+            "error, FAILED",
+            "fail, FAILED",
+            "runtime_error, FAILED",
+            "warn, WARNING",
+            "skipped, SKIPPED"
+        }
+    )
     void state_allStatuses(String status, String expectedState) {
         var result = RunResult.Result.builder()
             .status(status)
