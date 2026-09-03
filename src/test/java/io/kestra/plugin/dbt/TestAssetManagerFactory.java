@@ -16,9 +16,19 @@ import jakarta.inject.Singleton;
 public class TestAssetManagerFactory extends AssetManagerFactory {
     private final List<AssetEmit> allEmitted = Collections.synchronizedList(new ArrayList<>());
 
+    /**
+     * Off by default: most tests never set `assets.enableAuto` and rely on emission working anyway. Turn it
+     * on to exercise what production does when emission is disabled, which is to drop every emit silently.
+     */
+    private volatile boolean honourEnable = false;
+
+    public void honourEnable(boolean honourEnable) {
+        this.honourEnable = honourEnable;
+    }
+
     @Override
     public AssetEmitter of(boolean enable) {
-        return new TrackingAssetEmitter(allEmitted);
+        return new TrackingAssetEmitter(allEmitted, !honourEnable || enable);
     }
 
     /** All assets emitted across all RunContexts (for runner/integration tests). */
@@ -33,13 +43,19 @@ public class TestAssetManagerFactory extends AssetManagerFactory {
     private static final class TrackingAssetEmitter implements AssetEmitter {
         private final List<AssetEmit> shared;
         private final List<AssetEmit> local = new ArrayList<>();
+        private final boolean enabled;
 
-        TrackingAssetEmitter(List<AssetEmit> shared) {
+        TrackingAssetEmitter(List<AssetEmit> shared, boolean enabled) {
             this.shared = shared;
+            this.enabled = enabled;
         }
 
         @Override
         public void emit(AssetEmit assetEmit) {
+            // Mirrors EE's InMemoryAssetEmitter: disabled drops silently, it does not throw.
+            if (!enabled) {
+                return;
+            }
             local.add(assetEmit);
             shared.add(assetEmit);
         }

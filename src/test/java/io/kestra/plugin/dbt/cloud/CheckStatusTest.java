@@ -1315,9 +1315,9 @@ class CheckStatusTest {
         assertThat(metadata.get("name"), is("orders"));
     }
 
-    /** A job keeps its cron when its schedule trigger is off. That is not a cadence and must not read as one. */
+    /** A job keeps its cron when its schedule trigger is off. Report both, so the flag gates the cron. */
     @Test
-    void shouldNotReportACadenceWhenTheJobScheduleIsDisabled() throws Exception {
+    void shouldStillReportTheCronWhenTheJobScheduleIsDisabled() throws Exception {
         stubRunWithJob(9101, """
             {
               "id": 4322,
@@ -1331,7 +1331,7 @@ class CheckStatusTest {
         checkStatus.run(runContext);
 
         Map<String, Object> metadata = emittedMetadata(runContext);
-        assertThat(metadata.containsKey("dbtCloudJobSchedule"), is(false));
+        assertThat(metadata.get("dbtCloudJobSchedule"), is("7 */12 * * *"));
         assertThat(metadata.get("dbtCloudJobScheduled"), is(false));
     }
 

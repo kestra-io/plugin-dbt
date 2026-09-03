@@ -104,6 +104,8 @@ import static java.lang.Math.max;
                     accountId: "12345"
                     token: "{{ secret('DBT_TOKEN') }}"
                     jobId: "4321"
+                    assets:
+                      enableAuto: true
                 """
         )
     }
@@ -379,12 +381,12 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         boolean scheduled = job.getTriggers() != null && Boolean.TRUE.equals(job.getTriggers().getSchedule());
         String cron = job.getSchedule() == null ? null : job.getSchedule().getCron();
 
-        // Only claim a cadence when the job is actually scheduled: dbt Cloud keeps the cron on a job whose
-        // schedule trigger is disabled, and that job only ever runs when something calls the API.
-        if (scheduled && hasText(cron)) {
+        // Both, per issue #323: the cron so it is visible, and the flag so a disabled schedule is not read
+        // as a cadence. Dropping the cron when the trigger was off made the feature look like a no-op.
+        if (hasText(cron)) {
             metadata.put("dbtCloudJobSchedule", cron);
-            metadata.put("dbtCloudJobScheduled", true);
-        } else if (job.getTriggers() != null) {
+        }
+        if (job.getTriggers() != null) {
             metadata.put("dbtCloudJobScheduled", scheduled);
         }
 

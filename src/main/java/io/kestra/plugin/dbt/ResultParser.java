@@ -303,6 +303,7 @@ public abstract class ResultParser {
     private static boolean emitAssets(RunContext runContext, Map<String, ModelAsset> assetNodes, Map<String, Object> assetMetadata) throws IllegalVariableEvaluationException {
         runContext.logger().info("dbt assets extracted from manifest: {}", assetNodes.size());
         boolean fullyEmitted = true;
+        int attempted = 0;
 
         for (ModelAsset asset : assetNodes.values()) {
             if (!asset.produced()) {
@@ -314,6 +315,7 @@ public abstract class ResultParser {
             List<Asset> outputs = List.of(selfAsset(asset, assetMetadata));
             try {
                 runContext.assets().emit(new AssetEmit(inputs, outputs));
+                attempted++;
             } catch (UnsupportedOperationException e) {
                 // OSS edition or tests where EE assets are not available — silently skip. Reported as an
                 // incomplete emit so the caller never claims lineage landed nor records the run as done.
@@ -325,6 +327,16 @@ public abstract class ResultParser {
                 fullyEmitted = false;
                 runContext.logger().warn("Unable to emit dbt asset '{}'", asset.assetId(), e);
             }
+        }
+
+        // An emitter with assets.enableAuto off drops every emit without throwing, so nothing landed and
+        // the caller must not report success nor record the run as processed.
+        if (attempted > 0 && runContext.assets().emitted().isEmpty()) {
+            runContext.logger().warn(
+                "Asset emission is disabled, so {} assets were not emitted. Set `assets.enableAuto: true` on the task.",
+                attempted
+            );
+            return false;
         }
 
         return fullyEmitted;

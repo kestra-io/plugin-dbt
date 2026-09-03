@@ -36,6 +36,9 @@ class ResultParserTest {
     private RunContextFactory runContextFactory;
 
     @Inject
+    private TestAssetManagerFactory assetManagerFactory;
+
+    @Inject
     private DispatchQueueInterface<LogEntry> logQueue;
 
     // One model reading one source, shared by the source-lineage tests.
@@ -729,6 +732,49 @@ class ResultParserTest {
         // Without execution_time it still falls back to the end of the last phase.
         TaskRun fallback = byTaskId.get("model.p.no_execution_time");
         assertThat(fallback.getState().getDuration().orElseThrow(), is(Duration.ofSeconds(2)));
+    }
+
+    /**
+     * A task without `assets.enableAuto` gets an emitter that drops every emit without throwing, so
+     * nothing lands. parseManifestWithAssets must report that rather than claiming success, otherwise the
+     * caller records the run as processed and never emits its lineage once assets are switched on.
+     */
+    @Test
+    void parseManifestWithAssets_shouldNotClaimSuccessWhenEmissionIsDisabled() throws Exception {
+        assetManagerFactory.honourEnable(true);
+        assetManagerFactory.clear();
+        try {
+            var runContext = mockRunContext();
+            var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+            Files.writeString(manifestFile, """
+                {
+                  "metadata": {"adapter_type": "postgres"},
+                  "nodes": {
+                    "model.p.orders": {
+                      "resource_type": "model",
+                      "database": "analytics",
+                      "schema": "marts",
+                      "name": "orders",
+                      "unique_id": "model.p.orders",
+                      "depends_on": {"nodes": []}
+                    }
+                  },
+                  "parent_map": {"model.p.orders": []}
+                }
+                """);
+
+            var result = ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile());
+
+            // The manifest is still read and stored, and the asset ids are still reported...
+            assertThat(result.manifest(), is(notNullValue()));
+            assertThat(result.assetIds(), hasSize(1));
+
+            // ...but nothing was emitted, so the run must not be recorded as processed.
+            assertThat(runContext.assets().emitted(), hasSize(0));
+            assertThat(result.fullyEmitted(), is(false));
+        } finally {
+            assetManagerFactory.honourEnable(false);
+        }
     }
 
     private RunContext mockRunContext() {
