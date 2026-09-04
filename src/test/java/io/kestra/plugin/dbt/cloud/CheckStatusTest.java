@@ -740,7 +740,7 @@ class CheckStatusTest {
         assertThat(ex.getResponse().getStatus().getCode(), is(404));
     }
 
-    /** Issue #318: with only a jobId, the task resolves that job's most recent successful run. */
+    /** With only a jobId, the task resolves that job's most recent successful run. */
     @Test
     void shouldResolveLatestSuccessfulRunFromJobId() throws Exception {
         stubFor(
@@ -1002,7 +1002,7 @@ class CheckStatusTest {
     }
 
     /**
-     * Issue #318: a refresh resolves the same run on every tick. The second read must not append an
+     * A refresh resolves the same run on every tick. The second read must not append an
      * identical lineage event, but must still return its usual outputs.
      */
     @Test
@@ -1290,7 +1290,7 @@ class CheckStatusTest {
             .build();
     }
 
-    /** Issue #323: freshness needs a cadence, and for a dbt-Cloud-scheduled job the job itself is the source. */
+    /** Freshness needs a cadence, and for a dbt-Cloud-scheduled job the job itself is the source. */
     @Test
     void shouldCarryTheProducingJobScheduleOnEmittedAssets() throws Exception {
         stubRunWithJob(9100, """

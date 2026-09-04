@@ -67,11 +67,11 @@ public abstract class ResultParser {
 
     /**
      * A caller that has already emitted for this dbt run passes {@code emitLineage} false: the run's
-     * artifacts are immutable, so re-emitting only appends identical lineage events (issue #318). The asset
+     * artifacts are immutable, so re-emitting only appends identical lineage events. The asset
      * ids come back either way.
      *
      * {@code assetMetadata} is merged into every asset produced, carrying facts the manifest does not know,
-     * such as the producing dbt Cloud job's schedule (issue #323).
+     * such as the producing dbt Cloud job's schedule.
      */
     public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, boolean emitLineage, Map<String, Object> assetMetadata)
         throws IOException, IllegalVariableEvaluationException {
@@ -165,7 +165,7 @@ public abstract class ResultParser {
                     });
 
                 // The terminal date is anchored on dbt's own execution_time rather than the end of the last
-                // timing phase (issue #316). execution_time is the whole cost of the node, while the phases
+                // timing phase. execution_time is the whole cost of the node, while the phases
                 // cover only compile and execute, so the phase span understates the node and the Gantt showed
                 // every model as near-instantaneous. Never earlier than the last phase ended, so the history
                 // cannot invert if the two disagree.
@@ -303,7 +303,6 @@ public abstract class ResultParser {
     private static boolean emitAssets(RunContext runContext, Map<String, ModelAsset> assetNodes, Map<String, Object> assetMetadata) throws IllegalVariableEvaluationException {
         runContext.logger().info("dbt assets extracted from manifest: {}", assetNodes.size());
         boolean fullyEmitted = true;
-        int attempted = 0;
 
         for (ModelAsset asset : assetNodes.values()) {
             if (!asset.produced()) {
@@ -315,7 +314,6 @@ public abstract class ResultParser {
             List<Asset> outputs = List.of(selfAsset(asset, assetMetadata));
             try {
                 runContext.assets().emit(new AssetEmit(inputs, outputs));
-                attempted++;
             } catch (UnsupportedOperationException e) {
                 // OSS edition or tests where EE assets are not available — silently skip. Reported as an
                 // incomplete emit so the caller never claims lineage landed nor records the run as done.
@@ -327,16 +325,6 @@ public abstract class ResultParser {
                 fullyEmitted = false;
                 runContext.logger().warn("Unable to emit dbt asset '{}'", asset.assetId(), e);
             }
-        }
-
-        // An emitter with assets.enableAuto off drops every emit without throwing, so nothing landed and
-        // the caller must not report success nor record the run as processed.
-        if (attempted > 0 && runContext.assets().emitted().isEmpty()) {
-            runContext.logger().warn(
-                "Asset emission is disabled, so {} assets were not emitted. Set `assets.enableAuto: true` on the task.",
-                attempted
-            );
-            return false;
         }
 
         return fullyEmitted;

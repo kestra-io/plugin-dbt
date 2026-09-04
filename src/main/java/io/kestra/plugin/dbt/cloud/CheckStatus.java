@@ -221,7 +221,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
         String processedKey = alreadyProcessedKey(runContext);
 
-        // A run's artifacts are immutable, so its lineage only needs emitting once (issue #318). Everything
+        // A run's artifacts are immutable, so its lineage only needs emitting once. Everything
         // else still runs, so the outputs are the same on every tick.
         boolean alreadyEmitted = processedKey != null && isAlreadyProcessed(runContext, processedKey, runIdRendered);
         if (alreadyEmitted) {
@@ -356,7 +356,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     }
 
     /**
-     * Facts about the producing dbt Cloud job, merged into every asset the run emits (issue #323). Freshness
+     * Facts about the producing dbt Cloud job, merged into every asset the run emits. Freshness
      * needs a cadence, and for a job on dbt Cloud's own schedule the only source of it is the job itself.
      * The run response already carries the job, so this costs no extra call.
      *
@@ -381,7 +381,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         boolean scheduled = job.getTriggers() != null && Boolean.TRUE.equals(job.getTriggers().getSchedule());
         String cron = job.getSchedule() == null ? null : job.getSchedule().getCron();
 
-        // Both, per issue #323: the cron so it is visible, and the flag so a disabled schedule is not read
+        // Both: the cron so it is visible, and the flag so a disabled schedule is not read
         // as a cadence. Dropping the cron when the trigger was off made the feature look like a no-op.
         if (hasText(cron)) {
             metadata.put("dbtCloudJobSchedule", cron);
