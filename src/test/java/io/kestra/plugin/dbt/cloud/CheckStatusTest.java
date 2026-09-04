@@ -740,7 +740,7 @@ class CheckStatusTest {
         assertThat(ex.getResponse().getStatus().getCode(), is(404));
     }
 
-    /** Issue #318: with only a jobId, the task resolves that job's most recent successful run. */
+    /** With only a jobId, the task resolves that job's most recent successful run. */
     @Test
     void shouldResolveLatestSuccessfulRunFromJobId() throws Exception {
         stubFor(
@@ -1002,7 +1002,7 @@ class CheckStatusTest {
     }
 
     /**
-     * Issue #318: a refresh resolves the same run on every tick. The second read must not append an
+     * A refresh resolves the same run on every tick. The second read must not append an
      * identical lineage event, but must still return its usual outputs.
      */
     @Test
@@ -1290,7 +1290,7 @@ class CheckStatusTest {
             .build();
     }
 
-    /** Issue #323: freshness needs a cadence, and for a dbt-Cloud-scheduled job the job itself is the source. */
+    /** Freshness needs a cadence, and for a dbt-Cloud-scheduled job the job itself is the source. */
     @Test
     void shouldCarryTheProducingJobScheduleOnEmittedAssets() throws Exception {
         stubRunWithJob(9100, """
@@ -1315,9 +1315,9 @@ class CheckStatusTest {
         assertThat(metadata.get("name"), is("orders"));
     }
 
-    /** A job keeps its cron when its schedule trigger is off. That is not a cadence and must not read as one. */
+    /** A job keeps its cron when its schedule trigger is off. Report both, so the flag gates the cron. */
     @Test
-    void shouldNotReportACadenceWhenTheJobScheduleIsDisabled() throws Exception {
+    void shouldStillReportTheCronWhenTheJobScheduleIsDisabled() throws Exception {
         stubRunWithJob(9101, """
             {
               "id": 4322,
@@ -1331,7 +1331,7 @@ class CheckStatusTest {
         checkStatus.run(runContext);
 
         Map<String, Object> metadata = emittedMetadata(runContext);
-        assertThat(metadata.containsKey("dbtCloudJobSchedule"), is(false));
+        assertThat(metadata.get("dbtCloudJobSchedule"), is("7 */12 * * *"));
         assertThat(metadata.get("dbtCloudJobScheduled"), is(false));
     }
 

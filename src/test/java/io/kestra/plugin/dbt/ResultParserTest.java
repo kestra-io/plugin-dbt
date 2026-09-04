@@ -680,7 +680,7 @@ class ResultParserTest {
     }
 
     /**
-     * Issue #316: the Gantt showed every model as near-instantaneous because the terminal date came from the
+     * The Gantt showed every model as near-instantaneous because the terminal date came from the
      * end of the last timing phase, and those phases cover only compile and execute. dbt's execution_time is
      * the whole cost of the node, so the duration is anchored on that instead.
      */
