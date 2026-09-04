@@ -67,11 +67,11 @@ public abstract class ResultParser {
 
     /**
      * A caller that has already emitted for this dbt run passes {@code emitLineage} false: the run's
-     * artifacts are immutable, so re-emitting only appends identical lineage events (issue #318). The asset
+     * artifacts are immutable, so re-emitting only appends identical lineage events. The asset
      * ids come back either way.
      *
      * {@code assetMetadata} is merged into every asset produced, carrying facts the manifest does not know,
-     * such as the producing dbt Cloud job's schedule (issue #323).
+     * such as the producing dbt Cloud job's schedule.
      */
     public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, boolean emitLineage, Map<String, Object> assetMetadata)
         throws IOException, IllegalVariableEvaluationException {
@@ -165,7 +165,7 @@ public abstract class ResultParser {
                     });
 
                 // The terminal date is anchored on dbt's own execution_time rather than the end of the last
-                // timing phase (issue #316). execution_time is the whole cost of the node, while the phases
+                // timing phase. execution_time is the whole cost of the node, while the phases
                 // cover only compile and execute, so the phase span understates the node and the Gantt showed
                 // every model as near-instantaneous. Never earlier than the last phase ended, so the history
                 // cannot invert if the two disagree.
