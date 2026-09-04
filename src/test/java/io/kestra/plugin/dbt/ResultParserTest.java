@@ -731,6 +731,86 @@ class ResultParserTest {
         assertThat(fallback.getState().getDuration().orElseThrow(), is(Duration.ofSeconds(2)));
     }
 
+    /**
+     * Issue #319 reports that only models become assets. Seeds and snapshots are in
+     * PRODUCED_RESOURCE_TYPES since #311, so this pins that: a seed feeding a model produces its own
+     * asset and is the model's parent, and a snapshot produces one too. dbt tests are deliberately
+     * absent, they describe no table.
+     */
+    @Test
+    void parseManifestWithAssets_shouldEmitSeedAndSnapshotAssetsNotTests() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        Files.writeString(manifestFile, """
+            {
+              "metadata": {"adapter_type": "postgres"},
+              "nodes": {
+                "seed.p.raw_customers": {
+                  "resource_type": "seed",
+                  "database": "analytics",
+                  "schema": "raw",
+                  "name": "raw_customers",
+                  "unique_id": "seed.p.raw_customers",
+                  "depends_on": {"nodes": []}
+                },
+                "model.p.stg_customers": {
+                  "resource_type": "model",
+                  "database": "analytics",
+                  "schema": "staging",
+                  "name": "stg_customers",
+                  "unique_id": "model.p.stg_customers",
+                  "depends_on": {"nodes": ["seed.p.raw_customers"]}
+                },
+                "snapshot.p.customers_snap": {
+                  "resource_type": "snapshot",
+                  "database": "analytics",
+                  "schema": "snapshots",
+                  "name": "customers_snap",
+                  "unique_id": "snapshot.p.customers_snap",
+                  "depends_on": {"nodes": ["model.p.stg_customers"]}
+                },
+                "test.p.not_null_stg_customers_id.abc123": {
+                  "resource_type": "test",
+                  "database": "analytics",
+                  "schema": "dbt_test__audit",
+                  "name": "not_null_stg_customers_id",
+                  "unique_id": "test.p.not_null_stg_customers_id.abc123",
+                  "depends_on": {"nodes": ["model.p.stg_customers"]}
+                }
+              },
+              "parent_map": {
+                "seed.p.raw_customers": [],
+                "model.p.stg_customers": ["seed.p.raw_customers"],
+                "snapshot.p.customers_snap": ["model.p.stg_customers"],
+                "test.p.not_null_stg_customers_id.abc123": ["model.p.stg_customers"]
+              }
+            }
+            """);
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile());
+
+        var emitted = runContext.assets().emitted();
+
+        // the seed is an asset in its own right, with no parents
+        var seedEmit = findEmitWithOutput(emitted, "analytics.raw.raw_customers");
+        assertThat("seed emission should exist", seedEmit, is(notNullValue()));
+        assertThat(seedEmit.inputs(), hasSize(0));
+
+        // and it is the model's parent, so lineage reaches the raw layer
+        var modelEmit = findEmitWithOutput(emitted, "analytics.staging.stg_customers");
+        assertThat(modelEmit.inputs(), hasSize(1));
+        assertThat(modelEmit.inputs().getFirst().id(), is("analytics.raw.raw_customers"));
+
+        // snapshots too
+        var snapshotEmit = findEmitWithOutput(emitted, "analytics.snapshots.customers_snap");
+        assertThat("snapshot emission should exist", snapshotEmit, is(notNullValue()));
+        assertThat(snapshotEmit.inputs().getFirst().id(), is("analytics.staging.stg_customers"));
+
+        // the dbt test is not an asset: it describes no table
+        assertThat(findEmitWithOutput(emitted, "analytics.dbt_test__audit.not_null_stg_customers_id"), is(nullValue()));
+        assertThat(emitted, hasSize(3));
+    }
+
     private RunContext mockRunContext() {
         var task = DbtCLI.builder()
             .id(IdUtils.create())
