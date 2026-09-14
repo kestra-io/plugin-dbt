@@ -48,12 +48,32 @@ public abstract class ResultParser {
     // dbt node resource types that map to a physical table dbt builds.
     private static final Set<String> PRODUCED_RESOURCE_TYPES = Set.of(RESOURCE_TYPE_MODEL, RESOURCE_TYPE_SEED, RESOURCE_TYPE_SNAPSHOT);
 
+    // Kestra stores a taskrun's task id in a fixed-width DB column (VARCHAR(256)); a dbt node id longer
+    // than this must be shortened before it becomes a taskrun's task id, or persisting its logs/metrics fails.
+    private static final int TASK_ID_MAX_LENGTH = 256;
+    private static final int TASK_ID_PREFIX_LENGTH = 250;
+
     /**
      * @param fullyEmitted false when an emit failed part way, so a caller recording "this run is done" can
      *        tell that the lineage did not fully land.
      * @param assetIds populated whether or not lineage was emitted.
      */
     public record ManifestResult(Manifest manifest, URI uri, boolean fullyEmitted, List<String> assetIds) {
+    }
+
+    /**
+     * Shortens a dbt node unique id so it fits Kestra's fixed-width {@code task_id} column when it becomes
+     * a dynamic taskrun's task id. dbt appends its uniqueness hash at the tail of long node ids, which a
+     * plain front-truncation would drop, so a stable short hash of the full id is appended to keep distinct
+     * nodes distinct. The full unique id is still used elsewhere for asset/lineage lookups.
+     */
+    static String taskId(String uniqueId) {
+        if (uniqueId == null || uniqueId.length() <= TASK_ID_MAX_LENGTH) {
+            return uniqueId;
+        }
+
+        String suffix = String.format("%05d", Math.floorMod(uniqueId.hashCode(), 100_000));
+        return uniqueId.substring(0, TASK_ID_PREFIX_LENGTH) + "-" + suffix;
     }
 
     public static ManifestResult parseManifestWithAssets(RunContext runContext, File file) throws IOException, IllegalVariableEvaluationException {
@@ -224,7 +244,7 @@ public abstract class ResultParser {
                     .id(IdUtils.create())
                     .namespace(runContext.render("{{ flow.namespace }}"))
                     .flowId(runContext.render("{{ flow.id }}"))
-                    .taskId(r.getUniqueId())
+                    .taskId(taskId(r.getUniqueId()))
                     .executionId(runContext.render("{{ execution.id }}"))
                     .parentTaskRunId(runContext.render("{{ taskrun.id }}"))
                     .state(state)

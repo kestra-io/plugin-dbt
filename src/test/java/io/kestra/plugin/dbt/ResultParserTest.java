@@ -743,4 +743,37 @@ class ResultParserTest {
         var taskRun = TestsUtils.mockTaskRun(execution, task);
         return runContextFactory.of(flow, task, execution, taskRun, false);
     }
+
+    @Test
+    void taskId_shouldKeepUniqueIdWithinLimit() {
+        String uniqueId = "test.project.my_model";
+
+        assertThat(ResultParser.taskId(uniqueId), is(uniqueId));
+    }
+
+    @Test
+    void taskId_shouldLimitOverLongUniqueIdTo256() {
+        // a dbt node id longer than the DB task_id column allows
+        String uniqueId = "test.project." + "a".repeat(300);
+
+        String taskId = ResultParser.taskId(uniqueId);
+
+        assertThat(taskId.length(), is(lessThanOrEqualTo(256)));
+        assertThat(taskId, startsWith(uniqueId.substring(0, 250)));
+    }
+
+    @Test
+    void taskId_shouldKeepCollidingPrefixesDistinct() {
+        // dbt appends its uniqueness hash at the TAIL, so two long ids can share a 250-char prefix
+        String shared = "test.project." + "b".repeat(260);
+        String first = shared + ".hashaaaaaa";
+        String second = shared + ".hashbbbbbb";
+
+        assertThat(ResultParser.taskId(first), is(not(equalTo(ResultParser.taskId(second)))));
+    }
+
+    @Test
+    void taskId_shouldHandleNull() {
+        assertThat(ResultParser.taskId(null), is(nullValue()));
+    }
 }
