@@ -380,26 +380,32 @@ public abstract class ResultParser {
 
     /**
      * Rolls up run_results test outcomes onto the model(s) each test targets, keyed by unique_id so
-     * {@link #emitAssets} can attach them per node. A model absent from the returned map had no test
-     * results and gets no metadata, rather than defaulting to "pass".
+     * {@link #emitAssets} can attach them per node. A model absent from the returned map had no
+     * *executed* test results (none at all, or every one of them skipped) and gets no metadata,
+     * rather than defaulting to "pass". Any failure while reading or walking run_results degrades to
+     * "no test metadata" here rather than aborting the caller's whole asset emit.
      */
     private static Map<String, Map<String, Object>> testStatusMetadata(Manifest manifest, File runResultsFile) {
         if (manifest == null || manifest.getNodes() == null || runResultsFile == null || !runResultsFile.exists()) {
             return Map.of();
         }
 
-        RunResult runResult;
         try {
-            runResult = MAPPER.readValue(runResultsFile, RunResult.class);
-        } catch (IOException e) {
+            return rollUpTestStatus(manifest, runResultsFile);
+        } catch (Exception e) {
             return Map.of();
         }
+    }
 
+    private static Map<String, Map<String, Object>> rollUpTestStatus(Manifest manifest, File runResultsFile) throws IOException {
+        RunResult runResult = MAPPER.readValue(runResultsFile, RunResult.class);
         if (runResult.getResults() == null) {
             return Map.of();
         }
 
-        // Per model unique_id: [total, failed, warned].
+        // Per model unique_id: [executed, failed, warned]. Skipped tests (dbt skips tests downstream
+        // of a failed node during `dbt build`) never reach this tally, so a model whose tests were
+        // all skipped ends up with no entry at all, same as a model with no tests.
         Map<String, int[]> tallies = new HashMap<>();
         for (RunResult.Result result : runResult.getResults()) {
             if (result.getUniqueId() == null) {
@@ -416,6 +422,9 @@ public abstract class ResultParser {
                 state = result.state();
             } catch (IllegalStateException e) {
                 // An unrecognised status must not drop the rest of the roll-up.
+                continue;
+            }
+            if (state == State.Type.SKIPPED) {
                 continue;
             }
 
@@ -447,9 +456,10 @@ public abstract class ResultParser {
     }
 
     // Same parent_map-first, depends_on-fallback resolution extractAssetNodes uses for model-to-model
-    // edges, applied to a test node to find the model(s)/seed(s)/snapshot(s) it targets.
+    // edges, applied to a test node to find the model(s)/seed(s)/snapshot(s) it targets. A parent_map
+    // entry with an explicit null value (rather than a missing key) falls back to depends_on too.
     private static List<String> testTargets(Manifest manifest, Manifest.Node testNode, String uniqueId) {
-        if (manifest.getParentMap() != null && manifest.getParentMap().containsKey(uniqueId)) {
+        if (manifest.getParentMap() != null && manifest.getParentMap().get(uniqueId) != null) {
             return manifest.getParentMap().get(uniqueId);
         }
         if (testNode.getDependsOn() != null && testNode.getDependsOn().getNodes() != null) {
