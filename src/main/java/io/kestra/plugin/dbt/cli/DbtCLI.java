@@ -545,6 +545,8 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
     private void parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore) throws IllegalVariableEvaluationException, IOException {
         File manifestFile = projectWorkingDirectory.resolve("target/manifest.json").toFile();
+        File runResultsFile = projectWorkingDirectory.resolve("target/run_results.json").toFile();
+        boolean rParseRunResults = runContext.render(this.parseRunResults).as(Boolean.class).orElse(Boolean.TRUE);
         Manifest manifest = null;
         if (!manifestFile.exists()) {
             runContext.logger().warn("dbt manifest not found at {} (assets will NOT be emitted)", manifestFile.getAbsolutePath());
@@ -555,7 +557,11 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                 storeManifestKvStore.put(key, new KVValueAndMetadata(null, JacksonMapper.toObject(Files.readString(manifestFile.toPath()))));
             }
 
-            ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestFile);
+            // run_results is read ahead of the asset emit here so test outcomes land on each model's
+            // asset metadata together with the rest of its lineage.
+            ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(
+                runContext, manifestFile, rParseRunResults ? runResultsFile : null
+            );
             runContext.logger().info(
                 "Manifest parse done. uri={}, metadata={}, nodes={}",
                 manifestResult.uri(),
@@ -566,8 +572,8 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
             run.getOutputFiles().put("manifest.json", manifestResult.uri());
         }
 
-        if (runContext.render(this.parseRunResults).as(Boolean.class).orElse(Boolean.TRUE) && projectWorkingDirectory.resolve("target/run_results.json").toFile().exists()) {
-            URI results = ResultParser.parseRunResult(runContext, projectWorkingDirectory.resolve("target/run_results.json").toFile(), manifest);
+        if (rParseRunResults && runResultsFile.exists()) {
+            URI results = ResultParser.parseRunResult(runContext, runResultsFile, manifest);
             run.getOutputFiles().put("run_results.json", results);
         }
     }

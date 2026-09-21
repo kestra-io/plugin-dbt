@@ -295,10 +295,15 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             Path runResultsArtifact = downloadArtifacts(runContext, runIdRendered, "run_results.json", RunResult.class);
             Path manifestArtifact = downloadArtifacts(runContext, runIdRendered, "manifest.json", ManifestArtifact.class);
 
+            boolean rParseRunResults = runContext.render(this.parseRunResults).as(Boolean.class).orElse(false);
+
             io.kestra.plugin.dbt.models.Manifest manifest = null;
             if (manifestArtifact != null) {
+                // run_results is already downloaded above, so it rides the same emit as the rest of
+                // the run's lineage instead of arriving after assets are already emitted.
                 ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(
-                    runContext, manifestArtifact.toFile(), !alreadyEmitted, producerMetadata(finalRunResponse.getData())
+                    runContext, manifestArtifact.toFile(), !alreadyEmitted, producerMetadata(finalRunResponse.getData()),
+                    rParseRunResults && runResultsArtifact != null ? runResultsArtifact.toFile() : null
                 );
                 manifest = manifestResult.manifest();
                 manifestUri = manifestResult.uri();
@@ -307,7 +312,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             }
 
             if (runResultsArtifact != null) {
-                if (runContext.render(this.parseRunResults).as(Boolean.class).orElse(false)) {
+                if (rParseRunResults) {
                     runResultsUri = ResultParser.parseRunResult(runContext, runResultsArtifact.toFile(), manifest, !alreadyEmitted);
                 } else {
                     runResultsUri = runContext.storage().putFile(runResultsArtifact.toFile());

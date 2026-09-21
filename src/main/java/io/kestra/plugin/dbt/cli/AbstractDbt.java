@@ -235,17 +235,21 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
         String baseDir = runContext.render(this.projectDir).as(String.class).orElse("");
 
         File manifestFile = workingDirectory.resolve(baseDir + "target/manifest.json").toFile();
+        File runResults = workingDirectory.resolve(baseDir + "target/run_results.json").toFile();
+        boolean rParseRunResults = runContext.render(this.parseRunResults).as(Boolean.class).orElse(true);
         io.kestra.plugin.dbt.models.Manifest manifest = null;
 
         if (manifestFile.exists()) {
-            ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestFile);
+            // run_results is read ahead of the asset emit here so test outcomes land on each model's
+            // asset metadata together with the rest of its lineage.
+            ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(
+                runContext, manifestFile, rParseRunResults ? runResults : null
+            );
             manifest = manifestResult.manifest();
             scriptOutput.getOutputFiles().put("manifest.json", manifestResult.uri());
         }
 
-        File runResults = workingDirectory.resolve(baseDir + "target/run_results.json").toFile();
-
-        if (runContext.render(this.parseRunResults).as(Boolean.class).orElse(true) && runResults.exists()) {
+        if (rParseRunResults && runResults.exists()) {
             URI results = ResultParser.parseRunResult(runContext, runResults, manifest);
             scriptOutput.getOutputFiles().put("run_results.json", results);
         }

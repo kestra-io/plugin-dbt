@@ -416,6 +416,123 @@ class ResultParserTest {
     }
 
     @Test
+    void parseManifestWithAssets_shouldAttachTestStatusMetadataPerModel() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        // stg_orders is targeted by a failing test, fct_orders by two passing tests, dim_customers by none.
+        Files.writeString(manifestFile, """
+            {
+              "metadata": {
+                "adapter_type": "postgres"
+              },
+              "nodes": {
+                "model.analytics.stg_orders": {
+                  "resource_type": "model",
+                  "database": "analytics",
+                  "schema": "staging",
+                  "name": "stg_orders",
+                  "unique_id": "model.analytics.stg_orders"
+                },
+                "model.analytics.fct_orders": {
+                  "resource_type": "model",
+                  "database": "analytics",
+                  "schema": "marts",
+                  "name": "fct_orders",
+                  "unique_id": "model.analytics.fct_orders"
+                },
+                "model.analytics.dim_customers": {
+                  "resource_type": "model",
+                  "database": "analytics",
+                  "schema": "marts",
+                  "name": "dim_customers",
+                  "unique_id": "model.analytics.dim_customers"
+                },
+                "test.analytics.not_null_stg_orders_id": {
+                  "resource_type": "test",
+                  "unique_id": "test.analytics.not_null_stg_orders_id",
+                  "depends_on": {
+                    "nodes": ["model.analytics.stg_orders"]
+                  }
+                },
+                "test.analytics.unique_fct_orders_id": {
+                  "resource_type": "test",
+                  "unique_id": "test.analytics.unique_fct_orders_id",
+                  "depends_on": {
+                    "nodes": ["model.analytics.fct_orders"]
+                  }
+                },
+                "test.analytics.accepted_values_fct_orders_status": {
+                  "resource_type": "test",
+                  "unique_id": "test.analytics.accepted_values_fct_orders_status",
+                  "depends_on": {
+                    "nodes": ["model.analytics.fct_orders"]
+                  }
+                }
+              },
+              "parent_map": {
+                "model.analytics.stg_orders": [],
+                "model.analytics.fct_orders": [],
+                "model.analytics.dim_customers": [],
+                "test.analytics.not_null_stg_orders_id": ["model.analytics.stg_orders"],
+                "test.analytics.unique_fct_orders_id": ["model.analytics.fct_orders"],
+                "test.analytics.accepted_values_fct_orders_status": ["model.analytics.fct_orders"]
+              }
+            }
+            """);
+
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        Files.writeString(runResultsFile, """
+            {
+              "metadata": {"dbt_version": "1.8.0"},
+              "results": [
+                {
+                  "status": "fail",
+                  "unique_id": "test.analytics.not_null_stg_orders_id",
+                  "failures": 1,
+                  "adapter_response": {},
+                  "timing": []
+                },
+                {
+                  "status": "pass",
+                  "unique_id": "test.analytics.unique_fct_orders_id",
+                  "failures": 0,
+                  "adapter_response": {},
+                  "timing": []
+                },
+                {
+                  "status": "pass",
+                  "unique_id": "test.analytics.accepted_values_fct_orders_status",
+                  "failures": 0,
+                  "adapter_response": {},
+                  "timing": []
+                }
+              ],
+              "elapsed_time": 0.5
+            }
+            """);
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
+
+        assertThat(runContext.assets().emitted(), hasSize(3));
+
+        var stgOrders = findEmitWithOutput(runContext.assets().emitted(), "analytics.staging.stg_orders").outputs().getFirst();
+        assertThat(stgOrders.getMetadata().get("dbtTestStatus"), is("fail"));
+        assertThat(stgOrders.getMetadata().get("dbtTestsTotal"), is(1));
+        assertThat(stgOrders.getMetadata().get("dbtTestsFailed"), is(1));
+
+        var fctOrders = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.fct_orders").outputs().getFirst();
+        assertThat(fctOrders.getMetadata().get("dbtTestStatus"), is("pass"));
+        assertThat(fctOrders.getMetadata().get("dbtTestsTotal"), is(2));
+        assertThat(fctOrders.getMetadata().get("dbtTestsFailed"), is(0));
+
+        // No test targets dim_customers: absent must not read as a green "pass".
+        var dimCustomers = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.dim_customers").outputs().getFirst();
+        assertThat(dimCustomers.getMetadata(), not(hasKey("dbtTestStatus")));
+        assertThat(dimCustomers.getMetadata(), not(hasKey("dbtTestsTotal")));
+        assertThat(dimCustomers.getMetadata(), not(hasKey("dbtTestsFailed")));
+    }
+
+    @Test
     void parseManifestWithAssets_shouldStoreManifestWhenItCannotBeRead() throws Exception {
         var runContext = mockRunContext();
         var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
