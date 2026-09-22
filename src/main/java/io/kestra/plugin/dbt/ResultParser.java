@@ -44,16 +44,29 @@ public abstract class ResultParser {
     private static final String RESOURCE_TYPE_SEED = "seed";
     private static final String RESOURCE_TYPE_SNAPSHOT = "snapshot";
     private static final String RESOURCE_TYPE_SOURCE = "source";
+    private static final String RESOURCE_TYPE_TEST = "test";
 
     // dbt node resource types that map to a physical table dbt builds.
     private static final Set<String> PRODUCED_RESOURCE_TYPES = Set.of(RESOURCE_TYPE_MODEL, RESOURCE_TYPE_SEED, RESOURCE_TYPE_SNAPSHOT);
+
+    // Values are strings, not booleans: EventTrigger (kestra-ee) filters asset metadata with only
+    // EQUAL_TO/NOT_EQUAL_TO via String.valueOf, so a numeric or boolean status could not be matched.
+    private static final String METADATA_TEST_STATUS = "dbtTestStatus";
+    private static final String METADATA_TESTS_TOTAL = "dbtTestsTotal";
+    private static final String METADATA_TESTS_FAILED = "dbtTestsFailed";
+    private static final String TEST_STATUS_FAIL = "fail";
+    private static final String TEST_STATUS_WARN = "warn";
+    private static final String TEST_STATUS_PASS = "pass";
 
     /**
      * @param fullyEmitted false when an emit failed part way, so a caller recording "this run is done" can
      *        tell that the lineage did not fully land.
      * @param assetIds populated whether or not lineage was emitted.
+     * @param runResult run_results already parsed while computing test-status metadata (null when
+     *        run_results was absent, its parsing was disabled, or it could not be read), so a caller can
+     *        feed it into {@link #parseRunResult} instead of reading the same file a second time.
      */
-    public record ManifestResult(Manifest manifest, URI uri, boolean fullyEmitted, List<String> assetIds) {
+    public record ManifestResult(Manifest manifest, URI uri, boolean fullyEmitted, List<String> assetIds, RunResult runResult) {
     }
 
     public static ManifestResult parseManifestWithAssets(RunContext runContext, File file) throws IOException, IllegalVariableEvaluationException {
@@ -75,6 +88,28 @@ public abstract class ResultParser {
      */
     public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, boolean emitLineage, Map<String, Object> assetMetadata)
         throws IOException, IllegalVariableEvaluationException {
+        return parseManifestWithAssets(runContext, file, emitLineage, assetMetadata, (RunResult) null);
+    }
+
+    /**
+     * Convenience for the common case: default emit/flat-metadata, only carrying test outcomes per model.
+     * {@code runResultsFile} is read here (at most once) rather than by the caller, so the parsed
+     * {@link RunResult} can ride back on {@link ManifestResult#runResult()} for reuse by {@link #parseRunResult}.
+     */
+    public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, File runResultsFile)
+        throws IOException, IllegalVariableEvaluationException {
+        return parseManifestWithAssets(runContext, file, true, Map.of(), readRunResultQuietly(runResultsFile));
+    }
+
+    /**
+     * {@code runResult} is already-parsed run_results (from a caller that read the HTTP artifact body
+     * itself, for instance), used to compute test-status metadata without re-reading the file. Null when
+     * run_results was not produced, its parsing was disabled, or it could not be read/parsed, in which
+     * case no test metadata is attached, matching prior behaviour. It rides back unchanged on the
+     * returned {@link ManifestResult#runResult()} so the caller can pass it to {@link #parseRunResult}.
+     */
+    public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, boolean emitLineage, Map<String, Object> assetMetadata, RunResult runResult)
+        throws IOException, IllegalVariableEvaluationException {
         Manifest manifest = null;
         boolean fullyEmitted = true;
         List<String> assetIds = List.of();
@@ -93,7 +128,8 @@ public abstract class ResultParser {
                 .toList();
 
             if (emitLineage) {
-                fullyEmitted = emitAssets(runContext, assetNodes, assetMetadata);
+                Map<String, Map<String, Object>> testMetadata = testStatusMetadata(manifest, runResult);
+                fullyEmitted = emitAssets(runContext, assetNodes, assetMetadata, testMetadata);
             } else {
                 runContext.logger().debug("Lineage already emitted for this run, skipping {} assets", assetIds.size());
             }
@@ -104,7 +140,7 @@ public abstract class ResultParser {
             runContext.logger().warn("Unable to read the dbt manifest, assets will not be emitted. The manifest is still stored as an output file.", e);
         }
 
-        return new ManifestResult(manifest, runContext.storage().putFile(file), fullyEmitted, assetIds);
+        return new ManifestResult(manifest, runContext.storage().putFile(file), fullyEmitted, assetIds, runResult);
     }
 
     public static URI parseRunResult(RunContext runContext, File file, Manifest manifest) throws IOException, IllegalVariableEvaluationException {
@@ -117,10 +153,18 @@ public abstract class ResultParser {
      */
     public static URI parseRunResult(RunContext runContext, File file, Manifest manifest, boolean attachAssets)
         throws IOException, IllegalVariableEvaluationException {
-        RunResult result = MAPPER.readValue(
-            file,
-            RunResult.class
-        );
+        return parseRunResult(runContext, file, manifest, attachAssets, null);
+    }
+
+    /**
+     * {@code preParsed} reuses run_results already parsed elsewhere (e.g. {@link ManifestResult#runResult()},
+     * or a caller's own downloaded artifact body), so the file is not deserialized a second time. Null falls
+     * back to reading {@code file} here, so a run_results.json that could not be pre-parsed still throws from
+     * this read and fails the task exactly as before this parameter existed.
+     */
+    public static URI parseRunResult(RunContext runContext, File file, Manifest manifest, boolean attachAssets, RunResult preParsed)
+        throws IOException, IllegalVariableEvaluationException {
+        RunResult result = preParsed != null ? preParsed : MAPPER.readValue(file, RunResult.class);
 
         Map<String, ModelAsset> modelAssets = (manifest == null || !attachAssets) ? Map.of() : extractAssetNodes(manifest);
 
@@ -300,18 +344,20 @@ public abstract class ResultParser {
     }
 
     /** @return false if any asset failed to emit, so the caller never records a partial emit as complete. */
-    private static boolean emitAssets(RunContext runContext, Map<String, ModelAsset> assetNodes, Map<String, Object> assetMetadata) throws IllegalVariableEvaluationException {
+    private static boolean emitAssets(RunContext runContext, Map<String, ModelAsset> assetNodes, Map<String, Object> assetMetadata, Map<String, Map<String, Object>> testMetadata)
+        throws IllegalVariableEvaluationException {
         runContext.logger().info("dbt assets extracted from manifest: {}", assetNodes.size());
         boolean fullyEmitted = true;
 
-        for (ModelAsset asset : assetNodes.values()) {
+        for (Map.Entry<String, ModelAsset> entry : assetNodes.entrySet()) {
+            ModelAsset asset = entry.getValue();
             if (!asset.produced()) {
                 continue;
             }
 
             // Bundle is {parents} -> {this node} only (never children) so each event is self-contained, no cartesian join.
             List<AssetIdentifier> inputs = inputIdentifiers(asset, assetNodes);
-            List<Asset> outputs = List.of(selfAsset(asset, assetMetadata));
+            List<Asset> outputs = List.of(selfAsset(asset, assetMetadata, testMetadata.get(entry.getKey())));
             try {
                 runContext.assets().emit(new AssetEmit(inputs, outputs));
             } catch (UnsupportedOperationException e) {
@@ -331,18 +377,119 @@ public abstract class ResultParser {
     }
 
     private static Asset selfAsset(ModelAsset asset) {
-        return selfAsset(asset, Map.of());
+        return selfAsset(asset, Map.of(), null);
     }
 
-    private static Asset selfAsset(ModelAsset asset, Map<String, Object> assetMetadata) {
+    private static Asset selfAsset(ModelAsset asset, Map<String, Object> assetMetadata, Map<String, Object> nodeMetadata) {
         Map<String, Object> metadata = new HashMap<>(asset.metadata());
         metadata.putAll(assetMetadata);
+        if (nodeMetadata != null) {
+            metadata.putAll(nodeMetadata);
+        }
 
         return Custom.builder()
             .id(asset.assetId())
             .type(TABLE_ASSET_TYPE)
             .metadata(metadata)
             .build();
+    }
+
+    /**
+     * Rolls up run_results test outcomes onto the model(s) each test targets, keyed by unique_id so
+     * {@link #emitAssets} can attach them per node. A model absent from the returned map had no
+     * *executed* test results (none at all, or every one of them skipped) and gets no metadata,
+     * rather than defaulting to "pass". Any failure while walking run_results degrades to "no test
+     * metadata" here rather than aborting the caller's whole asset emit.
+     */
+    private static Map<String, Map<String, Object>> testStatusMetadata(Manifest manifest, RunResult runResult) {
+        if (manifest == null || manifest.getNodes() == null || runResult == null || runResult.getResults() == null) {
+            return Map.of();
+        }
+
+        try {
+            return rollUpTestStatus(manifest, runResult);
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
+    /** Never throws: {@code runResultsFile} unreadable or malformed is reported as "not parsed" (null), never as an exception. */
+    private static RunResult readRunResultQuietly(File runResultsFile) {
+        if (runResultsFile == null || !runResultsFile.exists()) {
+            return null;
+        }
+
+        try {
+            return MAPPER.readValue(runResultsFile, RunResult.class);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    private static Map<String, Map<String, Object>> rollUpTestStatus(Manifest manifest, RunResult runResult) {
+        // Per model unique_id: [executed, failed, warned]. Skipped tests (dbt skips tests downstream
+        // of a failed node during `dbt build`) never reach this tally, so a model whose tests were
+        // all skipped ends up with no entry at all, same as a model with no tests.
+        Map<String, int[]> tallies = new HashMap<>();
+        for (RunResult.Result result : runResult.getResults()) {
+            if (result.getUniqueId() == null) {
+                continue;
+            }
+
+            Manifest.Node testNode = manifest.getNodes().get(result.getUniqueId());
+            if (testNode == null || !RESOURCE_TYPE_TEST.equals(lower(testNode.getResourceType()))) {
+                continue;
+            }
+
+            State.Type state;
+            try {
+                state = result.state();
+            } catch (IllegalStateException e) {
+                // An unrecognised status must not drop the rest of the roll-up.
+                continue;
+            }
+            if (state == State.Type.SKIPPED) {
+                continue;
+            }
+
+            for (String modelId : testTargets(manifest, testNode, result.getUniqueId())) {
+                int[] tally = tallies.computeIfAbsent(modelId, id -> new int[3]);
+                tally[0]++;
+                if (state == State.Type.FAILED) {
+                    tally[1]++;
+                } else if (state == State.Type.WARNING) {
+                    tally[2]++;
+                }
+            }
+        }
+
+        Map<String, Map<String, Object>> perNode = new HashMap<>();
+        tallies.forEach((modelId, tally) ->
+        {
+            String status = tally[1] > 0 ? TEST_STATUS_FAIL : tally[2] > 0 ? TEST_STATUS_WARN : TEST_STATUS_PASS;
+            perNode.put(
+                modelId, Map.of(
+                    METADATA_TEST_STATUS, status,
+                    METADATA_TESTS_TOTAL, tally[0],
+                    METADATA_TESTS_FAILED, tally[1]
+                )
+            );
+        });
+
+        return perNode;
+    }
+
+    // Same parent_map-first, depends_on-fallback resolution extractAssetNodes uses for model-to-model
+    // edges, applied to a test node to find the model(s)/seed(s)/snapshot(s) it targets. A parent_map
+    // entry with an explicit null value (rather than a missing key) falls back to depends_on too.
+    private static List<String> testTargets(Manifest manifest, Manifest.Node testNode, String uniqueId) {
+        if (manifest.getParentMap() != null && manifest.getParentMap().get(uniqueId) != null) {
+            return manifest.getParentMap().get(uniqueId);
+        }
+        if (testNode.getDependsOn() != null && testNode.getDependsOn().getNodes() != null) {
+            return testNode.getDependsOn().getNodes();
+        }
+        return List.of();
     }
 
     private static List<AssetIdentifier> inputIdentifiers(ModelAsset modelAsset, Map<String, ModelAsset> modelAssets) {
