@@ -292,18 +292,19 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             // Artifacts are uploaded asynchronously by dbt Cloud and manifest.json is absent for some
             // run shapes (e.g. dbt source freshness). Tolerate 404 so a legitimate success is not
             // reported as a failure.
-            Path runResultsArtifact = downloadArtifacts(runContext, runIdRendered, "run_results.json", RunResult.class);
-            Path manifestArtifact = downloadArtifacts(runContext, runIdRendered, "manifest.json", ManifestArtifact.class);
+            DownloadedArtifact<RunResult> runResultsArtifact = downloadArtifacts(runContext, runIdRendered, "run_results.json", RunResult.class);
+            DownloadedArtifact<ManifestArtifact> manifestArtifact = downloadArtifacts(runContext, runIdRendered, "manifest.json", ManifestArtifact.class);
 
             var rParseRunResults = runContext.render(this.parseRunResults).as(Boolean.class).orElse(false);
+            RunResult preParsedRunResults = rParseRunResults && runResultsArtifact != null ? runResultsArtifact.body() : null;
 
             io.kestra.plugin.dbt.models.Manifest manifest = null;
             if (manifestArtifact != null) {
-                // run_results is already downloaded above, so it rides the same emit as the rest of
-                // the run's lineage instead of arriving after assets are already emitted.
+                // run_results was already deserialized by downloadArtifacts above, so it rides the same
+                // emit as the rest of the run's lineage instead of being read from the temp file again.
                 ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(
-                    runContext, manifestArtifact.toFile(), !alreadyEmitted, producerMetadata(finalRunResponse.getData()),
-                    rParseRunResults && runResultsArtifact != null ? runResultsArtifact.toFile() : null
+                    runContext, manifestArtifact.path().toFile(), !alreadyEmitted, producerMetadata(finalRunResponse.getData()),
+                    preParsedRunResults
                 );
                 manifest = manifestResult.manifest();
                 manifestUri = manifestResult.uri();
@@ -313,9 +314,9 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
             if (runResultsArtifact != null) {
                 if (rParseRunResults) {
-                    runResultsUri = ResultParser.parseRunResult(runContext, runResultsArtifact.toFile(), manifest, !alreadyEmitted);
+                    runResultsUri = ResultParser.parseRunResult(runContext, runResultsArtifact.path().toFile(), manifest, !alreadyEmitted, preParsedRunResults);
                 } else {
-                    runResultsUri = runContext.storage().putFile(runResultsArtifact.toFile());
+                    runResultsUri = runContext.storage().putFile(runResultsArtifact.path().toFile());
                 }
             }
 
@@ -647,13 +648,15 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     }
 
     /**
-     * Downloads an artifact and writes it to a temp file. Returns null when the artifact is not
+     * Downloads an artifact, writes it to a temp file, and returns both the file and the already-deserialized
+     * body, so a caller (e.g. ResultParser.parseManifestWithAssets) can reuse the parsed object instead of
+     * deserializing the same temp file a second time. Returns null when the artifact is not
      * found (404), which is a legitimate outcome for async uploads or run shapes that don't
      * produce every artifact (e.g. manifest.json is absent for dbt source freshness runs).
      * 5xx errors are still retried by {@link AbstractDbtCloud#request}; other unexpected errors
      * still propagate.
      */
-    private <T> Path downloadArtifacts(RunContext runContext, Long runId, String path, Class<T> responseType)
+    private <T> DownloadedArtifact<T> downloadArtifacts(RunContext runContext, Long runId, String path, Class<T> responseType)
         throws IllegalVariableEvaluationException, IOException, HttpClientException {
         var requestBuilder = HttpRequest.builder()
             .uri(
@@ -679,7 +682,10 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         var artifactJson = JacksonMapper.ofJson().writeValueAsString(artifact);
         var tempFile = runContext.workingDir().createTempFile(".json");
         Files.writeString(tempFile, artifactJson, StandardOpenOption.TRUNCATE_EXISTING);
-        return tempFile;
+        return new DownloadedArtifact<>(tempFile, artifact);
+    }
+
+    private record DownloadedArtifact<T>(Path path, T body) {
     }
 
     @Builder

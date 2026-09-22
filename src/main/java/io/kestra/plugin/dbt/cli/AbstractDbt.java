@@ -238,19 +238,22 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
         File runResults = workingDirectory.resolve(baseDir + "target/run_results.json").toFile();
         var rParseRunResults = runContext.render(this.parseRunResults).as(Boolean.class).orElse(true);
         io.kestra.plugin.dbt.models.Manifest manifest = null;
+        io.kestra.plugin.dbt.models.RunResult preParsedRunResults = null;
 
         if (manifestFile.exists()) {
-            // run_results is read ahead of the asset emit here so test outcomes land on each model's
-            // asset metadata together with the rest of its lineage.
+            // run_results is read here (at most once) ahead of the asset emit so test outcomes land on
+            // each model's asset metadata, and the parsed result rides back for parseRunResult below
+            // instead of being read from disk a second time.
             ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(
                 runContext, manifestFile, rParseRunResults ? runResults : null
             );
             manifest = manifestResult.manifest();
+            preParsedRunResults = manifestResult.runResult();
             scriptOutput.getOutputFiles().put("manifest.json", manifestResult.uri());
         }
 
         if (rParseRunResults && runResults.exists()) {
-            URI results = ResultParser.parseRunResult(runContext, runResults, manifest);
+            URI results = ResultParser.parseRunResult(runContext, runResults, manifest, true, preParsedRunResults);
             scriptOutput.getOutputFiles().put("run_results.json", results);
         }
     }

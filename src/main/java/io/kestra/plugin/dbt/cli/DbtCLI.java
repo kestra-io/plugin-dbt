@@ -32,6 +32,7 @@ import io.kestra.core.storages.kv.KVValue;
 import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.plugin.dbt.ResultParser;
 import io.kestra.plugin.dbt.models.Manifest;
+import io.kestra.plugin.dbt.models.RunResult;
 import io.kestra.plugin.scripts.exec.AbstractExecScript;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.plugin.scripts.exec.scripts.runners.CommandsWrapper;
@@ -548,6 +549,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         File runResultsFile = projectWorkingDirectory.resolve("target/run_results.json").toFile();
         var rParseRunResults = runContext.render(this.parseRunResults).as(Boolean.class).orElse(Boolean.TRUE);
         Manifest manifest = null;
+        RunResult preParsedRunResults = null;
         if (!manifestFile.exists()) {
             runContext.logger().warn("dbt manifest not found at {} (assets will NOT be emitted)", manifestFile.getAbsolutePath());
         } else {
@@ -557,8 +559,9 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                 storeManifestKvStore.put(key, new KVValueAndMetadata(null, JacksonMapper.toObject(Files.readString(manifestFile.toPath()))));
             }
 
-            // run_results is read ahead of the asset emit here so test outcomes land on each model's
-            // asset metadata together with the rest of its lineage.
+            // run_results is read here (at most once) ahead of the asset emit so test outcomes land on
+            // each model's asset metadata, and the parsed result rides back for parseRunResult below
+            // instead of being read from disk a second time.
             ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(
                 runContext, manifestFile, rParseRunResults ? runResultsFile : null
             );
@@ -569,11 +572,12 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                 manifestResult.manifest() != null ? manifestResult.manifest().getNodes().size() : -1
             );
             manifest = manifestResult.manifest();
+            preParsedRunResults = manifestResult.runResult();
             run.getOutputFiles().put("manifest.json", manifestResult.uri());
         }
 
         if (rParseRunResults && runResultsFile.exists()) {
-            URI results = ResultParser.parseRunResult(runContext, runResultsFile, manifest);
+            URI results = ResultParser.parseRunResult(runContext, runResultsFile, manifest, true, preParsedRunResults);
             run.getOutputFiles().put("run_results.json", results);
         }
     }

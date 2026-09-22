@@ -1,5 +1,6 @@
 package io.kestra.plugin.dbt;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.time.Instant;
@@ -29,6 +30,7 @@ import jakarta.inject.Inject;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @KestraTest
 class ResultParserTest {
@@ -511,7 +513,11 @@ class ResultParserTest {
             }
             """);
 
-        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
+        var manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
+
+        // The parsed run_results rides back so a caller (parseRunResult) never has to read the file again.
+        assertThat(manifestResult.runResult(), is(notNullValue()));
+        assertThat(manifestResult.runResult().getResults(), hasSize(3));
 
         assertThat(runContext.assets().emitted(), hasSize(3));
 
@@ -793,6 +799,38 @@ class ResultParserTest {
 
         var stgOrders = findEmitWithOutput(runContext.assets().emitted(), "analytics.staging.stg_orders").outputs().getFirst();
         assertThat(stgOrders.getMetadata(), not(hasKey("dbtTestStatus")));
+    }
+
+    @Test
+    void parseRunResult_shouldStillFailOnMalformedRunResultsAfterManifestParseSwallowedIt() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        Files.writeString(manifestFile, """
+            {
+              "nodes": {
+                "model.analytics.stg_orders": {
+                  "resource_type": "model", "database": "analytics", "schema": "staging",
+                  "name": "stg_orders", "unique_id": "model.analytics.stg_orders"
+                }
+              },
+              "parent_map": {
+                "model.analytics.stg_orders": []
+              }
+            }
+            """);
+
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        Files.writeString(runResultsFile, "{ this is not json");
+
+        var manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
+
+        // The manifest-side parse swallowed the malformed file, so there is nothing pre-parsed to reuse:
+        // parseRunResult falls back to reading the same file itself and still fails the task, exactly
+        // as it did before a pre-parsed RunResult could ever be threaded through.
+        assertThat(manifestResult.runResult(), is(nullValue()));
+        assertThrows(
+            IOException.class, () -> ResultParser.parseRunResult(runContext, runResultsFile.toFile(), manifestResult.manifest(), true, manifestResult.runResult())
+        );
     }
 
     @Test
