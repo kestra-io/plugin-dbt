@@ -295,7 +295,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             Path runResultsArtifact = downloadArtifacts(runContext, runIdRendered, "run_results.json", RunResult.class);
             Path manifestArtifact = downloadArtifacts(runContext, runIdRendered, "manifest.json", ManifestArtifact.class);
 
-            boolean rParseRunResults = runContext.render(this.parseRunResults).as(Boolean.class).orElse(false);
+            var rParseRunResults = runContext.render(this.parseRunResults).as(Boolean.class).orElse(false);
 
             io.kestra.plugin.dbt.models.Manifest manifest = null;
             if (manifestArtifact != null) {

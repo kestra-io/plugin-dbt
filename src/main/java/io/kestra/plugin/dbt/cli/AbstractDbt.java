@@ -236,7 +236,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
 
         File manifestFile = workingDirectory.resolve(baseDir + "target/manifest.json").toFile();
         File runResults = workingDirectory.resolve(baseDir + "target/run_results.json").toFile();
-        boolean rParseRunResults = runContext.render(this.parseRunResults).as(Boolean.class).orElse(true);
+        var rParseRunResults = runContext.render(this.parseRunResults).as(Boolean.class).orElse(true);
         io.kestra.plugin.dbt.models.Manifest manifest = null;
 
         if (manifestFile.exists()) {
