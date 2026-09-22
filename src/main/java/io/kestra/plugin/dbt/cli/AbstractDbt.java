@@ -235,18 +235,25 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
         String baseDir = runContext.render(this.projectDir).as(String.class).orElse("");
 
         File manifestFile = workingDirectory.resolve(baseDir + "target/manifest.json").toFile();
+        File runResults = workingDirectory.resolve(baseDir + "target/run_results.json").toFile();
+        var rParseRunResults = runContext.render(this.parseRunResults).as(Boolean.class).orElse(true);
         io.kestra.plugin.dbt.models.Manifest manifest = null;
+        io.kestra.plugin.dbt.models.RunResult preParsedRunResults = null;
 
         if (manifestFile.exists()) {
-            ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(runContext, manifestFile);
+            // run_results is read here (at most once) ahead of the asset emit so test outcomes land on
+            // each model's asset metadata, and the parsed result rides back for parseRunResult below
+            // instead of being read from disk a second time.
+            ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(
+                runContext, manifestFile, rParseRunResults ? runResults : null
+            );
             manifest = manifestResult.manifest();
+            preParsedRunResults = manifestResult.runResult();
             scriptOutput.getOutputFiles().put("manifest.json", manifestResult.uri());
         }
 
-        File runResults = workingDirectory.resolve(baseDir + "target/run_results.json").toFile();
-
-        if (runContext.render(this.parseRunResults).as(Boolean.class).orElse(true) && runResults.exists()) {
-            URI results = ResultParser.parseRunResult(runContext, runResults, manifest);
+        if (rParseRunResults && runResults.exists()) {
+            URI results = ResultParser.parseRunResult(runContext, runResults, manifest, true, preParsedRunResults);
             scriptOutput.getOutputFiles().put("run_results.json", results);
         }
     }
