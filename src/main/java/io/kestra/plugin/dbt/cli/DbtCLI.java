@@ -43,6 +43,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
+import lombok.extern.jackson.Jacksonized;
 
 @SuperBuilder
 @ToString
@@ -312,6 +313,40 @@ import lombok.experimental.SuperBuilder;
                                 database: memory
                             target: dev
                 """
+        ),
+        @Example(
+            title = "Run `dbt build` and get a near-real-time Slack notification for every distinct WARN/ERROR log line, instead of waiting for the task to finish.",
+            full = true,
+            code = """
+                id: dbt_build_with_alerts
+                namespace: company.team
+
+                tasks:
+                  - id: dbt
+                    type: io.kestra.plugin.core.flow.WorkingDirectory
+                    tasks:
+                      - id: clone_repository
+                        type: io.kestra.plugin.git.Clone
+                        url: https://github.com/kestra-io/dbt-example
+                        branch: main
+
+                      - id: dbt_build
+                        type: io.kestra.plugin.dbt.cli.DbtCLI
+                        containerImage: ghcr.io/kestra-io/dbt-duckdb:latest
+                        taskRunner:
+                          type: io.kestra.plugin.scripts.runner.docker.Docker
+                        commands:
+                          - dbt build
+                        alertWebhook:
+                          url: "{{ secret('SLACK_WEBHOOK') }}"
+                        profiles: |
+                          my_dbt_project:
+                            outputs:
+                              dev:
+                                type: duckdb
+                                path: ":memory:"
+                            target: dev
+                """
         )
     },
     metrics = {
@@ -419,129 +454,163 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     @PluginProperty(group = "advanced")
     private Property<Engine> engine = Property.ofValue(Engine.CORE);
 
+    @Schema(
+        title = "Alert webhook",
+        description = """
+            When set, POSTs a JSON alert to `url` for each distinct WARN/ERROR dbt log line as it happens, \
+            in addition to the task's own logs and final state. Requires `logFormat: JSON` (the default); \
+            with any other log format no alerts are sent. Alerting is best-effort: a slow, unreachable, or \
+            failing webhook never fails or delays the task."""
+    )
+    @PluginProperty(group = "advanced")
+    private AlertWebhook alertWebhook;
+
     @Override
     public Output run(RunContext runContext) throws Exception {
         var logger = runContext.logger();
 
         KVStore storeManifestKvStore = null;
         AtomicBoolean hasWarning = new AtomicBoolean(false);
+        WebhookAlerter alerter = this.buildAlerter(runContext);
 
-        // Check/fail if a KV store exists with given namespace
-        if (this.getStoreManifest() != null) {
-            storeManifestKvStore = runContext.namespaceKv(
-                runContext.render(this.getStoreManifest().getNamespace())
-                    .as(String.class)
-                    .orElseThrow()
-            );
-        }
-
-        var rEngine = runContext.render(this.engine).as(Engine.class).orElse(Engine.CORE);
-
-        CommandsWrapper builtCommandsWrapper = this.commands(runContext)
-            .withEnableOutputDirectory(true) // force the output dir, so we can get the run_results.json and manifest.json files on each task runners
-            .withLogConsumer(new DbtLogConsumer(runContext, hasWarning));
-
-        final CommandsWrapper commandsWrapper = builtCommandsWrapper.getContainerImage() == null
-            ? builtCommandsWrapper.withContainerImage(rEngine == Engine.FUSION ? FUSION_IMAGE : CORE_IMAGE)
-            : builtCommandsWrapper;
-
-        var rProjectDir = runContext.render(projectDir).as(String.class);
-        Path projectWorkingDirectory = rProjectDir
-            .map(s -> commandsWrapper.getWorkingDirectory().resolve(s))
-            .orElseGet(commandsWrapper::getWorkingDirectory);
-
-        logger.info("dbt project working directory: {}", projectWorkingDirectory);
-
-        // Load manifest from KV store
-        if (this.getLoadManifest() != null) {
-            KVStore loadManifestKvStore = runContext.namespaceKv(
-                runContext.render(this.getLoadManifest().getNamespace()).as(String.class).orElseThrow()
-            );
-            fetchAndStoreManifestIfExists(runContext, loadManifestKvStore, projectWorkingDirectory);
-        }
-
-        String profilesString = runContext.render(profiles).as(String.class).orElse(null);
-        if (profilesString != null && !profilesString.isEmpty()) {
-            var profileFile = new File(commandsWrapper.getWorkingDirectory().toString(), "profiles.yml");
-            if (profileFile.exists()) {
-                logger.info("A 'profiles.yml' file already exists in the task working directory; it will be overridden.");
-            }
-            FileUtils.writeStringToFile(profileFile, profilesString, StandardCharsets.UTF_8);
-        }
-
-        var rCommands = runContext.render(this.commands).asList(String.class);
-
-        if (rEngine == Engine.FUSION && rCommands.stream().anyMatch(command -> command.contains("--partial-parse") || command.contains("--no-partial-parse"))) {
-            logger.warn("The '--partial-parse' and '--no-partial-parse' flags are not supported by the FUSION engine and will be silently ignored by dbt.");
-        }
-
-        LogFormat rLogFormat = runContext.render(this.logFormat).as(LogFormat.class).orElseThrow();
-
-        final String logPathArg = " --log-path logs";
-
-        ScriptOutput runResults;
         try {
-            runResults = commandsWrapper
-                .addEnv(
-                    Map.of(
-                        "PYTHONUNBUFFERED", "true",
-                        "PIP_ROOT_USER_ACTION", "ignore"
+            // Check/fail if a KV store exists with given namespace
+            if (this.getStoreManifest() != null) {
+                storeManifestKvStore = runContext.namespaceKv(
+                    runContext.render(this.getStoreManifest().getNamespace())
+                        .as(String.class)
+                        .orElseThrow()
+                );
+            }
+
+            var rEngine = runContext.render(this.engine).as(Engine.class).orElse(Engine.CORE);
+
+            CommandsWrapper builtCommandsWrapper = this.commands(runContext)
+                .withEnableOutputDirectory(true) // force the output dir, so we can get the run_results.json and manifest.json files on each task runners
+                .withLogConsumer(new DbtLogConsumer(runContext, hasWarning, alerter));
+
+            final CommandsWrapper commandsWrapper = builtCommandsWrapper.getContainerImage() == null
+                ? builtCommandsWrapper.withContainerImage(rEngine == Engine.FUSION ? FUSION_IMAGE : CORE_IMAGE)
+                : builtCommandsWrapper;
+
+            var rProjectDir = runContext.render(projectDir).as(String.class);
+            Path projectWorkingDirectory = rProjectDir
+                .map(s -> commandsWrapper.getWorkingDirectory().resolve(s))
+                .orElseGet(commandsWrapper::getWorkingDirectory);
+
+            logger.info("dbt project working directory: {}", projectWorkingDirectory);
+
+            // Load manifest from KV store
+            if (this.getLoadManifest() != null) {
+                KVStore loadManifestKvStore = runContext.namespaceKv(
+                    runContext.render(this.getLoadManifest().getNamespace()).as(String.class).orElseThrow()
+                );
+                fetchAndStoreManifestIfExists(runContext, loadManifestKvStore, projectWorkingDirectory);
+            }
+
+            String profilesString = runContext.render(profiles).as(String.class).orElse(null);
+            if (profilesString != null && !profilesString.isEmpty()) {
+                var profileFile = new File(commandsWrapper.getWorkingDirectory().toString(), "profiles.yml");
+                if (profileFile.exists()) {
+                    logger.info("A 'profiles.yml' file already exists in the task working directory; it will be overridden.");
+                }
+                FileUtils.writeStringToFile(profileFile, profilesString, StandardCharsets.UTF_8);
+            }
+
+            var rCommands = runContext.render(this.commands).asList(String.class);
+
+            if (rEngine == Engine.FUSION && rCommands.stream().anyMatch(command -> command.contains("--partial-parse") || command.contains("--no-partial-parse"))) {
+                logger.warn("The '--partial-parse' and '--no-partial-parse' flags are not supported by the FUSION engine and will be silently ignored by dbt.");
+            }
+
+            LogFormat rLogFormat = runContext.render(this.logFormat).as(LogFormat.class).orElseThrow();
+
+            if (this.alertWebhook != null && !LogFormat.JSON.equals(rLogFormat)) {
+                logger.warn("alertWebhook requires logFormat JSON; no alerts will be sent");
+            }
+
+            final String logPathArg = " --log-path logs";
+
+            ScriptOutput runResults;
+            try {
+                runResults = commandsWrapper
+                    .addEnv(
+                        Map.of(
+                            "PYTHONUNBUFFERED", "true",
+                            "PIP_ROOT_USER_ACTION", "ignore"
+                        )
                     )
-                )
-                .withInterpreter(this.interpreter)
-                .withBeforeCommands(this.beforeCommands)
-                .withBeforeCommandsWithOptions(true)
-                .withCommands(
-                    Property.ofValue(
-                        rCommands.stream()
-                            .map(command ->
-                            {
-                                if (!command.startsWith("dbt")) {
+                    .withInterpreter(this.interpreter)
+                    .withBeforeCommands(this.beforeCommands)
+                    .withBeforeCommandsWithOptions(true)
+                    .withCommands(
+                        Property.ofValue(
+                            rCommands.stream()
+                                .map(command ->
+                                {
+                                    if (!command.startsWith("dbt")) {
+                                        return command;
+                                    }
+
+                                    if (rProjectDir.orElse(null) != null && !command.contains("--project-dir")) {
+                                        command = command.concat(" --project-dir " + rProjectDir.get());
+                                    }
+
+                                    if (!LogFormat.NONE.equals(rLogFormat) && !command.contains("--log-format")) {
+                                        command = command.concat(" --log-format " + rLogFormat.toString().toLowerCase());
+                                    }
+
+                                    if (!command.contains("--log-path")) {
+                                        command = command.concat(logPathArg);
+                                    }
+
                                     return command;
-                                }
-
-                                if (rProjectDir.orElse(null) != null && !command.contains("--project-dir")) {
-                                    command = command.concat(" --project-dir " + rProjectDir.get());
-                                }
-
-                                if (!LogFormat.NONE.equals(rLogFormat) && !command.contains("--log-format")) {
-                                    command = command.concat(" --log-format " + rLogFormat.toString().toLowerCase());
-                                }
-
-                                if (!command.contains("--log-path")) {
-                                    command = command.concat(logPathArg);
-                                }
-
-                                return command;
-                            })
-                            .toList()
+                                })
+                                .toList()
+                        )
                     )
-                )
-                .run();
-        } catch (Exception e) {
-            runResults = (e instanceof RunnableTaskException rte && rte.getOutput() instanceof ScriptOutput so)
-                ? so
-                : ScriptOutput.builder().exitCode(1).outputFiles(new HashMap<>()).build();
+                    .run();
+            } catch (Exception e) {
+                runResults = (e instanceof RunnableTaskException rte && rte.getOutput() instanceof ScriptOutput so)
+                    ? so
+                    : ScriptOutput.builder().exitCode(1).outputFiles(new HashMap<>()).build();
+
+                parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore);
+                Output dbtOutput = Output.builder()
+                    .warningDetected(hasWarning.get())
+                    .outputFiles(runResults.getOutputFiles())
+                    .exitCode(runResults.getExitCode())
+                    .vars(runResults.getVars())
+                    .build();
+
+                throw new RunnableTaskException(e.getMessage(), dbtOutput);
+            }
 
             parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore);
-            Output dbtOutput = Output.builder()
+
+            return Output.builder()
                 .warningDetected(hasWarning.get())
                 .outputFiles(runResults.getOutputFiles())
                 .exitCode(runResults.getExitCode())
                 .vars(runResults.getVars())
                 .build();
+        } finally {
+            if (alerter != null) {
+                alerter.close();
+            }
+        }
+    }
 
-            throw new RunnableTaskException(e.getMessage(), dbtOutput);
+    private WebhookAlerter buildAlerter(RunContext runContext) throws IllegalVariableEvaluationException {
+        if (this.alertWebhook == null) {
+            return null;
         }
 
-        parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore);
+        var rUrl = runContext.render(this.alertWebhook.getUrl()).as(String.class)
+            .orElseThrow(() -> new IllegalArgumentException("`alertWebhook.url` must be set when `alertWebhook` is configured."));
+        var rLevel = runContext.render(this.alertWebhook.getLevel()).as(AlertLevel.class).orElse(AlertLevel.WARN);
 
-        return Output.builder()
-            .warningDetected(hasWarning.get())
-            .outputFiles(runResults.getOutputFiles())
-            .exitCode(runResults.getExitCode())
-            .vars(runResults.getVars())
-            .build();
+        return new WebhookAlerter(runContext, rUrl, rLevel);
     }
 
     private void parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore) throws IllegalVariableEvaluationException, IOException {
@@ -637,5 +706,30 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     public enum Engine {
         CORE,
         FUSION
+    }
+
+    @Builder
+    @Jacksonized
+    @Getter
+    public static class AlertWebhook {
+        @NotNull
+        @PluginProperty(secret = true)
+        @Schema(
+            title = "Webhook URL",
+            description = "The URL alerts are POSTed to, e.g. a Slack incoming webhook. Use `{{ secret('...') }}` rather than a literal URL, since it is effectively a bearer credential."
+        )
+        Property<String> url;
+
+        @Builder.Default
+        @Schema(
+            title = "Minimum alert level",
+            description = "Minimum dbt log level that triggers an alert. `WARN` (default) alerts on both warnings and errors; `ERROR` alerts on errors only."
+        )
+        Property<AlertLevel> level = Property.ofValue(AlertLevel.WARN);
+    }
+
+    enum AlertLevel {
+        WARN,
+        ERROR
     }
 }

@@ -16,6 +16,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
+import com.github.tomakehurst.wiremock.junit5.WireMockTest;
+
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
@@ -31,6 +33,7 @@ import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 
 import jakarta.inject.Inject;
 
+import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static io.kestra.core.utils.Rethrow.throwConsumer;
 import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -38,6 +41,7 @@ import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @KestraTest
+@WireMockTest(httpPort = 28284)
 class DbtCLITest {
     @Inject
     private RunContextFactory runContextFactory;
@@ -45,6 +49,8 @@ class DbtCLITest {
     private static final String FLOW_NAMESPACE = "{{ flow.namespace }}";
 
     private static final String MANIFEST_KEY = "manifest.json";
+
+    private static final String ALERT_WEBHOOK_URL = "http://localhost:28284/hooks/alert";
 
     private static final String PROFILES = """
         unit-kestra:
@@ -328,6 +334,87 @@ class DbtCLITest {
         ScriptOutput runOutput = execute.run(runContext);
 
         assertThat(runOutput.getExitCode(), is(0));
+    }
+
+    @Test
+    void run_withAlertWebhookAndWarning_shouldAlertWebhookWithoutChangingTaskState() throws Exception {
+        stubFor(post(urlEqualTo("/hooks/alert")).willReturn(ok()));
+
+        var warnLine = "{\"info\":{\"level\":\"warn\",\"ts\":\"2024-01-01T00:00:00Z\",\"thread\":null,"
+            + "\"name\":\"DeprecatedModel\",\"msg\":\"Deprecation warning\"},"
+            + "\"data\":{\"node_info\":{\"unique_id\":\"model.my_project.my_model\"}}}";
+
+        DbtCLI task = DbtCLI.builder()
+            .id(IdUtils.create())
+            .type(DbtCLI.class.getName())
+            .taskRunner(Process.instance())
+            .alertWebhook(
+                DbtCLI.AlertWebhook.builder()
+                    .url(Property.ofValue(ALERT_WEBHOOK_URL))
+                    .build()
+            )
+            .commands(Property.ofValue(List.of("echo '" + warnLine + "'")))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+
+        DbtCLI.Output output = task.run(runContext);
+
+        // same outcome as the no-webhook happy path: alerting never changes the task's own state
+        assertThat(output.getExitCode(), is(0));
+        assertThat(output.isWarningDetected(), is(true));
+        assertThat(output.finalState().isPresent(), is(true));
+        assertThat(output.finalState().get(), is(State.Type.WARNING));
+
+        verify(
+            1,
+            postRequestedFor(urlEqualTo("/hooks/alert"))
+                .withRequestBody(matchingJsonPath("$.level", equalTo("warn")))
+                .withRequestBody(matchingJsonPath("$.node", equalTo("model.my_project.my_model")))
+        );
+    }
+
+    @Test
+    void run_withAlertWebhookAndFailingCommand_shouldAlertWebhookAndStillFail() throws Exception {
+        stubFor(post(urlEqualTo("/hooks/alert")).willReturn(ok()));
+
+        var errorLine = "{\"info\":{\"level\":\"error\",\"ts\":\"2024-01-01T00:00:00Z\",\"thread\":null,"
+            + "\"name\":\"CompilationError\",\"msg\":\"Model failed to compile\"},"
+            + "\"data\":{\"node_info\":{\"unique_id\":\"model.my_project.failing_model\"}}}";
+
+        DbtCLI task = DbtCLI.builder()
+            .id(IdUtils.create())
+            .type(DbtCLI.class.getName())
+            .taskRunner(Process.instance())
+            .alertWebhook(
+                DbtCLI.AlertWebhook.builder()
+                    .url(Property.ofValue(ALERT_WEBHOOK_URL))
+                    .build()
+            )
+            .commands(
+                Property.ofValue(
+                    List.of(
+                        "echo '" + errorLine + "'",
+                        "exit 1"
+                    )
+                )
+            )
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+
+        // same outcome as the no-webhook path: a failing command still surfaces as RunnableTaskException,
+        // proving the alerter is closed from the exception path's `finally`, not just the success path
+        RunnableTaskException exception = assertThrows(RunnableTaskException.class, () -> task.run(runContext));
+        DbtCLI.Output output = (DbtCLI.Output) exception.getOutput();
+        assertThat(output.getExitCode(), is(not(0)));
+
+        verify(
+            1,
+            postRequestedFor(urlEqualTo("/hooks/alert"))
+                .withRequestBody(matchingJsonPath("$.level", equalTo("error")))
+                .withRequestBody(matchingJsonPath("$.node", equalTo("model.my_project.failing_model")))
+        );
     }
 
     @Test

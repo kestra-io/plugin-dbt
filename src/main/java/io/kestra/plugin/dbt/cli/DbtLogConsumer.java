@@ -18,14 +18,20 @@ import io.kestra.core.runners.RunContext;
 class DbtLogConsumer extends AbstractLogConsumer {
     private final RunContext runContext;
     private final AtomicBoolean hasWarning;
+    private final WebhookAlerter alerter;
 
     DbtLogConsumer(RunContext runContext) {
         this(runContext, new AtomicBoolean(false));
     }
 
     DbtLogConsumer(RunContext runContext, AtomicBoolean hasWarning) {
+        this(runContext, hasWarning, null);
+    }
+
+    DbtLogConsumer(RunContext runContext, AtomicBoolean hasWarning, WebhookAlerter alerter) {
         this.runContext = runContext;
         this.hasWarning = hasWarning;
+        this.alerter = alerter;
     }
 
     @Override
@@ -34,7 +40,7 @@ class DbtLogConsumer extends AbstractLogConsumer {
             this.outputs.putAll(PluginUtilsService.parseOut(line, runContext.logger(), runContext, isStdErr, instant));
             return;
         }
-        LogService.parse(runContext, line, hasWarning);
+        LogService.parse(runContext, line, hasWarning, alerter);
     }
 
     @Override

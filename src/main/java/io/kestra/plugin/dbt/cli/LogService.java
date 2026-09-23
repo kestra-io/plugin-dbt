@@ -15,8 +15,12 @@ class LogService {
     static final protected ObjectMapper MAPPER = JacksonMapper.ofJson()
         .setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
-    @SuppressWarnings("unchecked")
     protected static void parse(RunContext runContext, String line, AtomicBoolean hasWarning) {
+        parse(runContext, line, hasWarning, null);
+    }
+
+    @SuppressWarnings("unchecked")
+    protected static void parse(RunContext runContext, String line, AtomicBoolean hasWarning, WebhookAlerter alerter) {
         if (line == null) {
             return;
         }
@@ -107,13 +111,41 @@ class LogService {
                 case "warn":
                     hasWarning.set(true);
                     runContext.logger().warn(format, (Object[]) args);
+                    if (alerter != null) {
+                        alerter.maybeAlert("warn", node(jsonLog), type, msg, ts);
+                    }
                     break;
                 default:
                     runContext.logger().error(format, (Object[]) args);
+                    if (alerter != null) {
+                        alerter.maybeAlert("error", node(jsonLog), type, msg, ts);
+                    }
             }
         } catch (Throwable e) {
             runContext.logger().info(line.trim());
         }
+    }
+
+    /**
+     * Extracts the node unique_id (falling back to node_name) a log line refers to, if any. Classic dbt JSON
+     * logs nest it under {@code data.node_info}; Fusion's flat format carries the equivalent block at the
+     * top level. Returns {@code null} when the line is not tied to a specific node (e.g. a run-level log).
+     */
+    private static String node(Map<String, Object> jsonLog) {
+        if (jsonLog.get("data") instanceof Map<?, ?> data && data.get("node_info") instanceof Map<?, ?> nodeInfo) {
+            String node = nodeFromInfo(nodeInfo);
+            if (node != null) {
+                return node;
+            }
+        }
+        return jsonLog.get("node_info") instanceof Map<?, ?> nodeInfo ? nodeFromInfo(nodeInfo) : null;
+    }
+
+    private static String nodeFromInfo(Map<?, ?> nodeInfo) {
+        if (nodeInfo.get("unique_id") instanceof String s && !s.isBlank()) {
+            return s;
+        }
+        return nodeInfo.get("node_name") instanceof String s && !s.isBlank() ? s : null;
     }
 
     /**
