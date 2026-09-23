@@ -132,7 +132,9 @@ class WebhookAlerter implements AutoCloseable {
                 .method("POST")
                 .body(HttpRequest.JsonRequestBody.of(payload))
                 .build();
-            client.request(request, String.class);
+            // Response body is never used: the Consumer overload streams it instead of materializing a String,
+            // so a misconfigured URL returning a large body never gets buffered in memory.
+            client.request(request, response -> {});
         } catch (Exception e) {
             // Never surface a webhook failure to the task: the exception message from the HTTP client can
             // embed the URI (which may carry a secret token), so only the exception class is logged.

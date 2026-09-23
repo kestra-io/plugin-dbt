@@ -463,6 +463,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
             failing webhook never fails or delays the task."""
     )
     @PluginProperty(group = "advanced")
+    @ToString.Exclude
     private AlertWebhook alertWebhook;
 
     @Override
@@ -714,6 +715,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     public static class AlertWebhook {
         @NotNull
         @PluginProperty(secret = true)
+        @ToString.Exclude
         @Schema(
             title = "Webhook URL",
             description = "The URL alerts are POSTed to, e.g. a Slack incoming webhook. Use `{{ secret('...') }}` rather than a literal URL, since it is effectively a bearer credential."
