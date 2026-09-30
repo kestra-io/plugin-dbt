@@ -268,10 +268,10 @@ class MockTriggerRunTest {
         RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
 
         // The 500 is retried (GET is read-only), retries are exhausted, and the failure surfaces
-        // as RetryFailed wrapping the HTTP error, never a silent success that triggers a duplicate.
+        // directly as the underlying HttpClientResponseException.
         assertThatThrownBy(() -> task.run(runContext))
-            .isInstanceOf(RetryUtils.RetryFailed.class)
-            .hasRootCauseInstanceOf(HttpClientResponseException.class);
+            .isInstanceOf(HttpClientResponseException.class)
+            .hasMessageContaining("500");
         verify(0, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
     }
 

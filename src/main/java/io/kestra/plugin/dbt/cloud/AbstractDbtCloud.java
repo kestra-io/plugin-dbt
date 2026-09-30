@@ -6,8 +6,12 @@ import java.net.NoRouteToHostException;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
-import java.util.function.BiPredicate;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import javax.net.ssl.SSLHandshakeException;
 
@@ -23,12 +27,12 @@ import io.kestra.core.http.client.HttpClientException;
 import io.kestra.core.http.client.HttpClientRequestException;
 import io.kestra.core.http.client.HttpClientResponseException;
 import io.kestra.core.http.client.configurations.HttpConfiguration;
+import io.kestra.core.http.client.configurations.HttpMethod;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.models.tasks.retrys.Exponential;
 import io.kestra.core.runners.RunContext;
-import io.kestra.core.utils.RetryUtils;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
@@ -84,23 +88,51 @@ public abstract class AbstractDbtCloud extends Task {
 
     @Schema(
         title = "Maximum number of retries in case of transient errors",
-        description = "Default: 3"
+        description = "Default: 3. Deprecated: set `options.retry` (e.g. an `Exponential` or `Constant` " +
+            "policy) instead. Ignored once `options` is set; kept for backward compatibility with existing " +
+            "flows and will be removed in a future major version."
     )
+    @Deprecated(since = "1.4", forRemoval = true)
     @Builder.Default
     Property<Integer> maxRetries = Property.ofValue(3);
 
     @Schema(
         title = "Initial delay in milliseconds before retrying",
-        description = "Default: 1000 ms (1 second)"
+        description = "Default: 1000 ms (1 second). Deprecated: set `options.retry.interval` instead. " +
+            "Ignored once `options` is set; kept for backward compatibility with existing flows and will " +
+            "be removed in a future major version."
     )
+    @Deprecated(since = "1.4", forRemoval = true)
     @Builder.Default
     Property<Long> initialDelayMs = Property.ofValue(1000L);
+
+    // dbt Cloud rejects a rate-limited request before running it, so it is always safe to retry for any method.
+    private static final int TOO_MANY_REQUESTS = 429;
+
+    // Gateway errors retried for a write.
+    private static final Set<Integer> RETRIABLE_WRITE_GATEWAY_CODES = Set.of(502, 503, 504);
+
+    // Gateway errors that may mean dbt Cloud already received the write and created the run.
+    private static final Set<Integer> AMBIGUOUS_WRITE_GATEWAY_CODES = Set.of(502, 504);
+
+    // Read-only methods (GET/HEAD) may safely retry any 5xx errors.
+    private static final List<Integer> READ_ONLY_RETRIABLE_CODES = Stream.concat(
+        Stream.of(TOO_MANY_REQUESTS),
+        IntStream.rangeClosed(500, 599).boxed()
+    ).collect(Collectors.toUnmodifiableList());
+
+    private static final List<Integer> WRITE_RETRIABLE_CODES = Stream.concat(
+        Stream.of(TOO_MANY_REQUESTS),
+        RETRIABLE_WRITE_GATEWAY_CODES.stream()
+    ).collect(Collectors.toUnmodifiableList());
+
+    private static final List<HttpMethod> TRANSPORT_RETRIABLE_METHODS = List.of(HttpMethod.GET, HttpMethod.HEAD);
 
     protected <RES> HttpResponse<RES> request(
         RunContext runContext,
         HttpRequest.HttpRequestBuilder requestBuilder,
         Class<RES> responseType) throws HttpClientException, IllegalVariableEvaluationException, IOException {
-        return this.request(runContext, requestBuilder, responseType, AbstractDbtCloud::isRetriableTransientError);
+        return this.request(runContext, requestBuilder, responseType, false);
     }
 
     // Same as above but with a caller-supplied retry decision (throwable, method) -> retry. Used by callers
@@ -110,7 +142,7 @@ public abstract class AbstractDbtCloud extends Task {
         RunContext runContext,
         HttpRequest.HttpRequestBuilder requestBuilder,
         Class<RES> responseType,
-        BiPredicate<Throwable, String> retryWhen) throws HttpClientException, IllegalVariableEvaluationException, IOException {
+        boolean reattachEnabled) throws HttpClientException, IllegalVariableEvaluationException, IOException {
 
         var request = requestBuilder
             .addHeader("Authorization", "Bearer " + runContext.render(this.token).as(String.class).orElseThrow())
@@ -125,128 +157,80 @@ public abstract class AbstractDbtCloud extends Task {
             runContext.render(this.baseUrl).as(String.class).orElse(LEGACY_BASE_URL)
         );
 
-        try (var client = new HttpClient(runContext, options)) {
-            return RetryUtils.<HttpResponse<RES>, HttpClientException> of(
-                Exponential.builder()
-                    .delayFactor(2.0)
-                    .interval(Duration.ofMillis(rInitialDelay))
-                    .maxInterval(Duration.ofSeconds(30))
-                    .maxAttempts(rMaxRetries)
-                    .build()
-            ).run(
-                (res, throwable) -> retryWhen.test(throwable, request.getMethod()),
-                () ->
-                {
-                    try {
-                        var response = client.request(request, String.class);
-                        // A success status with an empty body cannot be parsed. Throw rather than return a
-                        // null-bodied response: callers that expect a body (e.g. artifact download) fail loudly
-                        // instead of silently writing a "null" artifact, and the trigger POST sees an IOException,
-                        // which isAmbiguousFailure treats as ambiguous so it confirms the run it may have created.
-                        // readValue(null, ...) would itself throw an opaque IllegalArgumentException, so guard first.
-                        var body = response.getBody();
-                        if (body == null || body.isBlank()) {
-                            throw new IOException("Empty response body from dbt Cloud");
-                        }
-                        var parsedResponse = MAPPER.readValue(body, responseType);
-                        return HttpResponse.<RES> builder()
-                            .request(request)
-                            .body(parsedResponse)
-                            .headers(response.getHeaders())
-                            .status(response.getStatus())
-                            .build();
-                    } catch (HttpClientResponseException e) {
-                        // A 401 against the legacy default host is almost always a wrong baseUrl, not a bad
-                        // token: the shared host no longer resolves tokens for regional and cell-based
-                        // accounts. Rethrow the same type with an enriched message so the failure itself
-                        // names baseUrl, keeping the original 401 as the cause. Other cases pass through.
-                        if (usesLegacyBaseUrl && e.getResponse().getStatus().getCode() == 401) {
-                            throw new HttpClientResponseException(
-                                "Received a 401 while using the legacy baseUrl default \"" + LEGACY_BASE_URL +
-                                    "\". This host no longer resolves tokens for regional and cell-based dbt " +
-                                    "Cloud accounts. Before checking the token, set baseUrl to your account's " +
-                                    "access URL (ACCOUNT_PREFIX.REGION.dbt.com). Original error: " + e.getMessage(),
-                                e.getResponse(),
-                                e
-                            );
-                        }
-                        throw e;
-                    }
+        var effectiveOptions = retryConfiguration(rMaxRetries, rInitialDelay, reattachEnabled);
+
+        try (var client = new HttpClient(runContext, effectiveOptions)) {
+            try {
+                var response = client.request(request, String.class);
+                // A success status with an empty body cannot be parsed. Throw rather than return a
+                // null-bodied response: callers that expect a body (e.g. artifact download) fail loudly
+                // instead of silently writing a "null" artifact, and the trigger POST sees an IOException,
+                // which isAmbiguousFailure treats as ambiguous so it confirms the run it may have created.
+                // readValue(null, ...) would itself throw an opaque IllegalArgumentException, so guard first.
+                var body = response.getBody();
+                if (body == null || body.isBlank()) {
+                    throw new IOException("Empty response body from dbt Cloud");
                 }
-            );
+                var parsedResponse = MAPPER.readValue(body, responseType);
+                return HttpResponse.<RES> builder()
+                    .request(request)
+                    .body(parsedResponse)
+                    .headers(response.getHeaders())
+                    .status(response.getStatus())
+                    .build();
+            } catch (HttpClientResponseException e) {
+                // A 401 against the legacy default host is almost always a wrong baseUrl, not a bad
+                // token: the shared host no longer resolves tokens for regional and cell-based
+                // accounts. Rethrow the same type with an enriched message so the failure itself
+                // names baseUrl, keeping the original 401 as the cause. Other cases pass through.
+                if (usesLegacyBaseUrl && e.getResponse().getStatus().getCode() == 401) {
+                    throw new HttpClientResponseException(
+                        "Received a 401 while using the legacy baseUrl default \"" + LEGACY_BASE_URL +
+                            "\". This host no longer resolves tokens for regional and cell-based dbt " +
+                            "Cloud accounts. Before checking the token, set baseUrl to your account's " +
+                            "access URL (ACCOUNT_PREFIX.REGION.dbt.com). Original error: " + e.getMessage(),
+                        e.getResponse(),
+                        e
+                    );
+                }
+                throw e;
+            }
         }
     }
 
-    // dbt Cloud rejects a rate-limited request before running it, so it is always safe to retry.
-    private static final int TOO_MANY_REQUESTS = 429;
-
-    // Gateway errors retried for a write. 503 almost certainly never reached the app. 502 and 504 are
-    // ambiguous (the request may already have created the run), so a caller that can look the run up
-    // routes them through isAmbiguousFailure instead, but the generic retry keeps them for callers that
-    // cannot, preserving the previous behavior.
-    private static final Set<Integer> RETRIABLE_WRITE_GATEWAY_CODES = Set.of(502, 503, 504);
-
-    // Gateway errors that may mean dbt Cloud already received the write and created the run.
-    private static final Set<Integer> AMBIGUOUS_WRITE_GATEWAY_CODES = Set.of(502, 504);
+    // Write retriable error codes
+    private static final List<Integer> WRITE_RETRIABLE_CODES_EXCLUDING_AMBIGUOUS = List.of(TOO_MANY_REQUESTS, 503);
 
     /**
-     * Whether an error calling the dbt Cloud API is transient and worth retrying.
-     *
-     * <p>
-     * Read-only methods (GET/HEAD) retry any transient signal: all 5xx, connection failures and
-     * timeouts. Other methods retry only the 502/503/504 gateway errors plus transport failures that
-     * provably never reached dbt Cloud (TLS handshake, connection refused). A plain 500, a read timeout
-     * or a mid-flight connection drop is not retried for them, since the request may already have
-     * created the run and a retry could start the job twice. A 502 or 504 carries that same residual
-     * risk, but the narrow set is kept for backward compatibility. A 429 (rate limited) is retried for
-     * any method, since dbt Cloud rejects it before running the request. Other client errors (4xx) are
-     * never retried.
-     *
-     * <p>
-     * The core HTTP client wraps a read timeout as {@code RuntimeException(SocketTimeoutException)},
-     * so it is matched through the cause.
+     * Builds the {@link HttpConfiguration} used for a single call: the user-supplied {@link #options} (or
+     * defaults) with the retry policy and retryable status codes overridden to match this class's previous
+     * {@code RetryUtils}-based behavior — now expressed entirely through Kestra core's HTTP client retry
+     * support instead of a plugin-local retry loop. When reattachEnabled is true, the
+     * non-GET/HEAD (write) status-code set drops 502/504, leaving them to surface to the caller; every
+     * other retry rule (429, 503, TLS handshake, refused connection, and the full 5xx set for GET/HEAD) is
+     * unaffected.
      */
-    static boolean isRetriableTransientError(Throwable throwable, String method) {
-        if (throwable == null) {
-            return false;
-        }
+    HttpConfiguration retryConfiguration(int maxAttempts, long initialDelayMs, boolean reattachEnabled) {
+        var builder = this.options != null ? this.options.toBuilder() : HttpConfiguration.builder();
 
-        boolean readOnly = isReadOnlyMethod(method);
+        List<Integer> writeCodes = reattachEnabled
+            ? WRITE_RETRIABLE_CODES_EXCLUDING_AMBIGUOUS
+            : WRITE_RETRIABLE_CODES;
 
-        if (throwable instanceof HttpClientResponseException ex) {
-            int code = ex.getResponse().getStatus().getCode();
-            if (code == TOO_MANY_REQUESTS) {
-                return true;
-            }
-            if (readOnly) {
-                return code >= 500 && code <= 599;
-            }
-            return RETRIABLE_WRITE_GATEWAY_CODES.contains(code);
-        }
-
-        // Transport-level failures. For read-only methods any of them is retriable. For write methods
-        // only those that provably never reached the app are safe: a TLS handshake failure happens
-        // before any request bytes are sent, and a refused connection is never established. A read
-        // timeout or a mid-flight connection drop stays ambiguous (the run may already exist), so it
-        // is not retried for writes.
-        if (!readOnly) {
-            return hasCause(throwable, SSLHandshakeException.class)
-                || hasCause(throwable, ConnectException.class);
-        }
-
-        // Socket and SSL handshake failures are surfaced by the core HTTP client as this type.
-        if (throwable instanceof HttpClientRequestException) {
-            return true;
-        }
-
-        return throwable instanceof SocketTimeoutException
-            || throwable.getCause() instanceof SocketTimeoutException;
-    }
-
-    // GET/HEAD only. Named for retry-safety, not RFC idempotency: PUT/DELETE are idempotent but are
-    // not safe to retry blindly here, so they are treated as write methods.
-    private static boolean isReadOnlyMethod(String method) {
-        return "GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method);
+        return builder
+            .retry(Exponential.builder()
+                .delayFactor(2.0)
+                .interval(Duration.ofMillis(initialDelayMs))
+                .maxInterval(Duration.ofSeconds(30))
+                .maxAttempts(maxAttempts)
+                .build())
+            .retryOnStatusCodes(Property.ofValue(writeCodes))
+            .retryOnStatusCodesByMethod(Property.ofValue(Map.of(
+                HttpMethod.GET, READ_ONLY_RETRIABLE_CODES,
+                HttpMethod.HEAD, READ_ONLY_RETRIABLE_CODES
+            )))
+            .retryableTransportFailureMethods(Property.ofValue(TRANSPORT_RETRIABLE_METHODS))
+            .build();
     }
 
     /**
@@ -281,6 +265,30 @@ public abstract class AbstractDbtCloud extends Task {
         }
 
         return hasCause(throwable, SocketTimeoutException.class) || hasCause(throwable, IOException.class);
+    }
+
+    /**
+     * This method returns true for any failure that is likely to be transient and worth retrying, including
+     * a 429 rate-limit response, any 5xx response, a TLS handshake failure, a refused connection, a DNS resolution failure, a no-route-to-host error, a socket timeout, or a generic IOException.
+     * It returns false for any other failure, including a 4xx response
+     */
+    static boolean isRetriableReadFailure(Throwable throwable) {
+        if (throwable == null) {
+            return false;
+        }
+
+        if (throwable instanceof HttpClientResponseException ex) {
+            int code = ex.getResponse().getStatus().getCode();
+            return code == TOO_MANY_REQUESTS || (code >= 500 && code <= 599);
+        }
+
+        return throwable instanceof HttpClientRequestException
+            || hasCause(throwable, SSLHandshakeException.class)
+            || hasCause(throwable, ConnectException.class)
+            || hasCause(throwable, UnknownHostException.class)
+            || hasCause(throwable, NoRouteToHostException.class)
+            || hasCause(throwable, SocketTimeoutException.class)
+            || hasCause(throwable, IOException.class);
     }
 
     // Walks the cause chain (bounded, to tolerate a cyclic cause) looking for a given exception type.
