@@ -617,6 +617,8 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     private void parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore) throws IllegalVariableEvaluationException, IOException {
         File manifestFile = projectWorkingDirectory.resolve("target/manifest.json").toFile();
         File runResultsFile = projectWorkingDirectory.resolve("target/run_results.json").toFile();
+        DbtArtifacts.restoreIfCaptured(runContext, manifestFile, run.getOutputFiles());
+        DbtArtifacts.restoreIfCaptured(runContext, runResultsFile, run.getOutputFiles());
         var rParseRunResults = runContext.render(this.parseRunResults).as(Boolean.class).orElse(Boolean.TRUE);
         Manifest manifest = null;
         RunResult preParsedRunResults = null;

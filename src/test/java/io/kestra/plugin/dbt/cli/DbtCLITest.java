@@ -440,6 +440,54 @@ class DbtCLITest {
     }
 
     @Test
+    void run_withOutputFilesMatchingDbtArtifacts_shouldStillParseThem() throws Exception {
+        DbtCLI task = DbtCLI.builder()
+            .id(IdUtils.create())
+            .type(DbtCLI.class.getName())
+            .taskRunner(Process.instance())
+            .projectDir(Property.ofValue("dbt"))
+            .commands(Property.ofValue(List.of("echo 'dbt build finished'")))
+            .outputFiles(Property.ofValue(List.of("**/*.json")))
+            .build();
+
+        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+
+        // stands in for the artifacts `dbt build` leaves in target/
+        Path target = runContext.workingDir().path(true).resolve("dbt/target");
+        Files.createDirectories(target);
+        Files.writeString(target.resolve("manifest.json"), """
+            {
+              "metadata": {"project_name": "analytics"},
+              "nodes": {
+                "model.analytics.stg_orders": {
+                  "resource_type": "model", "database": "analytics", "schema": "staging",
+                  "name": "stg_orders", "unique_id": "model.analytics.stg_orders"
+                }
+              },
+              "parent_map": {"model.analytics.stg_orders": []}
+            }
+            """);
+        Files.writeString(target.resolve("run_results.json"), """
+            {
+              "metadata": {"dbt_version": "1.8.0"},
+              "results": [
+                {"status": "success", "unique_id": "model.analytics.stg_orders", "adapter_response": {}, "timing": []}
+              ]
+            }
+            """);
+
+        DbtCLI.Output output = task.run(runContext);
+
+        assertThat(output.getExitCode(), is(0));
+        // the user's own capture is kept
+        assertThat(output.getOutputFiles(), hasKey("dbt/target/manifest.json"));
+        assertThat(output.getOutputFiles(), hasKey("dbt/target/run_results.json"));
+        // and the artifacts were still parsed, although capturing them removed them from disk
+        assertThat(output.getOutputFiles(), hasKey("manifest.json"));
+        assertThat(output.getOutputFiles(), hasKey("run_results.json"));
+    }
+
+    @Test
     void run_withProjectDir_shouldInjectProjectDirFlag() throws Exception {
         DbtCLI task = DbtCLI.builder()
             .id(IdUtils.create())
