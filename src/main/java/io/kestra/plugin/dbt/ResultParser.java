@@ -414,7 +414,7 @@ public abstract class ResultParser {
     }
 
     /** Never throws: {@code runResultsFile} unreadable or malformed is reported as "not parsed" (null), never as an exception. */
-    private static RunResult readRunResultQuietly(File runResultsFile) {
+    public static RunResult readRunResultQuietly(File runResultsFile) {
         if (runResultsFile == null || !runResultsFile.exists()) {
             return null;
         }
