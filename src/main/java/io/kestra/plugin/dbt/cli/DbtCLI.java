@@ -399,7 +399,9 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     @Builder.Default
     @Schema(
         title = "Parse run results",
-        description = "If true (default), reads `target/run_results.json` to expose durations and warnings in task outputs."
+        description = """
+            If true (default), reads `target/run_results.json` to expose durations and warnings in task outputs.
+            The parsed artifacts are added to `outputFiles` as `manifest.json` and `run_results.json`, next to any copy an `outputFiles` pattern captured under its own path (for example `dbt/target/manifest.json`)."""
     )
     @PluginProperty(group = "advanced")
     protected Property<Boolean> parseRunResults = Property.ofValue(Boolean.TRUE);
@@ -617,6 +619,8 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     private void parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore) throws IllegalVariableEvaluationException, IOException {
         File manifestFile = projectWorkingDirectory.resolve("target/manifest.json").toFile();
         File runResultsFile = projectWorkingDirectory.resolve("target/run_results.json").toFile();
+        DbtArtifacts.restoreIfCaptured(runContext, manifestFile, run.getOutputFiles());
+        DbtArtifacts.restoreIfCaptured(runContext, runResultsFile, run.getOutputFiles());
         var rParseRunResults = runContext.render(this.parseRunResults).as(Boolean.class).orElse(Boolean.TRUE);
         Manifest manifest = null;
         RunResult preParsedRunResults = null;

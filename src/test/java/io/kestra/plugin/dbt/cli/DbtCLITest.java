@@ -440,6 +440,36 @@ class DbtCLITest {
     }
 
     @Test
+    void run_withOutputFilesMatchingDbtArtifacts_shouldStillParseThem() throws Exception {
+        var task = DbtCLI.builder()
+            .id(IdUtils.create())
+            .type(DbtCLI.class.getName())
+            .taskRunner(Process.instance())
+            .projectDir(Property.ofValue("dbt"))
+            .commands(Property.ofValue(List.of("echo 'dbt build finished'")))
+            .outputFiles(Property.ofValue(List.of("**/*.json")))
+            .build();
+
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        copyFolder(
+            Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("captured-artifacts")).getPath()),
+            Files.createDirectories(runContext.workingDir().path(true).resolve("dbt/target"))
+        );
+
+        var output = task.run(runContext);
+
+        assertThat(output.getExitCode(), is(0));
+        assertThat(output.getOutputFiles(), allOf(
+            hasKey("dbt/target/manifest.json"),
+            hasKey("dbt/target/run_results.json"),
+            hasKey("manifest.json"),
+            hasKey("run_results.json")
+        ));
+        assertThat(runContext.dynamicWorkerResults(), hasSize(1));
+        assertThat(runContext.dynamicWorkerResults().getFirst().getTaskRun().getTaskId(), is("model.analytics.stg_orders"));
+    }
+
+    @Test
     void run_withProjectDir_shouldInjectProjectDirFlag() throws Exception {
         DbtCLI task = DbtCLI.builder()
             .id(IdUtils.create())
