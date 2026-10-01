@@ -16,6 +16,7 @@ import io.kestra.core.models.assets.Custom;
 import io.kestra.core.models.executions.LogEntry;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.models.tasks.RunnableTaskException;
 import io.kestra.core.models.validations.ModelValidator;
 import io.kestra.core.queues.DispatchQueueInterface;
 import io.kestra.core.runners.RunContext;
@@ -34,6 +35,7 @@ import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @KestraTest
@@ -262,6 +264,8 @@ class CheckStatusTest {
                         {
                           "data": {
                             "id": 6667,
+                            "account_id": 123,
+                            "project_id": 9,
                             "status": 20,
                             "status_humanized": "Error",
                             "status_message": "Model failed",
@@ -320,6 +324,12 @@ class CheckStatusTest {
         // The run failed — the task must still throw, carrying the same message as before the fix.
         var ex = assertThrows(Exception.class, () -> checkStatus.run(runContext));
         assertThat(ex.getMessage(), containsString("Model failed"));
+
+        // The failed run's outputs ride the exception, so the topology view still shows them.
+        var output = (CheckStatus.Output) assertInstanceOf(RunnableTaskException.class, ex).getOutput();
+        assertThat(output.getRunSummary().getError(), is(1));
+        assertThat(output.getRun().getStatus(), is("Error"));
+        assertThat(output.getRunUrl(), is("http://localhost:8089/deploy/123/projects/9/runs/6667"));
 
         // But run_results.json must have been downloaded and parsed regardless, emitting a dynamic
         // taskrun for the failed model with an ERROR state — this is what was missing before the fix.

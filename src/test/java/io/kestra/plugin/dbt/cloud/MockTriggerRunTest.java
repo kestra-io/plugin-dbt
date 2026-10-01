@@ -144,6 +144,9 @@ class MockTriggerRunTest {
         assertThat(output.getRunId(), is(789L));
         assertThat(output.getRunResults().toString(), containsString("kestra://"));
         assertThat(output.getManifest(), is(notNullValue()));
+        assertThat(output.getRunSummary(), is(notNullValue()));
+        assertThat(output.getTestSummary(), is(notNullValue()));
+        assertThat(output.getRun().getStatus(), is(notNullValue()));
     }
 
     @Test

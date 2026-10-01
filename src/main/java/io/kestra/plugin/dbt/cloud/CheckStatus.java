@@ -15,6 +15,7 @@ import java.util.HexFormat;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -28,6 +29,7 @@ import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
+import io.kestra.core.models.tasks.RunnableTaskException;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.storages.kv.KVMetadata;
@@ -42,10 +44,13 @@ import io.kestra.plugin.dbt.cloud.models.JobStatus;
 import io.kestra.plugin.dbt.cloud.models.JobStatusHumanizedEnum;
 import io.kestra.plugin.dbt.cloud.models.ManifestArtifact;
 import io.kestra.plugin.dbt.cloud.models.Run;
+import io.kestra.plugin.dbt.cloud.models.RunDetails;
 import io.kestra.plugin.dbt.cloud.models.RunListResponse;
 import io.kestra.plugin.dbt.cloud.models.RunResponse;
 import io.kestra.plugin.dbt.cloud.models.Step;
 import io.kestra.plugin.dbt.models.RunResult;
+import io.kestra.plugin.dbt.models.RunSummary;
+import io.kestra.plugin.dbt.models.TestSummary;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.AssertTrue;
@@ -285,6 +290,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         // dynamic taskruns/logs (issue #315) — those must land even though the task ends up throwing.
         URI runResultsUri = null;
         URI manifestUri = null;
+        RunResult parsedRunResults = null;
         List<String> assets = List.of();
         boolean artifactsProcessed = false;
         boolean lineageLanded = false;
@@ -297,6 +303,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
             var rParseRunResults = runContext.render(this.parseRunResults).as(Boolean.class).orElse(false);
             RunResult preParsedRunResults = rParseRunResults && runResultsArtifact != null ? runResultsArtifact.body() : null;
+            parsedRunResults = preParsedRunResults;
 
             io.kestra.plugin.dbt.models.Manifest manifest = null;
             if (manifestArtifact != null) {
@@ -335,6 +342,17 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             rememberProcessed(runContext, processedKey, runIdRendered);
         }
 
+        Run run = finalRunResponse.getData();
+        Output.OutputBuilder output = Output.builder()
+            .runId(runIdRendered)
+            .lineageEmitted(!alreadyEmitted && lineageLanded)
+            .assets(assets)
+            .runResults(runResultsUri)
+            .manifest(manifestUri)
+            .run(RunDetails.from(run))
+            .runUrl(runUrl(runContext, run));
+        withSummaries(output, runContext, parsedRunResults);
+
         if (!successful) {
             String failure = "Failed run with status '" + finalRunResponse.getData().getStatusHumanized() +
                 "' after " + finalRunResponse.getData().getDurationHumanized() +
@@ -345,20 +363,36 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                 ": " + finalRunResponse;
 
             if (runContext.render(this.failOnUnsuccessful).as(Boolean.class).orElse(Boolean.TRUE)) {
-                throw new Exception(failure);
+                // Outputs ride the exception so a failed run still shows its results.
+                throw new RunnableTaskException(failure, output.build());
             }
 
             // Artifacts and lineage already landed above, so the caller keeps the run's data.
             logger.warn("{}", failure);
         }
 
-        return Output.builder()
-            .runId(runIdRendered)
-            .lineageEmitted(!alreadyEmitted && lineageLanded)
-            .assets(assets)
-            .runResults(runResultsUri)
-            .manifest(manifestUri)
-            .build();
+        return output.build();
+    }
+
+    // dbt Cloud serves its UI on the same host as the API, so baseUrl also builds the run link.
+    private String runUrl(RunContext runContext, Run run) throws IllegalVariableEvaluationException {
+        if (run == null || run.getAccountId() == null || run.getProjectId() == null || run.getId() == null) {
+            return null;
+        }
+        String host = StringUtils.removeEnd(runContext.render(getBaseUrl()).as(String.class).orElse("https://cloud.getdbt.com"), "/");
+        return host + "/deploy/" + run.getAccountId() + "/projects/" + run.getProjectId() + "/runs/" + run.getId();
+    }
+
+    // Summaries are UI and flow conveniences: a failure computing them must never change the run outcome.
+    private static void withSummaries(Output.OutputBuilder output, RunContext runContext, RunResult runResult) {
+        if (runResult == null) {
+            return;
+        }
+        try {
+            output.runSummary(RunSummary.from(runResult)).testSummary(TestSummary.from(runResult));
+        } catch (Exception e) {
+            runContext.logger().warn("Unable to summarize dbt Cloud run_results, runSummary and testSummary will be absent.", e);
+        }
     }
 
     /**
@@ -727,5 +761,23 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             description = "Internal storage URI for the downloaded `manifest.json`, when present."
         )
         private URI manifest;
+
+        @Schema(title = "Run details", description = "Status, job, environment, branch, dbt version and durations of the run.")
+        private RunDetails run;
+
+        @Schema(title = "Run URL", description = "Link to the run in dbt Cloud.")
+        private String runUrl;
+
+        @Schema(
+            title = "Summary of the executed non-test nodes",
+            description = "Counts by status, total duration and the slowest nodes, from `run_results.json`. Absent when run results were not parsed."
+        )
+        private RunSummary runSummary;
+
+        @Schema(
+            title = "Summary of the executed data and unit tests",
+            description = "Counts by status from `run_results.json`. Absent when run results were not parsed."
+        )
+        private TestSummary testSummary;
     }
 }
