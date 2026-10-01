@@ -18,8 +18,13 @@ final class DbtArtifacts {
             return;
         }
 
+        var workingDir = runContext.workingDir().path();
         var artifactPath = artifact.toPath().normalize();
-        var captured = outputFiles.get(runContext.workingDir().path().relativize(artifactPath).toString());
+        if (!artifactPath.startsWith(workingDir)) {
+            return;
+        }
+
+        var captured = outputFiles.get(workingDir.relativize(artifactPath).toString().replace('\\', '/'));
         if (captured == null) {
             return;
         }
@@ -28,7 +33,7 @@ final class DbtArtifacts {
         try (var is = runContext.storage().getFile(captured)) {
             Files.createDirectories(artifactPath.getParent());
             Files.copy(is, artifactPath, StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             runContext.logger().warn("Unable to restore the captured dbt artifact '{}', it will not be parsed", artifact.getName(), e);
         }
     }

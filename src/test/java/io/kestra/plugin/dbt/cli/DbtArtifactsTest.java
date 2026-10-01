@@ -82,6 +82,17 @@ class DbtArtifactsTest {
         assertThat(Files.exists(artifact), is(false));
     }
 
+    @Test
+    void restoreIfCaptured_shouldIgnoreAnArtifactOutsideTheWorkingDirectory() throws Exception {
+        var runContext = runContext();
+        var outside = Files.createTempDirectory("dbt-outside").resolve("target/manifest.json");
+        var captured = capture(runContext, runContext.workingDir().path(true).resolve(MANIFEST), "captured");
+
+        DbtArtifacts.restoreIfCaptured(runContext, outside.toFile(), Map.of(MANIFEST, captured));
+
+        assertThat(Files.exists(outside), is(false));
+    }
+
     private RunContext runContext() {
         var task = DbtCLI.builder()
             .id(IdUtils.create())
