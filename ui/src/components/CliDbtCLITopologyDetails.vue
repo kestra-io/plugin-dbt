@@ -6,14 +6,23 @@ import { REV_KEY, counts, formatSeconds, shortName, useDbtRunSummary } from "../
 
 const props = defineProps<KnownSlotProps["topology-details"]>();
 
-const { runSummary, testSummary, hasFailures, status } = useDbtRunSummary(
+const { runSummary, testSummary, cloudRun, hasFailures, status } = useDbtRunSummary(
     () => props.task?.id as string | undefined,
     () => props.execution as Record<string, any> | undefined,
     () => props.fetchOutputs as any,
 );
 
+// TriggerRun and CheckStatus share this box with DbtCLI.
+const isCloud = computed(() => String(props.task?.type ?? "").includes(".dbt.cloud."));
+
 const rows = computed(() => {
-    const result = [{ label: "Engine", value: String((props.task as any)?.engine ?? "CORE") }];
+    const task = props.task as any;
+    const result = isCloud.value
+        ? [{ label: "Job", value: String(cloudRun.value?.jobName ?? task?.jobId ?? "-") }]
+        : [{ label: "Engine", value: String(task?.engine ?? "CORE") }];
+    if (cloudRun.value?.status) {
+        result.push({ label: "Status", value: cloudRun.value.status });
+    }
     if (status.value === "error") {
         result.push({ label: "Results", value: "unavailable" });
         return result;
@@ -44,7 +53,7 @@ const rows = computed(() => {
         });
     }
     if (run) {
-        result.push({ label: "Duration", value: formatSeconds(run.elapsedTime) });
+        result.push({ label: "Duration", value: cloudRun.value?.duration ?? formatSeconds(run.elapsedTime) });
         const slowest = run.slowest?.[0];
         if (slowest) {
             result.push({

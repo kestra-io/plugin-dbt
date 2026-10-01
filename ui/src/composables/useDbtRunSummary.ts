@@ -19,6 +19,19 @@ export interface TestSummary {
     skipped: number;
 }
 
+export interface CloudRunDetails {
+    status?: string;
+    statusMessage?: string;
+    jobId?: number;
+    jobName?: string;
+    environmentName?: string;
+    gitBranch?: string;
+    dbtVersion?: string;
+    duration?: string;
+    queuedDuration?: string;
+    runDuration?: string;
+}
+
 type FetchOutputs = (query?: { taskRunId?: string }) => Promise<Record<string, any> | undefined>;
 
 // The host may render these slots under its own Vue runtime, so plugin-side refs do not always repaint
@@ -104,6 +117,13 @@ export function useDbtRunSummary(
 
     const runSummary = computed(() => outputs.value?.runSummary as RunSummary | undefined);
     const testSummary = computed(() => outputs.value?.testSummary as TestSummary | undefined);
+    // dbt Cloud tasks only: run details and a link back to the run.
+    const cloudRun = computed(() => outputs.value?.run as CloudRunDetails | undefined);
+    // Only http(s) links are rendered, the URL comes from a user-set baseUrl.
+    const runUrl = computed(() => {
+        const url = outputs.value?.runUrl as string | undefined;
+        return url && /^https?:\/\//.test(url) ? url : undefined;
+    });
     const hasFailures = computed(
         () =>
             (runSummary.value?.error ?? 0) > 0 ||
@@ -111,5 +131,5 @@ export function useDbtRunSummary(
             (testSummary.value?.error ?? 0) > 0,
     );
 
-    return { runSummary, testSummary, hasFailures, status, isRunning };
+    return { runSummary, testSummary, cloudRun, runUrl, hasFailures, status, isRunning };
 }

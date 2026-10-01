@@ -18,13 +18,17 @@ import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
+import io.kestra.core.models.tasks.RunnableTaskException;
 import io.kestra.core.models.tasks.retrys.Constant;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.utils.RetryUtils;
 import io.kestra.plugin.dbt.cloud.models.JobStatus;
 import io.kestra.plugin.dbt.cloud.models.Run;
+import io.kestra.plugin.dbt.cloud.models.RunDetails;
 import io.kestra.plugin.dbt.cloud.models.RunListResponse;
 import io.kestra.plugin.dbt.cloud.models.RunResponse;
+import io.kestra.plugin.dbt.models.RunSummary;
+import io.kestra.plugin.dbt.models.TestSummary;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
@@ -453,12 +457,29 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
             .parseRunResults(getParseRunResults())
             .build();
 
-        CheckStatus.Output runOutput = checkStatusJob.run(runContext);
+        CheckStatus.Output runOutput;
+        try {
+            runOutput = checkStatusJob.run(runContext);
+        } catch (RunnableTaskException e) {
+            // A failed run still carries CheckStatus outputs, re-expose them as this task's outputs.
+            if (e.getOutput() instanceof CheckStatus.Output failedOutput) {
+                throw new RunnableTaskException(e.getMessage(), from(runId, failedOutput));
+            }
+            throw e;
+        }
 
+        return from(runId, runOutput);
+    }
+
+    private static Output from(Long runId, CheckStatus.Output runOutput) {
         return Output.builder()
             .runId(runId)
             .runResults(runOutput.getRunResults())
             .manifest(runOutput.getManifest())
+            .run(runOutput.getRun())
+            .runUrl(runOutput.getRunUrl())
+            .runSummary(runOutput.getRunSummary())
+            .testSummary(runOutput.getTestSummary())
             .build();
     }
 
@@ -482,5 +503,23 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
             description = "Internal storage URI for `manifest.json`, when available."
         )
         private URI manifest;
+
+        @Schema(title = "Run details", description = "Status, job, environment, branch, dbt version and durations of the run.")
+        private RunDetails run;
+
+        @Schema(title = "Run URL", description = "Link to the run in dbt Cloud.")
+        private String runUrl;
+
+        @Schema(
+            title = "Summary of the executed non-test nodes",
+            description = "Counts by status, total duration and the slowest nodes, from `run_results.json`. Absent when run results were not parsed."
+        )
+        private RunSummary runSummary;
+
+        @Schema(
+            title = "Summary of the executed data and unit tests",
+            description = "Counts by status from `run_results.json`. Absent when run results were not parsed."
+        )
+        private TestSummary testSummary;
     }
 }

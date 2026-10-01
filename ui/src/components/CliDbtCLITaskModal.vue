@@ -6,7 +6,7 @@ import { REV_KEY, formatSeconds, shortName, useDbtRunSummary } from "../composab
 
 const props = defineProps<KnownSlotProps["topology-task-modal"]>();
 
-const { runSummary, testSummary, status, isRunning } = useDbtRunSummary(
+const { runSummary, testSummary, cloudRun, runUrl, status, isRunning } = useDbtRunSummary(
     () => (props.task as any)?.id as string | undefined,
     () => props.execution as Record<string, any> | undefined,
     () => (props as any).fetchOutputs,
@@ -14,10 +14,25 @@ const { runSummary, testSummary, status, isRunning } = useDbtRunSummary(
 
 const hasExecution = computed(() => !!(props.execution as any)?.id);
 
-const overviewRows = computed(() => [
-    { label: "Engine", value: String((props.task as any)?.engine ?? "CORE") },
-    { label: "Duration", value: formatSeconds(runSummary.value?.elapsedTime) },
-]);
+const overviewRows = computed(() => {
+    const cloud = cloudRun.value;
+    if (!cloud) {
+        return [
+            { label: "Engine", value: String((props.task as any)?.engine ?? "CORE") },
+            { label: "Duration", value: formatSeconds(runSummary.value?.elapsedTime) },
+        ];
+    }
+    return [
+        { label: "Job", value: cloud.jobName ?? String(cloud.jobId ?? "-") },
+        { label: "Environment", value: cloud.environmentName ?? "-" },
+        { label: "Branch", value: cloud.gitBranch ?? "-" },
+        { label: "dbt version", value: cloud.dbtVersion ?? "-" },
+        { label: "Status", value: cloud.status ?? "-" },
+        { label: "Duration", value: cloud.duration ?? formatSeconds(runSummary.value?.elapsedTime) },
+        { label: "Queued", value: cloud.queuedDuration ?? "-" },
+        { label: "Run time", value: cloud.runDuration ?? "-" },
+    ];
+});
 
 const modelRows = computed(() => {
     const run = runSummary.value;
@@ -58,11 +73,13 @@ const slowestRows = computed(() =>
         <p v-else-if="isRunning" class="dbt-cli-modal__empty">dbt is still running. Results appear when the task finishes.</p>
         <p v-else-if="status === 'error'" class="dbt-cli-modal__empty">Could not load dbt results.</p>
         <p v-else-if="status !== 'loaded'" class="dbt-cli-modal__empty">Loading dbt results...</p>
-        <p v-else-if="!runSummary && !testSummary" class="dbt-cli-modal__empty">No run results for this task yet.</p>
+        <p v-else-if="!runSummary && !testSummary && !cloudRun" class="dbt-cli-modal__empty">No run results for this task yet.</p>
 
         <template v-else>
             <section class="dbt-cli-modal__section">
                 <KsTopologyDetails :rows="overviewRows" />
+                <p v-if="cloudRun?.statusMessage" class="dbt-cli-modal__empty">{{ cloudRun.statusMessage }}</p>
+                <a v-if="runUrl" :href="runUrl" target="_blank" rel="noopener noreferrer" class="dbt-cli-modal__link">Open run in dbt Cloud</a>
             </section>
             <section v-if="modelRows.length" class="dbt-cli-modal__section">
                 <h4 class="dbt-cli-modal__title">Models</h4>
@@ -91,6 +108,11 @@ const slowestRows = computed(() =>
     font-size: var(--ks-font-size-xs);
     font-weight: 600;
     color: var(--ks-text-secondary);
+}
+
+.dbt-cli-modal__link {
+    display: inline-block;
+    margin-top: var(--ks-spacing-2, 0.5rem);
 }
 
 .dbt-cli-modal__empty {
