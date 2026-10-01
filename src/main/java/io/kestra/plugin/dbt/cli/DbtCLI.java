@@ -399,7 +399,9 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     @Builder.Default
     @Schema(
         title = "Parse run results",
-        description = "If true (default), reads `target/run_results.json` to expose durations and warnings in task outputs."
+        description = """
+            If true (default), reads `target/run_results.json` to expose durations and warnings in task outputs.
+            The parsed artifacts are added to `outputFiles` as `manifest.json` and `run_results.json`, next to any copy an `outputFiles` pattern captured under its own path (for example `dbt/target/manifest.json`)."""
     )
     @PluginProperty(group = "advanced")
     protected Property<Boolean> parseRunResults = Property.ofValue(Boolean.TRUE);

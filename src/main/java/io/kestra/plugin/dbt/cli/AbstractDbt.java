@@ -134,7 +134,9 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
     @Builder.Default
     @Schema(
         title = "Parse run result",
-        description = "Parsing run result to display duration of each task inside dbt"
+        description = """
+            Parsing run result to display duration of each task inside dbt.
+            The parsed artifacts are added to `outputFiles` as `manifest.json` and `run_results.json`, next to any copy an `outputFiles` pattern captured under its own path (for example `dbt/target/manifest.json`)."""
     )
     @PluginProperty(group = "advanced")
     protected Property<Boolean> parseRunResults = Property.ofValue(Boolean.TRUE);
