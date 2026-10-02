@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -493,5 +494,71 @@ class DbtCLITest {
         var runOutput = task.run(runContext);
 
         assertThat(runOutput.getExitCode(), is(0));
+    }
+
+    private static final String RUN_RESULTS = """
+        {"elapsed_time": 4.2, "results": [
+          {"unique_id": "model.shop.orders", "status": "success", "execution_time": 3.0, "timing": [], "adapter_response": {}},
+          {"unique_id": "model.shop.payments", "status": "error", "execution_time": 1.0, "timing": [], "adapter_response": {}},
+          {"unique_id": "operation.shop.shop-on-run-end-0", "status": "success", "execution_time": 9.0, "timing": [], "adapter_response": {}},
+          {"unique_id": "test.shop.not_null_orders_id.a1", "status": "pass", "failures": 0, "timing": [], "adapter_response": {}},
+          {"unique_id": "test.shop.unique_orders_id.b2", "status": "fail", "failures": 3, "timing": [], "adapter_response": {}}
+        ]}""";
+
+    private static DbtCLI.DbtCLIBuilder<?, ?> writeRunResultsTask(String runResults, String... extraCommands) {
+        var commands = new ArrayList<>(List.of("mkdir -p target", "printf '%s' '" + runResults.replace("\n", " ") + "' > target/run_results.json"));
+        commands.addAll(List.of(extraCommands));
+        return DbtCLI.builder()
+            .id(IdUtils.create())
+            .type(DbtCLI.class.getName())
+            .taskRunner(Process.instance())
+            .commands(Property.ofValue(commands));
+    }
+
+    @Test
+    void run_withRunResults_shouldExposeSummaries() throws Exception {
+        DbtCLI task = writeRunResultsTask(RUN_RESULTS).build();
+
+        DbtCLI.Output output = task.run(TestsUtils.mockRunContext(runContextFactory, task, Map.of()));
+
+        assertThat(output.getRunSummary().getTotal(), is(2));
+        assertThat(output.getRunSummary().getSuccess(), is(1));
+        assertThat(output.getRunSummary().getError(), is(1));
+        assertThat(output.getRunSummary().getElapsedTime(), is(4.2));
+        assertThat(output.getRunSummary().getSlowest().getFirst().getUniqueId(), is("model.shop.orders"));
+        assertThat(output.getTestSummary().getTotal(), is(2));
+        assertThat(output.getTestSummary().getPass(), is(1));
+        assertThat(output.getTestSummary().getFail(), is(1));
+    }
+
+    @Test
+    void run_withFailingCommand_shouldStillExposeSummaries() throws Exception {
+        DbtCLI task = writeRunResultsTask(RUN_RESULTS, "exit 1").build();
+
+        RunnableTaskException exception = assertThrows(
+            RunnableTaskException.class,
+            () -> task.run(TestsUtils.mockRunContext(runContextFactory, task, Map.of()))
+        );
+        DbtCLI.Output output = (DbtCLI.Output) exception.getOutput();
+
+        assertThat(output.getRunSummary().getError(), is(1));
+        assertThat(output.getTestSummary().getFail(), is(1));
+    }
+
+    @Test
+    void run_withParseRunResultsDisabled_shouldOmitSummaries() throws Exception {
+        DbtCLI task = writeRunResultsTask(RUN_RESULTS).parseRunResults(Property.ofValue(false)).build();
+
+        DbtCLI.Output output = task.run(TestsUtils.mockRunContext(runContextFactory, task, Map.of()));
+
+        assertThat(output.getRunSummary(), is(nullValue()));
+        assertThat(output.getTestSummary(), is(nullValue()));
+    }
+
+    @Test
+    void run_withMalformedRunResults_shouldFailAsBefore() {
+        DbtCLI task = writeRunResultsTask("not json").build();
+
+        assertThrows(Exception.class, () -> task.run(TestsUtils.mockRunContext(runContextFactory, task, Map.of())));
     }
 }

@@ -33,6 +33,8 @@ import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.plugin.dbt.ResultParser;
 import io.kestra.plugin.dbt.models.Manifest;
 import io.kestra.plugin.dbt.models.RunResult;
+import io.kestra.plugin.dbt.models.RunSummary;
+import io.kestra.plugin.dbt.models.TestSummary;
 import io.kestra.plugin.scripts.exec.AbstractExecScript;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.plugin.scripts.exec.scripts.runners.CommandsWrapper;
@@ -578,8 +580,8 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                     ? so
                     : ScriptOutput.builder().exitCode(1).outputFiles(new HashMap<>()).build();
 
-                parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore);
-                Output dbtOutput = Output.builder()
+                RunResult parsedRunResults = parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore);
+                Output dbtOutput = withSummaries(Output.builder(), runContext, parsedRunResults)
                     .warningDetected(hasWarning.get())
                     .outputFiles(runResults.getOutputFiles())
                     .exitCode(runResults.getExitCode())
@@ -589,9 +591,9 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                 throw new RunnableTaskException(e.getMessage(), dbtOutput);
             }
 
-            parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore);
+            RunResult parsedRunResults = parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore);
 
-            return Output.builder()
+            return withSummaries(Output.builder(), runContext, parsedRunResults)
                 .warningDetected(hasWarning.get())
                 .outputFiles(runResults.getOutputFiles())
                 .exitCode(runResults.getExitCode())
@@ -616,7 +618,22 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         return new WebhookAlerter(runContext, rUrl, rLevel);
     }
 
-    private void parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore) throws IllegalVariableEvaluationException, IOException {
+    // Summaries are UI/flow conveniences: a failure computing them must never fail the dbt run.
+    private static Output.OutputBuilder<?, ?> withSummaries(Output.OutputBuilder<?, ?> builder, RunContext runContext, RunResult runResult) {
+        if (runResult == null) {
+            return builder;
+        }
+        try {
+            return builder.runSummary(RunSummary.from(runResult)).testSummary(TestSummary.from(runResult));
+        } catch (Exception e) {
+            runContext.logger().warn("Unable to summarize dbt run_results, runSummary and testSummary will be absent.", e);
+            return builder;
+        }
+    }
+
+    /** Returns the parsed run_results, or null when it was not parsed, absent or unreadable. */
+    private RunResult parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore)
+        throws IllegalVariableEvaluationException, IOException {
         File manifestFile = projectWorkingDirectory.resolve("target/manifest.json").toFile();
         File runResultsFile = projectWorkingDirectory.resolve("target/run_results.json").toFile();
         DbtArtifacts.restoreIfCaptured(runContext, manifestFile, run.getOutputFiles());
@@ -651,9 +668,15 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         }
 
         if (rParseRunResults && runResultsFile.exists()) {
+            if (preParsedRunResults == null) {
+                // Null again on a malformed file, so parseRunResult below still throws as before.
+                preParsedRunResults = ResultParser.readRunResultQuietly(runResultsFile);
+            }
             URI results = ResultParser.parseRunResult(runContext, runResultsFile, manifest, true, preParsedRunResults);
             run.getOutputFiles().put("run_results.json", results);
+            return preParsedRunResults;
         }
+        return null;
     }
 
     private void fetchAndStoreManifestIfExists(RunContext runContext, KVStore loadManifestKvStore, Path projectWorkingDirectory)
@@ -682,6 +705,18 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     public static class Output extends ScriptOutput {
         @Builder.Default
         private final transient boolean warningDetected = false;
+
+        @Schema(
+            title = "Summary of the executed non-test nodes",
+            description = "Counts by status, total duration and the slowest nodes, from `run_results.json`. Absent when run results were not parsed."
+        )
+        private final RunSummary runSummary;
+
+        @Schema(
+            title = "Summary of the executed data and unit tests",
+            description = "Counts by status from `run_results.json`, e.g. `{{ outputs.dbt.testSummary.fail > 0 }}`. Absent when run results were not parsed."
+        )
+        private final TestSummary testSummary;
 
         @Override
         public Optional<State.Type> finalState() {

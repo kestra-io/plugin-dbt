@@ -10,6 +10,7 @@ plugins {
     id "com.gradleup.shadow" version "9.6.1"
     id 'signing'
     id 'net.researchgate.release' version '3.1.0'
+    id 'com.github.node-gradle.node' version '7.1.0'
 }
 
 def isBuildSnapshot = version.toString().endsWith("-SNAPSHOT")
@@ -212,4 +213,30 @@ idea {
         downloadJavadoc = true
         downloadSources = true
     }
+}
+
+/**********************************************************************************************************************\
+ * Plugin UI
+ **********************************************************************************************************************/
+if (file('ui').exists()) {
+    tasks.register('npmInstallUI', com.github.gradle.node.npm.task.NpmTask) {
+        args = ['install', '--fetch-retries=5', '--fetch-retry-mintimeout=5000', '--fetch-retry-maxtimeout=60000']
+        workingDir = file('ui')
+        // Lets Gradle skip npm install on the second CI invocation (check, then publish).
+        inputs.files('ui/package.json', 'ui/package-lock.json')
+        outputs.dir('ui/node_modules')
+    }
+    tasks.register('buildUI', com.github.gradle.node.npm.task.NpmTask) {
+        dependsOn 'npmInstallUI'
+        args = ['run', 'build', '--', '--outDir', '../src/main/resources/plugin-ui']
+        workingDir = file('ui')
+        // Same reason as npmInstallUI: skip a second ~3GB Vite build during publish.
+        inputs.dir('ui/src')
+        inputs.files('ui/package.json', 'ui/vite.config.ts', 'ui/tsconfig.json', 'ui/index.html')
+        outputs.dir('src/main/resources/plugin-ui')
+    }
+    processResources.dependsOn 'buildUI'
+    shadowJar.dependsOn 'buildUI'
+    // buildUI writes into src/main/resources, so a sources jar (if the publish setup adds one) must run after it.
+    tasks.matching { it.name == 'sourcesJar' }.configureEach { dependsOn 'buildUI' }
 }
