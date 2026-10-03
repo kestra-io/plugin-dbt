@@ -6,6 +6,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.stream.Collectors;
 
 import org.slf4j.event.Level;
 
@@ -58,6 +59,20 @@ public abstract class ResultParser {
     private static final String TEST_STATUS_WARN = "warn";
     private static final String TEST_STATUS_PASS = "pass";
 
+    // Asset metadata merges, and only an explicit null removes a key, so "no tests" must be sent as nulls.
+    private static final Map<String, Object> NO_TEST_METADATA;
+
+    static {
+        var noTestMetadata = new HashMap<String, Object>();
+        noTestMetadata.put(METADATA_TEST_STATUS, null);
+        noTestMetadata.put(METADATA_TESTS_TOTAL, null);
+        noTestMetadata.put(METADATA_TESTS_FAILED, null);
+        NO_TEST_METADATA = Collections.unmodifiableMap(noTestMetadata);
+    }
+
+    // dbt commands whose run_results report the tests of the nodes they selected.
+    private static final Set<String> TESTING_COMMANDS = Set.of("build", "test", "retry");
+
     /**
      * @param fullyEmitted false when an emit failed part way, so a caller recording "this run is done" can
      *        tell that the lineage did not fully land.
@@ -98,7 +113,9 @@ public abstract class ResultParser {
      */
     public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, File runResultsFile)
         throws IOException, IllegalVariableEvaluationException {
-        return parseManifestWithAssets(runContext, file, true, Map.of(), readRunResultQuietly(runResultsFile));
+        var runResult = readRunResultQuietly(runResultsFile);
+        var runResultsUnreadable = runResult == null && runResultsFile != null && runResultsFile.exists();
+        return parseManifestWithAssets(runContext, file, true, Map.of(), runResult, runResultsUnreadable);
     }
 
     /**
@@ -110,6 +127,11 @@ public abstract class ResultParser {
      */
     public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, boolean emitLineage, Map<String, Object> assetMetadata, RunResult runResult)
         throws IOException, IllegalVariableEvaluationException {
+        return parseManifestWithAssets(runContext, file, emitLineage, assetMetadata, runResult, false);
+    }
+
+    private static ManifestResult parseManifestWithAssets(RunContext runContext, File file, boolean emitLineage, Map<String, Object> assetMetadata, RunResult runResult,
+        boolean runResultsUnreadable) throws IOException, IllegalVariableEvaluationException {
         Manifest manifest = null;
         boolean fullyEmitted = true;
         List<String> assetIds = List.of();
@@ -129,7 +151,8 @@ public abstract class ResultParser {
 
             if (emitLineage) {
                 Map<String, Map<String, Object>> testMetadata = testStatusMetadata(manifest, runResult);
-                fullyEmitted = emitAssets(runContext, assetNodes, assetMetadata, testMetadata);
+                Set<String> clearableNodes = runResultsUnreadable ? assetNodes.keySet() : testedNodes(manifest, runResult);
+                fullyEmitted = emitAssets(runContext, assetNodes, assetMetadata, testMetadata, clearableNodes);
             } else {
                 runContext.logger().debug("Lineage already emitted for this run, skipping {} assets", assetIds.size());
             }
@@ -344,8 +367,8 @@ public abstract class ResultParser {
     }
 
     /** @return false if any asset failed to emit, so the caller never records a partial emit as complete. */
-    private static boolean emitAssets(RunContext runContext, Map<String, ModelAsset> assetNodes, Map<String, Object> assetMetadata, Map<String, Map<String, Object>> testMetadata)
-        throws IllegalVariableEvaluationException {
+    private static boolean emitAssets(RunContext runContext, Map<String, ModelAsset> assetNodes, Map<String, Object> assetMetadata, Map<String, Map<String, Object>> testMetadata,
+        Set<String> clearableNodes) throws IllegalVariableEvaluationException {
         runContext.logger().info("dbt assets extracted from manifest: {}", assetNodes.size());
         boolean fullyEmitted = true;
 
@@ -357,7 +380,11 @@ public abstract class ResultParser {
 
             // Bundle is {parents} -> {this node} only (never children) so each event is self-contained, no cartesian join.
             List<AssetIdentifier> inputs = inputIdentifiers(asset, assetNodes);
-            List<Asset> outputs = List.of(selfAsset(asset, assetMetadata, testMetadata.get(entry.getKey())));
+            var nodeMetadata = testMetadata.get(entry.getKey());
+            if (nodeMetadata == null && clearableNodes.contains(entry.getKey())) {
+                nodeMetadata = NO_TEST_METADATA;
+            }
+            List<Asset> outputs = List.of(selfAsset(asset, assetMetadata, nodeMetadata));
             try {
                 runContext.assets().emit(new AssetEmit(inputs, outputs));
             } catch (UnsupportedOperationException e) {
@@ -413,6 +440,35 @@ public abstract class ResultParser {
         }
     }
 
+    // Nodes this invocation selected and could have tested. Only these may have stale test metadata cleared:
+    // the manifest lists every node, so `dbt build --select x` or `dbt docs generate` must not wipe the rest.
+    private static Set<String> testedNodes(Manifest manifest, RunResult runResult) {
+        if (manifest == null || manifest.getNodes() == null || runResult == null || runResult.getResults() == null) {
+            return Set.of();
+        }
+
+        try {
+            var which = runResult.getArgs() == null ? null : runResult.getArgs().get("which");
+            var ranTests = which != null
+                ? TESTING_COMMANDS.contains(String.valueOf(which))
+                : runResult.getResults().stream().anyMatch(result -> isTest(manifest.getNodes().get(result.getUniqueId())));
+            if (!ranTests) {
+                return Set.of();
+            }
+
+            return runResult.getResults().stream()
+                .map(RunResult.Result::getUniqueId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        } catch (Exception e) {
+            return Set.of();
+        }
+    }
+
+    private static boolean isTest(Manifest.Node node) {
+        return node != null && RESOURCE_TYPE_TEST.equals(lower(node.getResourceType()));
+    }
+
     /** Never throws: {@code runResultsFile} unreadable or malformed is reported as "not parsed" (null), never as an exception. */
     private static RunResult readRunResultQuietly(File runResultsFile) {
         if (runResultsFile == null || !runResultsFile.exists()) {
@@ -437,7 +493,7 @@ public abstract class ResultParser {
             }
 
             Manifest.Node testNode = manifest.getNodes().get(result.getUniqueId());
-            if (testNode == null || !RESOURCE_TYPE_TEST.equals(lower(testNode.getResourceType()))) {
+            if (!isTest(testNode)) {
                 continue;
             }
 
