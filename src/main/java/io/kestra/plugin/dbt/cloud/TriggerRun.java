@@ -7,7 +7,6 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.BiPredicate;
 
 import org.slf4j.Logger;
 
@@ -249,13 +248,9 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         // transient retries (503, TLS handshake, refused connection) but let an ambiguous failure (read
         // timeout, mid-flight drop, or a 502/504 gateway error) surface here, where we can confirm and adopt
         // the run it may already have created. When reattach is off, behave exactly as before.
-        BiPredicate<Throwable, String> triggerRetry = reattachEnabled
-            ? (throwable, method) -> isRetriableTransientError(throwable, method) && !isAmbiguousFailure(throwable)
-            : AbstractDbtCloud::isRetriableTransientError;
-
         HttpResponse<RunResponse> triggerResponse;
         try {
-            triggerResponse = this.request(runContext, requestBuilder, RunResponse.class, triggerRetry);
+            triggerResponse = this.request(runContext, requestBuilder, RunResponse.class, reattachEnabled);
         } catch (Exception e) {
             // An ambiguous failure may mean dbt already created the run, so confirm and adopt it before failing.
             // If no run was created the original failure is rethrown; a task-level retry then triggers a fresh
