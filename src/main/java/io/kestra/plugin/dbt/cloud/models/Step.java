@@ -16,6 +16,9 @@ public class Step {
     @JsonProperty("id")
     Long id;
 
+    @JsonProperty("index")
+    Integer index;
+
     @JsonProperty("run_id")
     Long runId;
 
