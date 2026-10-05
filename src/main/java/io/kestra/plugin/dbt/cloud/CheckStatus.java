@@ -64,7 +64,7 @@ import static java.lang.Math.max;
     title = "Monitor a dbt Cloud run",
     description = """
         Polls a dbt Cloud run until it ends, streaming step logs and downloading artifacts.
-        Downloads artifacts from the last completed dbt invocation other than `dbt docs generate` when identifiable,
+        Downloads artifacts from the last completed dbt invocation other than `dbt docs generate` or `dbt deps` when identifiable,
         so a later docs-generation step does not replace execution results.
         Takes a `runId`, or a `jobId` or `environmentId` to read the most recent successful run of that job or
         environment, which keeps lineage fresh for runs Kestra did not trigger.
@@ -127,7 +127,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     private static final Pattern UNSAFE_KEY_CHARS = Pattern.compile("[^a-zA-Z0-9_-]");
 
     private static final Pattern DBT_STEP = Pattern.compile("^(?:Invoke dbt with `)?dbt\\s+\\S+");
-    private static final Pattern DOCS_GENERATION_STEP = Pattern.compile("^(?:Invoke dbt with `)?dbt\\s+docs\\s+generate(?=\\s|`?$)");
+    private static final Pattern EXCLUDED_ARTIFACT_STEP = Pattern.compile("^(?:Invoke dbt with `)?dbt\\s+(?:docs\\s+generate|deps)(?=\\s|`?$)");
 
     @Schema(
         title = "Run ID",
@@ -663,7 +663,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             .filter(step -> step.getIndex() != null && step.getIndex() > 0)
             .filter(step -> step.getStatus() == JobStatus.NUMBER_10 || step.getStatus() == JobStatus.NUMBER_20)
             .filter(step -> step.getName() != null && DBT_STEP.matcher(step.getName()).find())
-            .filter(step -> !DOCS_GENERATION_STEP.matcher(step.getName()).find())
+            .filter(step -> !EXCLUDED_ARTIFACT_STEP.matcher(step.getName()).find())
             .map(Step::getIndex)
             .max(Integer::compareTo)
             .orElse(null);
