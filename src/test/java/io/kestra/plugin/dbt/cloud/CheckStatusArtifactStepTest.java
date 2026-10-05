@@ -14,6 +14,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import com.github.tomakehurst.wiremock.junit5.WireMockTest;
 
 import io.kestra.core.junit.annotations.KestraTest;
+import io.kestra.core.models.assets.Custom;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
@@ -36,7 +37,7 @@ class CheckStatusArtifactStepTest {
     @Inject
     RunContextFactory runContextFactory;
 
-    static Stream<Arguments> modelSteps() {
+    static Stream<Arguments> artifactSteps() {
         return Stream.of(
             Arguments.of(
                 "run before docs", steps(
@@ -52,6 +53,28 @@ class CheckStatusArtifactStepTest {
             ),
             Arguments.of("run without docs", steps(step(4, "dbt run", 10)), 4),
             Arguments.of(
+                "seed after run", steps(
+                    step(4, "dbt run", 10),
+                    step(5, "Invoke dbt with `dbt seed`", 10),
+                    step(6, "Generate docs", 10)
+                ), 5
+            ),
+            Arguments.of(
+                "snapshot after run", steps(
+                    step(4, "dbt run", 10),
+                    step(5, "dbt snapshot", 10),
+                    step(6, "dbt docs generate --no-compile", 10)
+                ), 5
+            ),
+            Arguments.of(
+                "test without a model invocation", steps(
+                    step(1, "Clone repository", 10),
+                    step(2, "dbt deps", 10),
+                    step(3, "dbt seed", 10),
+                    step(4, "dbt test", 10)
+                ), 4
+            ),
+            Arguments.of(
                 "latest index, not response order or id", steps(
                     step(7, "Invoke dbt with `dbt build`", 10),
                     step(4, "Invoke dbt with `dbt run`", 10),
@@ -66,17 +89,23 @@ class CheckStatusArtifactStepTest {
                 ), 4
             ),
             Arguments.of(
-                "ignore command names in arguments", steps(
+                "other dbt invocations remain eligible", steps(
                     step(4, "dbt build", 10),
                     step(5, "Invoke dbt with `dbt run-operation build --args '{command: dbt run}'`", 10)
+                ), 5
+            ),
+            Arguments.of(
+                "ignore command names in docs arguments", steps(
+                    step(4, "dbt build", 10),
+                    step(5, "Invoke dbt with `dbt docs generate --vars '{command: dbt run}'`", 10)
                 ), 4
             )
         );
     }
 
     @ParameterizedTest(name = "{0}")
-    @MethodSource("modelSteps")
-    void shouldUseModelStepForBothArtifacts(String description, String runSteps, int expectedStep) throws Exception {
+    @MethodSource("artifactSteps")
+    void shouldUseLatestNonDocsStepForBothArtifacts(String description, String runSteps, int expectedStep) throws Exception {
         stubRun(runSteps, 10);
         stubArtifacts("", 0.173);
         stubArtifacts("?step=" + expectedStep, 12.0);
@@ -104,11 +133,9 @@ class CheckStatusArtifactStepTest {
                 [{"id": 100, "index": 4, "status": 10, "logs": ""}]
                 """),
             Arguments.of(
-                "no model invocation", steps(
+                "no dbt invocation", steps(
                     step(1, "Clone repository", 10),
-                    step(2, "dbt deps", 10),
-                    step(3, "dbt seed", 10),
-                    step(4, "dbt test", 10)
+                    step(2, "Generate docs", 10)
                 )
             ),
             Arguments.of("docs-only job", steps(step(4, "Invoke dbt with `dbt docs generate`", 10)))
@@ -117,7 +144,7 @@ class CheckStatusArtifactStepTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("fallbackSteps")
-    void shouldKeepDefaultArtifactsWhenModelStepCannotBeIdentified(String description, String runSteps) throws Exception {
+    void shouldKeepDefaultArtifactsWhenNonDocsStepCannotBeIdentified(String description, String runSteps) throws Exception {
         stubRun(runSteps, 10);
         stubArtifacts("", 12.0);
         var task = task();
@@ -128,6 +155,59 @@ class CheckStatusArtifactStepTest {
         assertThat(output.getManifest(), notNullValue());
         assertModelDuration(context, 12);
         verifyArtifacts("");
+    }
+
+    static Stream<Arguments> testSteps() {
+        return Stream.of(
+            Arguments.of("successful tests without docs", "pass", 10, false),
+            Arguments.of("successful tests before docs", "pass", 10, true),
+            Arguments.of("failed tests without docs", "fail", 20, false),
+            Arguments.of("failed tests before unstarted docs", "fail", 20, true)
+        );
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("testSteps")
+    void shouldPreserveTestResultsAfterRun(String description, String testStatus, int runStatus, boolean generateDocs) throws Exception {
+        var runStep = step(4, "Invoke dbt with `dbt run`", 10);
+        var testStep = step(5, "Invoke dbt with `dbt test`", runStatus);
+        stubRun(
+            generateDocs
+                ? steps(runStep, testStep, step(6, "Invoke dbt with `dbt docs generate`", runStatus == 10 ? 10 : 1))
+                : steps(runStep, testStep),
+            runStatus
+        );
+        stubArtifacts("", 0.173);
+        stubArtifacts("?step=4", 12.0);
+        stubArtifacts("?step=5", 2.0, testStatus, "test.project.not_null_orders_id");
+        var task = task();
+        var context = context(task);
+
+        if (runStatus == 20) {
+            var exception = assertThrows(Exception.class, () -> task.run(context));
+            assertThat(exception.getMessage(), startsWith("Failed run with status"));
+        } else {
+            var output = task.run(context);
+            assertThat(output.getRunResults(), notNullValue());
+            assertThat(output.getManifest(), notNullValue());
+        }
+
+        var results = context.dynamicWorkerResults();
+        assertThat(results, hasSize(1));
+        var taskRun = results.getFirst().getTaskRun();
+        assertThat(taskRun.getTaskId(), is("test.project.not_null_orders_id"));
+        assertThat(taskRun.getState().getCurrent(), is(runStatus == 20 ? State.Type.FAILED : State.Type.SUCCESS));
+        var emitted = context.assets().emitted();
+        assertThat(emitted, hasSize(1));
+        var metadata = ((Custom) emitted.getFirst().outputs().getFirst()).getMetadata();
+        assertThat(metadata.get("dbtTestStatus"), is(testStatus));
+        assertThat(metadata.get("dbtTestsTotal"), is(1));
+        assertThat(metadata.get("dbtTestsFailed"), is(runStatus == 20 ? 1 : 0));
+        verifyArtifacts("?step=5");
+        for (var artifact : List.of("run_results.json", "manifest.json")) {
+            verify(0, getRequestedFor(urlEqualTo(RUN_PATH + "artifacts/" + artifact)));
+            verify(0, getRequestedFor(urlEqualTo(RUN_PATH + "artifacts/" + artifact + "?step=4")));
+        }
     }
 
     @Test
@@ -204,10 +284,14 @@ class CheckStatusArtifactStepTest {
     }
 
     private void stubArtifacts(String query, double duration, String status) {
+        stubArtifacts(query, duration, status, "model.project.orders");
+    }
+
+    private void stubArtifacts(String query, double duration, String status, String uniqueId) {
         stubFor(get(urlEqualTo(RUN_PATH + "artifacts/run_results.json" + query)).willReturn(okJson("""
             {
               "results": [{
-                "unique_id": "model.project.orders",
+                "unique_id": "%s",
                 "status": "%s",
                 "execution_time": %s,
                 "adapter_response": {},
@@ -218,7 +302,7 @@ class CheckStatusArtifactStepTest {
               }],
               "elapsed_time": %s
             }
-            """.formatted(status, duration, duration))));
+            """.formatted(uniqueId, status, duration, duration))));
         stubFor(get(urlEqualTo(RUN_PATH + "artifacts/manifest.json" + query)).willReturn(okJson("""
             {
               "metadata": {"adapter_type": "postgres"},
@@ -226,9 +310,16 @@ class CheckStatusArtifactStepTest {
                 "model.project.orders": {
                   "resource_type": "model", "database": "analytics", "schema": "marts",
                   "name": "orders", "unique_id": "model.project.orders", "depends_on": {"nodes": []}
+                },
+                "test.project.not_null_orders_id": {
+                  "resource_type": "test", "name": "not_null_orders_id",
+                  "unique_id": "test.project.not_null_orders_id", "depends_on": {"nodes": ["model.project.orders"]}
                 }
               },
-              "parent_map": {"model.project.orders": []}
+              "parent_map": {
+                "model.project.orders": [],
+                "test.project.not_null_orders_id": ["model.project.orders"]
+              }
             }
             """)));
     }
