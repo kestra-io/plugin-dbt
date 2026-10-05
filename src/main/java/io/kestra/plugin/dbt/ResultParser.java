@@ -59,6 +59,10 @@ public abstract class ResultParser {
     private static final String TEST_STATUS_WARN = "warn";
     private static final String TEST_STATUS_PASS = "pass";
 
+    // dbt's resource_type (model, seed, snapshot, source): every node shares the Table asset type, so this is
+    // what tells a seed from a model in the catalog.
+    private static final String METADATA_RESOURCE_TYPE = "dbtResourceType";
+
     // Asset metadata merges, and only an explicit null removes a key, so "no tests" must be sent as nulls.
     private static final Map<String, Object> NO_TEST_METADATA;
 
@@ -596,7 +600,8 @@ public abstract class ResultParser {
                     dependsOn = List.of();
                 }
 
-                assetNodes.put(uniqueId, new ModelAsset(assetId, metadataFor(system, node.getDatabase(), node.getSchema(), name), dependsOn, lower(node.getResourceType())));
+                String resourceType = lower(node.getResourceType());
+                assetNodes.put(uniqueId, new ModelAsset(assetId, metadataFor(system, node.getDatabase(), node.getSchema(), name, resourceType), dependsOn, resourceType));
             }
         }
 
@@ -617,7 +622,7 @@ public abstract class ResultParser {
                 String name = firstNonBlank(source.getIdentifier(), source.getName(), uniqueId);
                 String assetId = assetIdFor(source.getDatabase(), source.getSchema(), name, uniqueId);
 
-                assetNodes.put(uniqueId, new ModelAsset(assetId, metadataFor(system, source.getDatabase(), source.getSchema(), name), List.of(), RESOURCE_TYPE_SOURCE));
+                assetNodes.put(uniqueId, new ModelAsset(assetId, metadataFor(system, source.getDatabase(), source.getSchema(), name, RESOURCE_TYPE_SOURCE), List.of(), RESOURCE_TYPE_SOURCE));
             }
         }
 
@@ -635,8 +640,11 @@ public abstract class ResultParser {
         return resolved;
     }
 
-    private static Map<String, Object> metadataFor(String system, String database, String schema, String name) {
+    private static Map<String, Object> metadataFor(String system, String database, String schema, String name, String resourceType) {
         Map<String, Object> metadata = new HashMap<>();
+        if (hasValue(resourceType)) {
+            metadata.put(METADATA_RESOURCE_TYPE, resourceType);
+        }
         if (hasValue(system)) {
             metadata.put("system", system);
         }
