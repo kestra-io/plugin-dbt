@@ -53,6 +53,13 @@ class CheckStatusArtifactStepTest {
             ),
             Arguments.of("run without docs", steps(step(4, "dbt run", 10)), 4),
             Arguments.of(
+                "deps with arguments after build", steps(
+                    step(4, "dbt build", 10),
+                    step(5, "Invoke dbt with `dbt deps --upgrade`", 10),
+                    step(6, "Invoke dbt with `dbt docs generate`", 10)
+                ), 4
+            ),
+            Arguments.of(
                 "seed after run", steps(
                     step(4, "dbt run", 10),
                     step(5, "Invoke dbt with `dbt seed`", 10),
@@ -105,7 +112,7 @@ class CheckStatusArtifactStepTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("artifactSteps")
-    void shouldUseLatestNonDocsStepForBothArtifacts(String description, String runSteps, int expectedStep) throws Exception {
+    void shouldUseLatestArtifactStepForBothArtifacts(String description, String runSteps, int expectedStep) throws Exception {
         stubRun(runSteps, 10);
         stubArtifacts("", 0.173);
         stubArtifacts("?step=" + expectedStep, 12.0);
@@ -138,13 +145,22 @@ class CheckStatusArtifactStepTest {
                     step(2, "Generate docs", 10)
                 )
             ),
-            Arguments.of("docs-only job", steps(step(4, "Invoke dbt with `dbt docs generate`", 10)))
+            Arguments.of("docs-only job", steps(step(4, "Invoke dbt with `dbt docs generate`", 10))),
+            Arguments.of(
+                "docs-only job with deps step", steps(
+                    step(1, "Clone git repository", 10),
+                    step(2, "Create profile from connection Postgres", 10),
+                    step(3, "Invoke dbt with `dbt deps`", 10),
+                    step(4, "Invoke dbt with `dbt docs generate`", 10)
+                )
+            ),
+            Arguments.of("deps-only job with arguments", steps(step(3, "dbt deps --upgrade", 10)))
         );
     }
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("fallbackSteps")
-    void shouldKeepDefaultArtifactsWhenNonDocsStepCannotBeIdentified(String description, String runSteps) throws Exception {
+    void shouldKeepDefaultArtifactsWhenArtifactStepCannotBeIdentified(String description, String runSteps) throws Exception {
         stubRun(runSteps, 10);
         stubArtifacts("", 12.0);
         var task = task();
@@ -155,6 +171,9 @@ class CheckStatusArtifactStepTest {
         assertThat(output.getManifest(), notNullValue());
         assertModelDuration(context, 12);
         verifyArtifacts("");
+        for (var artifact : List.of("run_results.json", "manifest.json")) {
+            verify(0, getRequestedFor(urlPathEqualTo(RUN_PATH + "artifacts/" + artifact)).withQueryParam("step", matching(".*")));
+        }
     }
 
     static Stream<Arguments> testSteps() {
