@@ -58,6 +58,26 @@ import lombok.experimental.SuperBuilder;
                     token: "{{ secret('DBT_TOKEN') }}"
                     jobId: "67890"
                 """
+        ),
+        @Example(
+            title = "Customize the retry policy of the dbt Cloud API calls.",
+            full = true,
+            code = """
+                id: dbt_trigger_job_run_with_retry
+                namespace: company.team
+
+                tasks:
+                  - id: trigger_run
+                    type: io.kestra.plugin.dbt.cloud.TriggerRun
+                    accountId: "12345"
+                    token: "{{ secret('DBT_TOKEN') }}"
+                    jobId: "67890"
+                    options:
+                      retry:
+                        type: io.kestra.core.models.tasks.retrys.Constant
+                        interval: PT2S
+                        maxAttempts: 5
+                """
         )
     }
 )
@@ -245,7 +265,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
         // The trigger POST is not idempotent, so when reattach is on it must not be blindly retried by the
         // generic HTTP layer on an ambiguous failure, since a retry could start the job twice. Keep the safe
-        // transient retries (503, TLS handshake, refused connection) but let an ambiguous failure (read
+        // transient retries (429, 503) but let an ambiguous failure (read
         // timeout, mid-flight drop, or a 502/504 gateway error) surface here, where we can confirm and adopt
         // the run it may already have created. When reattach is off, behave exactly as before.
         HttpResponse<RunResponse> triggerResponse;

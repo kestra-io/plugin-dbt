@@ -9,7 +9,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
@@ -27,7 +26,6 @@ import io.kestra.core.http.client.HttpClientException;
 import io.kestra.core.http.client.HttpClientRequestException;
 import io.kestra.core.http.client.HttpClientResponseException;
 import io.kestra.core.http.client.configurations.HttpConfiguration;
-import io.kestra.core.http.client.configurations.HttpMethod;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.Task;
@@ -83,27 +81,38 @@ public abstract class AbstractDbtCloud extends Task {
     @ToString.Exclude
     Property<String> token;
 
-    @Schema(title = "The HTTP client configuration")
+    @Schema(
+        title = "The HTTP client configuration",
+        description = "Set `options.retry` to customize the retry policy of every call to dbt Cloud. When " +
+            "`options.retry` is left unset, an `Exponential` policy built from the deprecated `maxRetries` " +
+            "and `initialDelayMs` is applied. User-set `retryOnStatusCodes`, `retryOnStatusCodesByMethod` and " +
+            "`retryableTransportFailureMethods` are kept as is; unset ones default to a read/write-aware set " +
+            "(GET/HEAD retry any 5xx and 429, other methods retry only 429, 503 and, unless `reattach` handles " +
+            "them, 502/504)."
+    )
+    @PluginProperty(group = "advanced")
     HttpConfiguration options;
 
     @Schema(
         title = "Maximum number of retries in case of transient errors",
-        description = "Default: 3. Deprecated: set `options.retry` (e.g. an `Exponential` or `Constant` " +
-            "policy) instead. Ignored once `options` is set; kept for backward compatibility with existing " +
-            "flows and will be removed in a future major version."
+        description = "Default: 3. Deprecated, set `options.retry.maxAttempts` instead. Ignored as soon as " +
+            "`options.retry` is set. Will be removed in 3.0.0.",
+        deprecated = true
     )
-    @Deprecated(since = "1.4", forRemoval = true)
+    @Deprecated(since = "2.4.0", forRemoval = true)
     @Builder.Default
+    @PluginProperty(group = "advanced")
     Property<Integer> maxRetries = Property.ofValue(3);
 
     @Schema(
         title = "Initial delay in milliseconds before retrying",
-        description = "Default: 1000 ms (1 second). Deprecated: set `options.retry.interval` instead. " +
-            "Ignored once `options` is set; kept for backward compatibility with existing flows and will " +
-            "be removed in a future major version."
+        description = "Default: 1000 ms (1 second). Deprecated, set `options.retry.interval` instead. Ignored " +
+            "as soon as `options.retry` is set. Will be removed in 3.0.0.",
+        deprecated = true
     )
-    @Deprecated(since = "1.4", forRemoval = true)
+    @Deprecated(since = "2.4.0", forRemoval = true)
     @Builder.Default
+    @PluginProperty(group = "advanced")
     Property<Long> initialDelayMs = Property.ofValue(1000L);
 
     // dbt Cloud rejects a rate-limited request before running it, so it is always safe to retry for any method.
@@ -119,14 +128,24 @@ public abstract class AbstractDbtCloud extends Task {
     private static final List<Integer> READ_ONLY_RETRIABLE_CODES = Stream.concat(
         Stream.of(TOO_MANY_REQUESTS),
         IntStream.rangeClosed(500, 599).boxed()
-    ).collect(Collectors.toUnmodifiableList());
+    ).toList();
 
     private static final List<Integer> WRITE_RETRIABLE_CODES = Stream.concat(
         Stream.of(TOO_MANY_REQUESTS),
-        RETRIABLE_WRITE_GATEWAY_CODES.stream()
-    ).collect(Collectors.toUnmodifiableList());
+        RETRIABLE_WRITE_GATEWAY_CODES.stream().sorted()
+    ).toList();
 
-    private static final List<HttpMethod> TRANSPORT_RETRIABLE_METHODS = List.of(HttpMethod.GET, HttpMethod.HEAD);
+    // Write codes when the caller recovers ambiguous failures itself: the retriable set minus 502/504.
+    private static final List<Integer> WRITE_RETRIABLE_CODES_EXCLUDING_AMBIGUOUS = WRITE_RETRIABLE_CODES.stream()
+        .filter(code -> !AMBIGUOUS_WRITE_GATEWAY_CODES.contains(code))
+        .toList();
+
+    // Transport failures (TLS handshake, refused connection, ...) are retried for reads only. POST is left
+    // out on purpose: Core retries transport failures per method, not per exception type, so including POST
+    // would also re-send a write after a read timeout or a dropped connection, which may duplicate a run.
+    // The old plugin-local retry also retried a POST on a TLS handshake failure or a refused connection;
+    // those now surface immediately and can be handled with a task-level retry.
+    private static final List<String> TRANSPORT_RETRIABLE_METHODS = List.of("GET", "HEAD");
 
     protected <RES> HttpResponse<RES> request(
         RunContext runContext,
@@ -135,9 +154,9 @@ public abstract class AbstractDbtCloud extends Task {
         return this.request(runContext, requestBuilder, responseType, false);
     }
 
-    // Same as above but with a caller-supplied retry decision (throwable, method) -> retry. Used by callers
-    // that can recover an ambiguous write differently (e.g. TriggerRun confirming and adopting the run it may
-    // already have created) and so must not let the generic retry re-send it.
+    // Same as above, but when reattachEnabled is true the 502/504 gateway errors are not retried for writes.
+    // They surface to the caller instead, so TriggerRun can confirm and adopt the run it may already have
+    // created rather than let the generic retry re-send the request and duplicate it.
     protected <RES> HttpResponse<RES> request(
         RunContext runContext,
         HttpRequest.HttpRequestBuilder requestBuilder,
@@ -198,39 +217,44 @@ public abstract class AbstractDbtCloud extends Task {
         }
     }
 
-    // Write retriable error codes
-    private static final List<Integer> WRITE_RETRIABLE_CODES_EXCLUDING_AMBIGUOUS = List.of(TOO_MANY_REQUESTS, 503);
-
     /**
-     * Builds the {@link HttpConfiguration} used for a single call: the user-supplied {@link #options} (or
-     * defaults) with the retry policy and retryable status codes overridden to match this class's previous
-     * {@code RetryUtils}-based behavior — now expressed entirely through Kestra core's HTTP client retry
-     * support instead of a plugin-local retry loop. When reattachEnabled is true, the
-     * non-GET/HEAD (write) status-code set drops 502/504, leaving them to surface to the caller; every
-     * other retry rule (429, 503, TLS handshake, refused connection, and the full 5xx set for GET/HEAD) is
-     * unaffected.
+     * Builds the {@link HttpConfiguration} used for a single call from the user-supplied {@link #options}.
+     * Anything the user set is kept. Only unset parts get plugin defaults: {@code retry} falls back to an
+     * {@code Exponential} policy built from the deprecated {@code maxRetries}/{@code initialDelayMs}, and the
+     * status-code and transport-failure settings fall back to the read/write-aware sets above.
+     * When reattachEnabled is true, the default write status codes drop 502/504, leaving them to surface
+     * to the caller.
      */
     HttpConfiguration retryConfiguration(int maxAttempts, long initialDelayMs, boolean reattachEnabled) {
         var builder = this.options != null ? this.options.toBuilder() : HttpConfiguration.builder();
 
-        List<Integer> writeCodes = reattachEnabled
-            ? WRITE_RETRIABLE_CODES_EXCLUDING_AMBIGUOUS
-            : WRITE_RETRIABLE_CODES;
-
-        return builder
-            .retry(Exponential.builder()
+        if (this.options == null || this.options.getRetry() == null) {
+            builder.retry(Exponential.builder()
                 .delayFactor(2.0)
                 .interval(Duration.ofMillis(initialDelayMs))
                 .maxInterval(Duration.ofSeconds(30))
                 .maxAttempts(maxAttempts)
-                .build())
-            .retryOnStatusCodes(Property.ofValue(writeCodes))
-            .retryOnStatusCodesByMethod(Property.ofValue(Map.of(
-                HttpMethod.GET, READ_ONLY_RETRIABLE_CODES,
-                HttpMethod.HEAD, READ_ONLY_RETRIABLE_CODES
-            )))
-            .retryableTransportFailureMethods(Property.ofValue(TRANSPORT_RETRIABLE_METHODS))
-            .build();
+                .build());
+        }
+
+        if (this.options == null || this.options.getRetryOnStatusCodes() == null) {
+            builder.retryOnStatusCodes(Property.ofValue(
+                reattachEnabled ? WRITE_RETRIABLE_CODES_EXCLUDING_AMBIGUOUS : WRITE_RETRIABLE_CODES
+            ));
+        }
+
+        if (this.options == null || this.options.getRetryOnStatusCodesByMethod() == null) {
+            builder.retryOnStatusCodesByMethod(Property.ofValue(Map.of(
+                "GET", READ_ONLY_RETRIABLE_CODES,
+                "HEAD", READ_ONLY_RETRIABLE_CODES
+            )));
+        }
+
+        if (this.options == null || this.options.getRetryableTransportFailureMethods() == null) {
+            builder.retryableTransportFailureMethods(Property.ofValue(TRANSPORT_RETRIABLE_METHODS));
+        }
+
+        return builder.build();
     }
 
     /**
@@ -268,9 +292,11 @@ public abstract class AbstractDbtCloud extends Task {
     }
 
     /**
-     * This method returns true for any failure that is likely to be transient and worth retrying, including
-     * a 429 rate-limit response, any 5xx response, a TLS handshake failure, a refused connection, a DNS resolution failure, a no-route-to-host error, a socket timeout, or a generic IOException.
-     * It returns false for any other failure, including a 4xx response
+     * Whether a failed read is likely transient and worth waiting out: a 429, any 5xx, or a transport
+     * failure (TLS handshake, refused connection, DNS, no route, timeout, or any other {@link IOException}).
+     * Notably this includes the "Empty response body" {@link IOException} thrown by {@code request()}, so a
+     * poll that gets an empty 2xx body keeps polling instead of failing. Any other response, such as a 4xx,
+     * returns false.
      */
     static boolean isRetriableReadFailure(Throwable throwable) {
         if (throwable == null) {

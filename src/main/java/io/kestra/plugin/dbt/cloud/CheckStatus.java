@@ -35,7 +35,6 @@ import io.kestra.core.storages.kv.KVStore;
 import io.kestra.core.storages.kv.KVValue;
 import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.core.utils.Await;
-import io.kestra.core.utils.RetryUtils;
 import io.kestra.plugin.dbt.ResultParser;
 import io.kestra.plugin.dbt.cloud.models.Job;
 import io.kestra.plugin.dbt.cloud.models.JobStatus;
@@ -595,21 +594,11 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     }
 
     /**
-     * Whether a failed status read is transient, meaning polling should continue rather than fail the
-     * task. The run keeps executing on dbt Cloud while we cannot read its status, so a transient read
-     * failure is not a run failure. Non-transient errors (e.g. 401/403/404, bad config) never resolve
-     * by waiting, so they propagate and the task fails fast.
-     *
-     * Delegates the actual classification to {@link AbstractDbtCloud#isRetriableReadFailure}, which
-     * replaced the old status/method-aware {@code isRetriableTransientError} once per-request retries
-     * moved into Core's HttpClient/HttpConfiguration. That method only decides whether a single HTTP
-     * call retries; this decides whether the outer poll loop keeps going after such a call has already
-     * exhausted its retries and thrown — a distinct, higher-level decision.
+     * Whether a failed status read is transient, so polling continues instead of failing the task.
+     * The run keeps executing on dbt Cloud, so non-transient errors (401/403/404, bad config) fail fast.
      */
     static boolean isTransientReadFailure(Throwable e) {
-        // request() surfaces an exhausted retry as RetryFailed wrapping the last error, so unwrap it.
-        Throwable cause = e instanceof RetryUtils.RetryFailed && e.getCause() != null ? e.getCause() : e;
-        return AbstractDbtCloud.isRetriableReadFailure(cause);
+        return AbstractDbtCloud.isRetriableReadFailure(e);
     }
 
     private void logSteps(Logger logger, RunResponse runResponse) {
