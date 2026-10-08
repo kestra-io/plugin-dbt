@@ -266,12 +266,15 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
         // Best-effort debug=true fetch for fuller step logs; truncated_debug_logs population timing
         // isn't part of dbt Cloud's terminal-run contract, so a failure here must not fail the run.
+        // Catch Exception, not only HttpClientException: once request() exhausts its retries on a
+        // retriable status (e.g. a 502 when the debug_logs payload of a long run is too large), it
+        // surfaces RetryUtils.RetryFailed, which is a plain checked Exception.
         try {
             var debugRunResponse = fetchRunResponse(runContext, runIdRendered, true);
             if (debugRunResponse.isPresent()) {
                 finalRunResponse = debugRunResponse.get();
             }
-        } catch (IllegalVariableEvaluationException | HttpClientException | IOException e) {
+        } catch (Exception e) {
             logger.debug("Unable to fetch final debug logs for run '{}' — falling back to logs collected during polling", runIdRendered, e);
         }
 
