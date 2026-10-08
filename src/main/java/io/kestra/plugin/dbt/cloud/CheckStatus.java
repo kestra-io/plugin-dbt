@@ -275,7 +275,13 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                 finalRunResponse = debugRunResponse.get();
             }
         } catch (Exception e) {
-            logger.debug("Unable to fetch final debug logs for run '{}' — falling back to logs collected during polling", runIdRendered, e);
+            // A kill or cancel interrupts the worker thread; the retry backoff turns that into a failed
+            // attempt, so let it propagate instead of carrying on to artifacts and lineage.
+            if (isInterruption(e)) {
+                Thread.currentThread().interrupt();
+                throw e;
+            }
+            logger.warn("Unable to fetch final debug logs for run '{}' — falling back to logs collected during polling: {}", runIdRendered, e.getMessage());
         }
 
         // final response
@@ -607,6 +613,23 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         // request() surfaces an exhausted retry as RetryFailed wrapping the last error, so unwrap it.
         Throwable cause = e instanceof RetryUtils.RetryFailed && e.getCause() != null ? e.getCause() : e;
         return isRetriableTransientError(cause, "GET");
+    }
+
+    /**
+     * Whether a failure comes from the worker thread being interrupted (task kill or cancel), either
+     * directly, as a cause wrapped by the HTTP client or RetryUtils, or as an interrupt flag the retry
+     * backoff restored before returning a failed attempt.
+     */
+    static boolean isInterruption(Throwable e) {
+        if (Thread.currentThread().isInterrupted()) {
+            return true;
+        }
+        for (Throwable t = e; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            if (t instanceof InterruptedException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void logSteps(Logger logger, RunResponse runResponse) {
