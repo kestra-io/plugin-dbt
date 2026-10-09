@@ -59,6 +59,9 @@ public abstract class ResultParser {
     private static final String TEST_STATUS_WARN = "warn";
     private static final String TEST_STATUS_PASS = "pass";
 
+    // Tells a seed from a model, since every node shares the Table asset type.
+    private static final String METADATA_RESOURCE_TYPE = "dbtResourceType";
+
     // Asset metadata merges, and only an explicit null removes a key, so "no tests" must be sent as nulls.
     private static final Map<String, Object> NO_TEST_METADATA;
 
@@ -409,6 +412,7 @@ public abstract class ResultParser {
 
     private static Asset selfAsset(ModelAsset asset, Map<String, Object> assetMetadata, Map<String, Object> nodeMetadata) {
         Map<String, Object> metadata = new HashMap<>(asset.metadata());
+        metadata.put(METADATA_RESOURCE_TYPE, asset.resourceType());
         metadata.putAll(assetMetadata);
         if (nodeMetadata != null) {
             metadata.putAll(nodeMetadata);
