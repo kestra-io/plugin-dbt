@@ -64,6 +64,8 @@ import static java.lang.Math.max;
     title = "Monitor a dbt Cloud run",
     description = """
         Polls a dbt Cloud run until it ends, streaming step logs and downloading artifacts.
+        Downloads artifacts from the last completed dbt invocation other than `dbt docs generate` or `dbt deps` when identifiable,
+        so a later docs-generation step does not replace execution results.
         Takes a `runId`, or a `jobId` or `environmentId` to read the most recent successful run of that job or
         environment, which keeps lineage fresh for runs Kestra did not trigger.
         Fails on non-successful statuses unless `failOnUnsuccessful` is false.
@@ -123,6 +125,9 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     // task "c" would collide with flow "a" with task "b_c".
     private static final String PROCESSED_KEY_SEPARATOR = ".";
     private static final Pattern UNSAFE_KEY_CHARS = Pattern.compile("[^a-zA-Z0-9_-]");
+
+    private static final Pattern DBT_STEP = Pattern.compile("^(?:Invoke dbt with `)?dbt\\s+\\S+");
+    private static final Pattern EXCLUDED_ARTIFACT_STEP = Pattern.compile("^(?:Invoke dbt with `)?dbt\\s+(?:docs\\s+generate|deps)(?=\\s|`?$)");
 
     @Schema(
         title = "Run ID",
@@ -292,8 +297,9 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             // Artifacts are uploaded asynchronously by dbt Cloud and manifest.json is absent for some
             // run shapes (e.g. dbt source freshness). Tolerate 404 so a legitimate success is not
             // reported as a failure.
-            DownloadedArtifact<RunResult> runResultsArtifact = downloadArtifacts(runContext, runIdRendered, "run_results.json", RunResult.class);
-            DownloadedArtifact<ManifestArtifact> manifestArtifact = downloadArtifacts(runContext, runIdRendered, "manifest.json", ManifestArtifact.class);
+            var artifactStep = artifactStep(finalRunResponse.getData());
+            DownloadedArtifact<RunResult> runResultsArtifact = downloadArtifacts(runContext, runIdRendered, "run_results.json", artifactStep, RunResult.class);
+            DownloadedArtifact<ManifestArtifact> manifestArtifact = downloadArtifacts(runContext, runIdRendered, "manifest.json", artifactStep, ManifestArtifact.class);
 
             var rParseRunResults = runContext.render(this.parseRunResults).as(Boolean.class).orElse(false);
             RunResult preParsedRunResults = rParseRunResults && runResultsArtifact != null ? runResultsArtifact.body() : null;
@@ -647,6 +653,22 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         return Optional.ofNullable(this.request(runContext, requestBuilder, RunResponse.class).getBody());
     }
 
+    private static Integer artifactStep(Run run) {
+        if (run.getRunSteps() == null) {
+            return null;
+        }
+
+        // The API takes the one-based step index, not its database id or position in run_steps.
+        return run.getRunSteps().stream()
+            .filter(step -> step.getIndex() != null && step.getIndex() > 0)
+            .filter(step -> step.getStatus() == JobStatus.NUMBER_10 || step.getStatus() == JobStatus.NUMBER_20)
+            .filter(step -> step.getName() != null && DBT_STEP.matcher(step.getName()).find())
+            .filter(step -> !EXCLUDED_ARTIFACT_STEP.matcher(step.getName()).find())
+            .map(Step::getIndex)
+            .max(Integer::compareTo)
+            .orElse(null);
+    }
+
     /**
      * Downloads an artifact, writes it to a temp file, and returns both the file and the already-deserialized
      * body, so a caller (e.g. ResultParser.parseManifestWithAssets) can reuse the parsed object instead of
@@ -656,7 +678,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
      * 5xx errors are still retried by {@link AbstractDbtCloud#request}; other unexpected errors
      * still propagate.
      */
-    private <T> DownloadedArtifact<T> downloadArtifacts(RunContext runContext, Long runId, String path, Class<T> responseType)
+    private <T> DownloadedArtifact<T> downloadArtifacts(RunContext runContext, Long runId, String path, Integer step, Class<T> responseType)
         throws IllegalVariableEvaluationException, IOException, HttpClientException {
         var requestBuilder = HttpRequest.builder()
             .uri(
@@ -664,6 +686,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                     runContext.render(this.baseUrl).as(String.class).orElseThrow()
                         + "/api/v2/accounts/" + runContext.render(this.accountId).as(String.class).orElseThrow()
                         + "/runs/" + runId + "/artifacts/" + path
+                        + (step == null ? "" : "?step=" + step)
                 )
             )
             .method("GET");
