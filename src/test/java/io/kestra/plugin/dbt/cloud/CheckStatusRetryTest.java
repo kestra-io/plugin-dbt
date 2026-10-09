@@ -1,5 +1,6 @@
 package io.kestra.plugin.dbt.cloud;
 
+import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.util.Map;
@@ -202,15 +203,14 @@ class CheckStatusRetryTest {
     @Test
     void isInterruption_detectsDirectWrappedAndFlaggedInterrupts() {
         assertTrue(CheckStatus.isInterruption(new InterruptedException()));
-        assertTrue(CheckStatus.isInterruption(new RuntimeException(new java.io.IOException(new InterruptedException()))));
+        assertTrue(CheckStatus.isInterruption(new RuntimeException(new IOException(new InterruptedException()))));
         assertFalse(CheckStatus.isInterruption(status(502)));
-        assertFalse(CheckStatus.isInterruption(new java.io.IOException("Empty response body from dbt Cloud")));
+        assertFalse(CheckStatus.isInterruption(new IOException("Empty response body from dbt Cloud")));
 
         Thread.currentThread().interrupt();
         try {
             assertTrue(CheckStatus.isInterruption(status(502)));
         } finally {
-            // Clear the flag so it does not leak into other tests on this thread.
             Thread.interrupted();
         }
     }

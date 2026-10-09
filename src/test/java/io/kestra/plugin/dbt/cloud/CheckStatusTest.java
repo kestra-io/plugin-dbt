@@ -566,12 +566,7 @@ class CheckStatusTest {
         );
     }
 
-    /**
-     * Regression test: a retriable status (502) on the final debug=true fetch is retried by request(),
-     * which then surfaces RetryUtils.RetryFailed. That must not fail the task either. dbt Cloud returns
-     * a 502 here when the debug_logs payload of a long run is too large, so every task retry fails the
-     * same way although the run succeeded.
-     */
+    // Regression: 502 on the final debug_logs fetch exhausts retries (RetryFailed) but must not fail the run.
     @Test
     void shouldFallBackToPolledResponseWhenFinalDebugFetchExhaustsRetries() throws Exception {
         stubFor(
@@ -632,6 +627,56 @@ class CheckStatusTest {
         assertThat(output, is(notNullValue()));
         verify(2, getRequestedFor(urlPathEqualTo("/api/v2/accounts/123/runs/2223/"))
             .withQueryParam("include_related", containing("debug_logs")));
+    }
+
+    // A kill during the final debug_logs fetch must propagate, not be swallowed as a fallback.
+    @Test
+    void shouldPropagateInterruptDuringFinalDebugFetch() throws Exception {
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/2224/"))
+                .withQueryParam("include_related", notContaining("debug_logs"))
+                .willReturn(okJson("""
+                        {"data": {"id": 2224, "status": 10, "status_humanized": "Success", "duration_humanized": "1s", "run_steps": []}}
+                    """))
+        );
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/2224/"))
+                .withQueryParam("include_related", containing("debug_logs"))
+                .willReturn(aResponse().withStatus(200).withFixedDelay(5000).withBody("{}"))
+        );
+
+        CheckStatus checkStatus = CheckStatus.builder()
+            .id(IdUtils.create())
+            .type(CheckStatus.class.getName())
+            .baseUrl(Property.ofValue("http://localhost:8089"))
+            .runId(Property.ofValue("2224"))
+            .accountId(Property.ofValue("123"))
+            .token(Property.ofValue("fake-token"))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(10)))
+            .maxRetries(Property.ofValue(2))
+            .initialDelayMs(Property.ofValue(10L))
+            .parseRunResults(Property.ofValue(false))
+            .build();
+
+        RunContext runContext = mockRunContext(checkStatus);
+
+        Thread runner = Thread.currentThread();
+        var interrupter = new Thread(() -> {
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException ignored) {
+                return;
+            }
+            runner.interrupt();
+        });
+        interrupter.start();
+        try {
+            assertThrows(Exception.class, () -> checkStatus.run(runContext));
+            assertThat(Thread.currentThread().isInterrupted(), is(true));
+        } finally {
+            Thread.interrupted();
+            interrupter.join();
+        }
     }
 
     /**

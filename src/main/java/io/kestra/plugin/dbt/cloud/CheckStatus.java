@@ -22,6 +22,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.client.HttpClientException;
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import io.kestra.core.http.client.HttpClientResponseException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
@@ -266,22 +267,19 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
         // Best-effort debug=true fetch for fuller step logs; truncated_debug_logs population timing
         // isn't part of dbt Cloud's terminal-run contract, so a failure here must not fail the run.
-        // Catch Exception, not only HttpClientException: once request() exhausts its retries on a
-        // retriable status (e.g. a 502 when the debug_logs payload of a long run is too large), it
-        // surfaces RetryUtils.RetryFailed, which is a plain checked Exception.
         try {
             var debugRunResponse = fetchRunResponse(runContext, runIdRendered, true);
             if (debugRunResponse.isPresent()) {
                 finalRunResponse = debugRunResponse.get();
             }
         } catch (Exception e) {
-            // A kill or cancel interrupts the worker thread; the retry backoff turns that into a failed
-            // attempt, so let it propagate instead of carrying on to artifacts and lineage.
+            // RetryFailed is a plain Exception; a kill surfaces as an interrupt, so rethrow it
             if (isInterruption(e)) {
                 Thread.currentThread().interrupt();
                 throw e;
             }
-            logger.warn("Unable to fetch final debug logs for run '{}' — falling back to logs collected during polling: {}", runIdRendered, e.getMessage());
+            logger.warn("Unable to fetch final debug logs for run '{}' ({}: {}), falling back to logs collected during polling", runIdRendered, e.getClass().getSimpleName(), e.getMessage());
+            logger.debug("Final debug logs fetch failure", e);
         }
 
         // final response
@@ -615,21 +613,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         return isRetriableTransientError(cause, "GET");
     }
 
-    /**
-     * Whether a failure comes from the worker thread being interrupted (task kill or cancel), either
-     * directly, as a cause wrapped by the HTTP client or RetryUtils, or as an interrupt flag the retry
-     * backoff restored before returning a failed attempt.
-     */
     static boolean isInterruption(Throwable e) {
-        if (Thread.currentThread().isInterrupted()) {
-            return true;
-        }
-        for (Throwable t = e; t != null; t = t.getCause() == t ? null : t.getCause()) {
-            if (t instanceof InterruptedException) {
-                return true;
-            }
-        }
-        return false;
+        return Thread.currentThread().isInterrupted() || ExceptionUtils.indexOfType(e, InterruptedException.class) >= 0;
     }
 
     private void logSteps(Logger logger, RunResponse runResponse) {
