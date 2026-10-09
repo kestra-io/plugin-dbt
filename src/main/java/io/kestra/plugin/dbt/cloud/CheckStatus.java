@@ -22,6 +22,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.client.HttpClientException;
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import io.kestra.core.http.client.HttpClientResponseException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
@@ -276,8 +277,14 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             if (debugRunResponse.isPresent()) {
                 finalRunResponse = debugRunResponse.get();
             }
-        } catch (IllegalVariableEvaluationException | HttpClientException | IOException e) {
-            logger.debug("Unable to fetch final debug logs for run '{}' — falling back to logs collected during polling", runIdRendered, e);
+        } catch (Exception e) {
+            // RetryFailed is a plain Exception; a kill surfaces as an interrupt, so rethrow it
+            if (isInterruption(e)) {
+                Thread.currentThread().interrupt();
+                throw e;
+            }
+            logger.warn("Unable to fetch final debug logs for run '{}' ({}: {}), falling back to logs collected during polling", runIdRendered, e.getClass().getSimpleName(), e.getMessage());
+            logger.debug("Final debug logs fetch failure", e);
         }
 
         // final response
@@ -610,6 +617,10 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         // request() surfaces an exhausted retry as RetryFailed wrapping the last error, so unwrap it.
         Throwable cause = e instanceof RetryUtils.RetryFailed && e.getCause() != null ? e.getCause() : e;
         return isRetriableTransientError(cause, "GET");
+    }
+
+    static boolean isInterruption(Throwable e) {
+        return Thread.currentThread().isInterrupted() || ExceptionUtils.indexOfType(e, InterruptedException.class) >= 0;
     }
 
     private void logSteps(Logger logger, RunResponse runResponse) {

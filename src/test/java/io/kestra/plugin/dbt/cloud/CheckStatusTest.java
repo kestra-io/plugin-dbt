@@ -566,6 +566,119 @@ class CheckStatusTest {
         );
     }
 
+    // Regression: 502 on the final debug_logs fetch exhausts retries (RetryFailed) but must not fail the run.
+    @Test
+    void shouldFallBackToPolledResponseWhenFinalDebugFetchExhaustsRetries() throws Exception {
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/2223/"))
+                .withQueryParam("include_related", notContaining("debug_logs"))
+                .willReturn(okJson("""
+                        {
+                          "data": {
+                            "id": 2223,
+                            "status": 10,
+                            "status_humanized": "Success",
+                            "duration_humanized": "1s",
+                            "run_steps": [{ "id": 1, "name": "dbt run", "logs": "polled step output" }]
+                          }
+                        }
+                    """))
+        );
+
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/2223/"))
+                .withQueryParam("include_related", containing("debug_logs"))
+                .willReturn(aResponse().withStatus(502).withBody("Bad Gateway"))
+        );
+
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/2223/artifacts/run_results.json"))
+                .willReturn(aResponse().withStatus(404).withBody("Not Found"))
+        );
+
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/2223/artifacts/manifest.json"))
+                .willReturn(aResponse().withStatus(404).withBody("Not Found"))
+        );
+
+        CheckStatus checkStatus = CheckStatus.builder()
+            .id(IdUtils.create())
+            .type(CheckStatus.class.getName())
+            .baseUrl(Property.ofValue("http://localhost:8089"))
+            .runId(Property.ofValue("2223"))
+            .accountId(Property.ofValue("123"))
+            .token(Property.ofValue("fake-token"))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(5)))
+            .maxRetries(Property.ofValue(2))
+            .initialDelayMs(Property.ofValue(10L))
+            .parseRunResults(Property.ofValue(false))
+            .build();
+
+        RunContext runContext = mockRunContext(checkStatus);
+
+        List<LogEntry> logs = new CopyOnWriteArrayList<>();
+        logQueue.addListener(logs::add);
+
+        // Must not throw despite the debug=true follow-up fetch exhausting its retries on a 502.
+        CheckStatus.Output output = checkStatus.run(runContext);
+
+        TestsUtils.awaitLog(logs, l -> l.getMessage() != null && l.getMessage().contains("polled step output"));
+
+        assertThat(output, is(notNullValue()));
+        verify(2, getRequestedFor(urlPathEqualTo("/api/v2/accounts/123/runs/2223/"))
+            .withQueryParam("include_related", containing("debug_logs")));
+    }
+
+    // A kill during the final debug_logs fetch must propagate, not be swallowed as a fallback.
+    @Test
+    void shouldPropagateInterruptDuringFinalDebugFetch() throws Exception {
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/2224/"))
+                .withQueryParam("include_related", notContaining("debug_logs"))
+                .willReturn(okJson("""
+                        {"data": {"id": 2224, "status": 10, "status_humanized": "Success", "duration_humanized": "1s", "run_steps": []}}
+                    """))
+        );
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/2224/"))
+                .withQueryParam("include_related", containing("debug_logs"))
+                .willReturn(aResponse().withStatus(200).withFixedDelay(5000).withBody("{}"))
+        );
+
+        CheckStatus checkStatus = CheckStatus.builder()
+            .id(IdUtils.create())
+            .type(CheckStatus.class.getName())
+            .baseUrl(Property.ofValue("http://localhost:8089"))
+            .runId(Property.ofValue("2224"))
+            .accountId(Property.ofValue("123"))
+            .token(Property.ofValue("fake-token"))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(10)))
+            .maxRetries(Property.ofValue(2))
+            .initialDelayMs(Property.ofValue(10L))
+            .parseRunResults(Property.ofValue(false))
+            .build();
+
+        RunContext runContext = mockRunContext(checkStatus);
+
+        Thread runner = Thread.currentThread();
+        var interrupter = new Thread(() -> {
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException ignored) {
+                return;
+            }
+            runner.interrupt();
+        });
+        interrupter.start();
+        try {
+            assertThrows(Exception.class, () -> checkStatus.run(runContext));
+            assertThat(Thread.currentThread().isInterrupted(), is(true));
+        } finally {
+            Thread.interrupted();
+            interrupter.join();
+        }
+    }
+
     /**
      * Happy path for the best-effort debug=true fetch: when it succeeds, its fuller step logs
      * supersede the response collected during polling.
