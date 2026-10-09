@@ -88,7 +88,9 @@ public abstract class AbstractDbtCloud extends Task {
             "and `initialDelayMs` is applied. User-set `retryOnStatusCodes`, `retryOnStatusCodesByMethod` and " +
             "`retryableTransportFailureMethods` are kept as is; unset ones default to a read/write-aware set " +
             "(GET/HEAD retry any 5xx and 429, other methods retry only 429, 503 and, unless `reattach` handles " +
-            "them, 502/504)."
+            "them, 502/504). Transport failures are retried for GET/HEAD only. POST transport failures, " +
+            "including TLS handshake and connection-refused errors, fail immediately to avoid replaying a " +
+            "write whose outcome may be unknown;"
     )
     @PluginProperty(group = "advanced")
     HttpConfiguration options;

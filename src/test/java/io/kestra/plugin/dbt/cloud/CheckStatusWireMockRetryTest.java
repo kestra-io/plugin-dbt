@@ -67,16 +67,49 @@ class CheckStatusWireMockRetryTest {
     }
 
     @Test
+    void pollsAgainAfterAnEmptyResponseBody() throws Exception {
+        stubFor(
+            get(urlPathEqualTo(RUN_PATH))
+                .inScenario("empty-read")
+                .whenScenarioStateIs(Scenario.STARTED)
+                .willReturn(aResponse().withStatus(200))
+                .willSetStateTo("recovered")
+        );
+        stubFor(
+            get(urlPathEqualTo(RUN_PATH))
+                .inScenario("empty-read")
+                .whenScenarioStateIs("recovered")
+                .willReturn(okJson("""
+                    {
+                      "data": {
+                        "id": 9999,
+                        "status": 10,
+                        "status_humanized": "Success",
+                        "duration_humanized": "0s",
+                        "run_steps": []
+                      }
+                    }
+                    """))
+        );
+
+        var output = checkStatus(fastRetry(3), Duration.ofSeconds(30)).run(runContextFactory.of(Map.of()));
+
+        assertThat(output.getRunId(), is(9999L));
+        // Empty-body parsing fails outside Core's HTTP retry loop, so CheckStatus tries again next poll.
+        verify(3, getRequestedFor(urlPathEqualTo(RUN_PATH)));
+    }
+
+    @Test
     void stopsRetryingOncePerRequestAttemptsAreExhausted() {
         stubFor(get(urlPathEqualTo(RUN_PATH)).willReturn(aResponse().withStatus(503)));
 
-        // A transient read failure never fails the task, it is polled again until maxDuration elapses.
-        var task = checkStatus(fastRetry(3), Duration.ofSeconds(2));
+        // Keep maxDuration below pollFrequency so only one polling cycle is attempted.
+        var task = checkStatus(fastRetry(3), Duration.ofMillis(100));
         assertThrows(Exception.class, () -> task.run(runContextFactory.of(Map.of())));
 
-        // Each poll makes exactly maxAttempts (3) requests, so at least one full cycle happened.
+        // Core exhausted the configured three attempts for this request before CheckStatus timed out.
         var requests = findAll(getRequestedFor(urlPathEqualTo(RUN_PATH))).size();
-        assertThat(requests >= 3, is(true));
+        assertThat(requests, is(3));
     }
 
     private HttpConfiguration fastRetry(int maxAttempts) {

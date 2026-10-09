@@ -67,6 +67,7 @@ import static java.lang.Math.max;
         environment, which keeps lineage fresh for runs Kestra did not trigger.
         Fails on non-successful statuses unless `failOnUnsuccessful` is false.
         Defaults to 5s polling and a 60m timeout.
+        Configure `options.retry` to customize retries for each dbt Cloud API request.
         """
 )
 @Plugin(
@@ -105,6 +106,26 @@ import static java.lang.Math.max;
                     jobId: "4321"
                     assets:
                       enableAuto: true
+                """
+        ),
+        @Example(
+            title = "Customize retries for dbt Cloud API requests.",
+            full = true,
+            code = """
+                id: dbt_check_status_with_retry
+                namespace: company.team
+
+                tasks:
+                  - id: check_status
+                    type: io.kestra.plugin.dbt.cloud.CheckStatus
+                    accountId: "12345"
+                    token: "{{ secret('DBT_TOKEN') }}"
+                    runId: "98765"
+                    options:
+                      retry:
+                        type: io.kestra.core.models.tasks.retrys.Constant
+                        interval: PT2S
+                        maxAttempts: 5
                 """
         )
     }

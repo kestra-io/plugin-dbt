@@ -57,7 +57,7 @@ class CheckStatusRetryTest {
 
         var config = checkStatus(null).retryConfiguration(3, 100L, false);
 
-        Map<HttpMethod, List<Integer>> byMethod = runContext
+        var byMethod = runContext
             .render(config.getRetryOnStatusCodesByMethod())
             .asMap(HttpMethod.class, List.class);
 
