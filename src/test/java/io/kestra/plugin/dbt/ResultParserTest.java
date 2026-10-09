@@ -847,7 +847,7 @@ class ResultParserTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = { "run", "compile", "docs" })
+    @ValueSource(strings = {"run", "compile", "docs"})
     void parseManifestWithAssets_shouldKeepTestMetadataWhenTheCommandRanNoTests(String which) throws Exception {
         var runContext = mockRunContext();
         var manifestFile = writeStgOrdersManifest(runContext);
