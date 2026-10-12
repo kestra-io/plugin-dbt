@@ -1,0 +1,10 @@
+{
+  "metadata": {"project_name": "analytics"},
+  "nodes": {
+    "model.analytics.stg_orders": {
+      "resource_type": "model", "database": "analytics", "schema": "staging",
+      "name": "stg_orders", "unique_id": "model.analytics.stg_orders"
+    }
+  },
+  "parent_map": {"model.analytics.stg_orders": []}
+}

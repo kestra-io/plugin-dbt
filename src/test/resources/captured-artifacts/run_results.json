@@ -1,0 +1,6 @@
+{
+  "metadata": {"dbt_version": "1.8.0"},
+  "results": [
+    {"status": "success", "unique_id": "model.analytics.stg_orders", "adapter_response": {}, "timing": []}
+  ]
+}

@@ -1,7 +1,9 @@
 package io.kestra.plugin.dbt;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -11,6 +13,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.event.Level;
 
 import io.kestra.core.junit.annotations.KestraTest;
@@ -133,6 +137,7 @@ class ResultParserTest {
         assertThat(stgOrdersOutput.getMetadata().get("database"), is("analytics"));
         assertThat(stgOrdersOutput.getMetadata().get("schema"), is("staging"));
         assertThat(stgOrdersOutput.getMetadata().get("name"), is("stg_orders"));
+        assertThat(stgOrdersOutput.getMetadata().get("dbtResourceType"), is("model"));
 
         // fct_orders: parent stg_orders -> model fct_orders.
         var fctOrdersEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.fct_orders");
@@ -711,7 +716,9 @@ class ResultParserTest {
         var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
         Files.writeString(runResultsFile, """
             {
+              "args": {"which": "build"},
               "results": [
+                {"status": "error", "unique_id": "model.analytics.stg_orders", "adapter_response": {}, "timing": []},
                 {"status": "skipped", "unique_id": "test.analytics.skipped_stg_orders_id", "failures": null, "adapter_response": {}, "timing": []}
               ]
             }
@@ -720,9 +727,7 @@ class ResultParserTest {
         ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
 
         var stgOrders = findEmitWithOutput(runContext.assets().emitted(), "analytics.staging.stg_orders").outputs().getFirst();
-        assertThat(stgOrders.getMetadata(), not(hasKey("dbtTestStatus")));
-        assertThat(stgOrders.getMetadata(), not(hasKey("dbtTestsTotal")));
-        assertThat(stgOrders.getMetadata(), not(hasKey("dbtTestsFailed")));
+        assertClearedTestMetadata(stgOrders.getMetadata());
     }
 
     @Test
@@ -798,7 +803,103 @@ class ResultParserTest {
         assertThat(runContext.assets().emitted(), hasSize(1));
 
         var stgOrders = findEmitWithOutput(runContext.assets().emitted(), "analytics.staging.stg_orders").outputs().getFirst();
+        assertClearedTestMetadata(stgOrders.getMetadata());
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldClearTestMetadataOfAModelWhoseTestsWereRemoved() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = writeStgOrdersManifest(runContext);
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        Files.writeString(runResultsFile, """
+            {
+              "args": {"which": "build"},
+              "results": [
+                {"status": "success", "unique_id": "model.analytics.stg_orders", "adapter_response": {}, "timing": []}
+              ]
+            }
+            """);
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
+
+        var stgOrders = findEmitWithOutput(runContext.assets().emitted(), "analytics.staging.stg_orders").outputs().getFirst();
+        assertClearedTestMetadata(stgOrders.getMetadata());
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldKeepTestMetadataOfAModelTheBuildDidNotSelect() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = writeStgOrdersManifest(runContext);
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        Files.writeString(runResultsFile, """
+            {
+              "args": {"which": "build"},
+              "results": [
+                {"status": "success", "unique_id": "model.analytics.another_model", "adapter_response": {}, "timing": []}
+              ]
+            }
+            """);
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
+
+        var stgOrders = findEmitWithOutput(runContext.assets().emitted(), "analytics.staging.stg_orders").outputs().getFirst();
         assertThat(stgOrders.getMetadata(), not(hasKey("dbtTestStatus")));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"run", "compile", "docs"})
+    void parseManifestWithAssets_shouldKeepTestMetadataWhenTheCommandRanNoTests(String which) throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = writeStgOrdersManifest(runContext);
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        Files.writeString(runResultsFile, """
+            {
+              "args": {"which": "%s"},
+              "results": [
+                {"status": "success", "unique_id": "model.analytics.stg_orders", "adapter_response": {}, "timing": []}
+              ]
+            }
+            """.formatted(which));
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
+
+        var stgOrders = findEmitWithOutput(runContext.assets().emitted(), "analytics.staging.stg_orders").outputs().getFirst();
+        assertThat(stgOrders.getMetadata(), not(hasKey("dbtTestStatus")));
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldKeepTestMetadataWithoutRunResults() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = writeStgOrdersManifest(runContext);
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), (File) null);
+
+        var stgOrders = findEmitWithOutput(runContext.assets().emitted(), "analytics.staging.stg_orders").outputs().getFirst();
+        assertThat(stgOrders.getMetadata(), not(hasKey("dbtTestStatus")));
+    }
+
+    private static Path writeStgOrdersManifest(RunContext runContext) throws IOException {
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        Files.writeString(manifestFile, """
+            {
+              "nodes": {
+                "model.analytics.stg_orders": {
+                  "resource_type": "model", "database": "analytics", "schema": "staging",
+                  "name": "stg_orders", "unique_id": "model.analytics.stg_orders"
+                }
+              },
+              "parent_map": {
+                "model.analytics.stg_orders": []
+              }
+            }
+            """);
+        return manifestFile;
+    }
+
+    private static void assertClearedTestMetadata(Map<String, Object> metadata) {
+        assertThat(metadata, hasEntry(is("dbtTestStatus"), nullValue()));
+        assertThat(metadata, hasEntry(is("dbtTestsTotal"), nullValue()));
+        assertThat(metadata, hasEntry(is("dbtTestsFailed"), nullValue()));
     }
 
     @Test
@@ -1227,6 +1328,90 @@ class ResultParserTest {
         // the dbt test is not an asset: it describes no table
         assertThat(findEmitWithOutput(emitted, "analytics.dbt_test__audit.not_null_stg_customers_id"), is(nullValue()));
         assertThat(emitted, hasSize(3));
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldCarryDbtResourceTypeOnEveryAsset() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        Files.writeString(manifestFile, """
+            {
+              "metadata": {"adapter_type": "bigquery"},
+              "nodes": {
+                "seed.p.raw_customers": {
+                  "resource_type": "seed",
+                  "database": "analytics",
+                  "schema": "raw",
+                  "name": "raw_customers",
+                  "unique_id": "seed.p.raw_customers"
+                },
+                "model.p.stg_customers": {
+                  "resource_type": "Model",
+                  "database": "analytics",
+                  "schema": "staging",
+                  "name": "stg_customers",
+                  "unique_id": "model.p.stg_customers"
+                },
+                "snapshot.p.customers_snap": {
+                  "resource_type": "snapshot",
+                  "database": "analytics",
+                  "schema": "snapshots",
+                  "name": "customers_snap",
+                  "unique_id": "snapshot.p.customers_snap"
+                }
+              },
+              "parent_map": {
+                "seed.p.raw_customers": [],
+                "model.p.stg_customers": ["seed.p.raw_customers"],
+                "snapshot.p.customers_snap": ["model.p.stg_customers"]
+              }
+            }
+            """);
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile());
+
+        var emitted = runContext.assets().emitted();
+        Map<String, Object> seed = findEmitWithOutput(emitted, "analytics.raw.raw_customers").outputs().getFirst().getMetadata();
+        Map<String, Object> model = findEmitWithOutput(emitted, "analytics.staging.stg_customers").outputs().getFirst().getMetadata();
+        Map<String, Object> snapshot = findEmitWithOutput(emitted, "analytics.snapshots.customers_snap").outputs().getFirst().getMetadata();
+
+        // Every node is a Table asset, so the dbt resource_type is what tells a seed from a model; normalised to lower case.
+        assertThat(seed.get("dbtResourceType"), is("seed"));
+        assertThat(model.get("dbtResourceType"), is("model"));
+        assertThat(snapshot.get("dbtResourceType"), is("snapshot"));
+    }
+
+    @Test
+    void parseRunResult_shouldCarryDbtResourceTypeOnTaskRunOutputAsset() throws Exception {
+        var runContext = mockRunContext();
+
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        Files.writeString(manifestFile, SOURCE_MANIFEST_JSON);
+        var manifest = ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile()).manifest();
+
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        Files.writeString(runResultsFile, """
+            {
+              "metadata": {"dbt_version": "1.8.0"},
+              "results": [
+                {
+                  "status": "success",
+                  "unique_id": "model.analytics.stg_orders",
+                  "execution_time": 0.2,
+                  "adapter_response": {},
+                  "timing": [
+                    {"name": "execute", "started_at": "2024-01-01T00:00:01Z", "completed_at": "2024-01-01T00:00:02Z"}
+                  ]
+                }
+              ],
+              "elapsed_time": 0.2
+            }
+            """);
+
+        ResultParser.parseRunResult(runContext, runResultsFile.toFile(), manifest);
+
+        var output = runContext.dynamicWorkerResults().getFirst().getTaskRun().getAssetEmits().getFirst().getOutputs().getFirst();
+        assertThat(output.getMetadata().get("dbtResourceType"), is("model"));
     }
 
     private RunContext mockRunContext() {

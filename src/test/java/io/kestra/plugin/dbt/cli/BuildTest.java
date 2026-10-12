@@ -30,6 +30,8 @@ import jakarta.inject.Inject;
 import static io.kestra.core.utils.Rethrow.throwConsumer;
 import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -121,6 +123,36 @@ class BuildTest {
         assertTrue(runOutput.getOutputFiles().containsKey("run_results.json"));
         assertTrue(runOutput.getOutputFiles().containsKey("manifest.json"));
         assertThat(runContext.dynamicWorkerResults(), hasSize(12));
+    }
+
+    @Test
+    void run_withOutputFilesMatchingDbtArtifacts_shouldStillParseThem() throws Exception {
+        var task = Build.builder()
+            .id(IdUtils.create())
+            .type(Build.class.getName())
+            .taskRunner(Process.instance())
+            .dbtPath(Property.ofValue("echo"))
+            .projectDir(Property.ofValue("dbt/"))
+            .outputFiles(Property.ofValue(List.of("**/*.json")))
+            .build();
+
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        copyFolder(
+            Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("captured-artifacts")).getPath()),
+            Files.createDirectories(runContext.workingDir().path(true).resolve("dbt/target"))
+        );
+
+        var output = task.run(runContext);
+
+        assertThat(output.getExitCode(), is(0));
+        assertThat(output.getOutputFiles(), allOf(
+            hasKey("dbt/target/manifest.json"),
+            hasKey("dbt/target/run_results.json"),
+            hasKey("manifest.json"),
+            hasKey("run_results.json")
+        ));
+        assertThat(runContext.dynamicWorkerResults(), hasSize(1));
+        assertThat(runContext.dynamicWorkerResults().getFirst().getTaskRun().getTaskId(), is("model.analytics.stg_orders"));
     }
 
     private String resolvePythonPath() {
