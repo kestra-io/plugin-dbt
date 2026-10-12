@@ -263,11 +263,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
                     .build()
             );
 
-        // The trigger POST is not idempotent, so when reattach is on it must not be blindly retried by the
-        // generic HTTP layer on an ambiguous failure, since a retry could start the job twice. Keep the safe
-        // transient retries (429, 503) but let an ambiguous failure (read
-        // timeout, mid-flight drop, or a 502/504 gateway error) surface here, where we can confirm and adopt
-        // the run it may already have created. When reattach is off, behave exactly as before.
+        //502/504 gateway errors surface here when reattach is on
         HttpResponse<RunResponse> triggerResponse;
         try {
             triggerResponse = this.request(runContext, requestBuilder, RunResponse.class, reattachEnabled);

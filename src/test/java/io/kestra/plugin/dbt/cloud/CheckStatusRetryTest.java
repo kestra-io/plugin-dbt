@@ -4,13 +4,14 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.net.SocketException;
 
 import javax.net.ssl.SSLHandshakeException;
 
 import org.junit.jupiter.api.Test;
 
 import io.kestra.core.http.client.configurations.HttpConfiguration;
-import io.kestra.core.http.client.configurations.HttpMethod;
+import io.kestra.core.http.client.configurations.TimeoutConfiguration;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.retrys.Constant;
@@ -59,11 +60,11 @@ class CheckStatusRetryTest {
 
         var byMethod = runContext
             .render(config.getRetryOnStatusCodesByMethod())
-            .asMap(HttpMethod.class, List.class);
+            .asMap(String.class, List.class);
 
-        assertTrue(byMethod.get(HttpMethod.GET).containsAll(List.of(429, 500, 501, 599)));
-        assertTrue(byMethod.get(HttpMethod.HEAD).containsAll(List.of(429, 500, 501, 599)));
-        assertFalse(byMethod.containsKey(HttpMethod.POST));
+        assertTrue(byMethod.get("GET").containsAll(List.of(429, 500, 501, 599)));
+        assertTrue(byMethod.get("HEAD").containsAll(List.of(429, 500, 501, 599)));
+        assertFalse(byMethod.containsKey("POST"));
     }
 
     @Test
@@ -74,9 +75,9 @@ class CheckStatusRetryTest {
 
         var transportRetriable = runContext
             .render(config.getRetryableTransportFailureMethods())
-            .asList(HttpMethod.class);
+            .asList(String.class);
 
-        assertEquals(List.of(HttpMethod.GET, HttpMethod.HEAD), transportRetriable);
+        assertEquals(List.of("GET", "HEAD"), transportRetriable);
     }
 
     @Test
@@ -91,7 +92,7 @@ class CheckStatusRetryTest {
     @Test
     void retryConfigurationAppliesDeprecatedPropertiesWhenOptionsHasNoRetry() {
         var options = HttpConfiguration.builder()
-            .timeout(io.kestra.core.http.client.configurations.TimeoutConfiguration.builder()
+            .timeout(TimeoutConfiguration.builder()
                 .readIdleTimeout(Property.ofValue(Duration.ofSeconds(5)))
                 .build())
             .build();
@@ -122,15 +123,15 @@ class CheckStatusRetryTest {
         var options = HttpConfiguration.builder()
             .retry(Constant.builder().interval(Duration.ofMillis(10)).maxAttempts(2).build())
             .retryOnStatusCodes(Property.ofValue(List.of(418)))
-            .retryableTransportFailureMethods(Property.ofValue(List.of(HttpMethod.GET, HttpMethod.POST)))
+            .retryableTransportFailureMethods(Property.ofValue(List.of("GET", "POST")))
             .build();
 
         var config = checkStatus(options).retryConfiguration(3, 100L, true);
 
         assertEquals(List.of(418), runContext.render(config.getRetryOnStatusCodes()).asList(Integer.class));
         assertEquals(
-            List.of(HttpMethod.GET, HttpMethod.POST),
-            runContext.render(config.getRetryableTransportFailureMethods()).asList(HttpMethod.class)
+            List.of("GET", "POST"),
+            runContext.render(config.getRetryableTransportFailureMethods()).asList(String.class)
         );
         // Not set by the user, so it still gets the plugin default.
         assertNotNull(config.getRetryOnStatusCodesByMethod());
@@ -144,7 +145,7 @@ class CheckStatusRetryTest {
     @Test
     void transportFailuresAreTransientReadFailures() {
         assertTrue(CheckStatus.isTransientReadFailure(new SSLHandshakeException("handshake")));
-        assertTrue(CheckStatus.isTransientReadFailure(new IOException("connection reset", new java.net.SocketException())));
+        assertTrue(CheckStatus.isTransientReadFailure(new IOException("connection reset", new SocketException())));
     }
 
     @Test

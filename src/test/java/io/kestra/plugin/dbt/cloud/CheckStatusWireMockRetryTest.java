@@ -22,11 +22,13 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.github.tomakehurst.wiremock.junit5.WireMockRuntimeInfo;
+
 /**
  * Exercises Core's real retry loop for CheckStatus against a mocked server.
  */
 @KestraTest
-@WireMockTest(httpPort = 28185)
+@WireMockTest
 class CheckStatusWireMockRetryTest {
     private static final String RUN_PATH = "/api/v2/accounts/123/runs/9999/";
 
@@ -34,7 +36,7 @@ class CheckStatusWireMockRetryTest {
     private RunContextFactory runContextFactory;
 
     @Test
-    void retriesAServerErrorThenSucceeds() throws Exception {
+    void retriesAServerErrorThenSucceeds(WireMockRuntimeInfo runtimeInfo) throws Exception {
         stubFor(
             get(urlPathEqualTo(RUN_PATH))
                 .inScenario("flaky-read")
@@ -59,7 +61,7 @@ class CheckStatusWireMockRetryTest {
                     """))
         );
 
-        var output = checkStatus(fastRetry(3), Duration.ofSeconds(30)).run(runContextFactory.of(Map.of()));
+        var output = checkStatus(fastRetry(3), Duration.ofSeconds(30),runtimeInfo.getHttpBaseUrl()).run(runContextFactory.of(Map.of()));
 
         assertThat(output.getRunId(), is(9999L));
         // One 503, then the poll read, then the final debug read.
@@ -67,7 +69,7 @@ class CheckStatusWireMockRetryTest {
     }
 
     @Test
-    void pollsAgainAfterAnEmptyResponseBody() throws Exception {
+    void pollsAgainAfterAnEmptyResponseBody(WireMockRuntimeInfo runtimeInfo) throws Exception {
         stubFor(
             get(urlPathEqualTo(RUN_PATH))
                 .inScenario("empty-read")
@@ -92,7 +94,7 @@ class CheckStatusWireMockRetryTest {
                     """))
         );
 
-        var output = checkStatus(fastRetry(3), Duration.ofSeconds(30)).run(runContextFactory.of(Map.of()));
+        var output = checkStatus(fastRetry(3), Duration.ofSeconds(30),runtimeInfo.getHttpBaseUrl()).run(runContextFactory.of(Map.of()));
 
         assertThat(output.getRunId(), is(9999L));
         // Empty-body parsing fails outside Core's HTTP retry loop, so CheckStatus tries again next poll.
@@ -100,11 +102,25 @@ class CheckStatusWireMockRetryTest {
     }
 
     @Test
-    void stopsRetryingOncePerRequestAttemptsAreExhausted() {
+    void failsFastOnANonJsonSuccessResponse(WireMockRuntimeInfo runtimeInfo) {
+        stubFor(get(urlPathEqualTo(RUN_PATH))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "text/html")
+                .withBody("<html><body>Blocked by proxy</body></html>")));
+
+        var task = checkStatus(fastRetry(3), Duration.ofSeconds(1),runtimeInfo.getHttpBaseUrl());
+        assertThrows(Exception.class, () -> task.run(runContextFactory.of(Map.of())));
+
+        verify(1, getRequestedFor(urlPathEqualTo(RUN_PATH)));
+    }
+
+    @Test
+    void stopsRetryingOncePerRequestAttemptsAreExhausted(WireMockRuntimeInfo runtimeInfo) {
         stubFor(get(urlPathEqualTo(RUN_PATH)).willReturn(aResponse().withStatus(503)));
 
         // Keep maxDuration below pollFrequency so only one polling cycle is attempted.
-        var task = checkStatus(fastRetry(3), Duration.ofMillis(100));
+        var task = checkStatus(fastRetry(3), Duration.ofMillis(100),runtimeInfo.getHttpBaseUrl());
         assertThrows(Exception.class, () -> task.run(runContextFactory.of(Map.of())));
 
         // Core exhausted the configured three attempts for this request before CheckStatus timed out.
@@ -118,14 +134,14 @@ class CheckStatusWireMockRetryTest {
             .build();
     }
 
-    private CheckStatus checkStatus(HttpConfiguration options, Duration maxDuration) {
+    private CheckStatus checkStatus(HttpConfiguration options, Duration maxDuration, String baseUrl) {
         return CheckStatus.builder()
             .id(IdUtils.create())
             .type(CheckStatus.class.getName())
             .runId(Property.ofValue("9999"))
             .accountId(Property.ofValue("123"))
             .token(Property.ofValue("my-token"))
-            .baseUrl(Property.ofValue("http://localhost:28185"))
+            .baseUrl(Property.ofValue(baseUrl))
             .pollFrequency(Property.ofValue(Duration.ofMillis(200)))
             .maxDuration(Property.ofValue(maxDuration))
             .options(options)

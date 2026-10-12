@@ -14,6 +14,7 @@ import java.util.stream.Stream;
 
 import javax.net.ssl.SSLHandshakeException;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -90,7 +91,7 @@ public abstract class AbstractDbtCloud extends Task {
             "(GET/HEAD retry any 5xx and 429, other methods retry only 429, 503 and, unless `reattach` handles " +
             "them, 502/504). Transport failures are retried for GET/HEAD only. POST transport failures, " +
             "including TLS handshake and connection-refused errors, fail immediately to avoid replaying a " +
-            "write whose outcome may be unknown;"
+            "write whose outcome may be unknown."
     )
     @PluginProperty(group = "advanced")
     HttpConfiguration options;
@@ -142,11 +143,7 @@ public abstract class AbstractDbtCloud extends Task {
         .filter(code -> !AMBIGUOUS_WRITE_GATEWAY_CODES.contains(code))
         .toList();
 
-    // Transport failures (TLS handshake, refused connection, ...) are retried for reads only. POST is left
-    // out on purpose: Core retries transport failures per method, not per exception type, so including POST
-    // would also re-send a write after a read timeout or a dropped connection, which may duplicate a run.
-    // The old plugin-local retry also retried a POST on a TLS handshake failure or a refused connection;
-    // those now surface immediately and can be handled with a task-level retry.
+    // POST excluded: Core retries per method, not per exception, so a write could be re-sent after a read timeout
     private static final List<String> TRANSPORT_RETRIABLE_METHODS = List.of("GET", "HEAD");
 
     protected <RES> HttpResponse<RES> request(
@@ -295,10 +292,10 @@ public abstract class AbstractDbtCloud extends Task {
 
     /**
      * Whether a failed read is likely transient and worth waiting out: a 429, any 5xx, or a transport
-     * failure (TLS handshake, refused connection, DNS, no route, timeout, or any other {@link IOException}).
-     * Notably this includes the "Empty response body" {@link IOException} thrown by {@code request()}, so a
-     * poll that gets an empty 2xx body keeps polling instead of failing. Any other response, such as a 4xx,
-     * returns false.
+     * failure (TLS handshake, refused connection, DNS, no route, timeout, or any other {@link IOException}
+     * except a {@link JsonProcessingException}). This includes the "Empty response body" {@link IOException}
+     * thrown by {@code request()}, so a poll that gets an empty 2xx body keeps polling instead of failing.
+     * Any other response, such as a 4xx, returns false.
      */
     static boolean isRetriableReadFailure(Throwable throwable) {
         if (throwable == null) {
@@ -308,6 +305,10 @@ public abstract class AbstractDbtCloud extends Task {
         if (throwable instanceof HttpClientResponseException ex) {
             int code = ex.getResponse().getStatus().getCode();
             return code == TOO_MANY_REQUESTS || (code >= 500 && code <= 599);
+        }
+
+        if (hasCause(throwable, JsonProcessingException.class)) {
+            return false;
         }
 
         return throwable instanceof HttpClientRequestException
