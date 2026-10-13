@@ -260,9 +260,16 @@ public abstract class AbstractDbtCloud extends Task {
         }
 
         if (this.options == null || this.options.getRetryOnStatusCodesByMethod() == null || this.options.getRetryOnStatusCodesByMethod().equals(defaults.getRetryOnStatusCodesByMethod())) {
+            // Core never retries a non-idempotent method on a status code unless it is listed here,
+            // so each write method needs its own entry or a POST 503 is never retried.
+            var writeCodes = reattachEnabled ? WRITE_RETRIABLE_CODES_EXCLUDING_AMBIGUOUS : WRITE_RETRIABLE_CODES;
             builder.retryOnStatusCodesByMethod(Property.ofValue(Map.of(
                 "GET", READ_ONLY_RETRIABLE_CODES,
-                "HEAD", READ_ONLY_RETRIABLE_CODES
+                "HEAD", READ_ONLY_RETRIABLE_CODES,
+                "POST", writeCodes,
+                "PUT", writeCodes,
+                "PATCH", writeCodes,
+                "DELETE", writeCodes
             )));
         }
 

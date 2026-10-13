@@ -123,11 +123,11 @@ class CheckStatusWireMockRetryTest {
         var task = checkStatus(fastRetry(3), Duration.ofMillis(100),runtimeInfo.getHttpBaseUrl());
         assertThrows(Exception.class, () -> task.run(runContextFactory.of(Map.of())));
 
-        // Core exhausts the three configured attempts per request; Await may run a second poll cycle
-        // before it times out, so the total is a whole number of cycles, never a partial one.
+        // Each of the three configured attempts is sent twice: core's Apache client retries a 503 once
+        // on its own. Await may also run a second poll cycle, so only require whole attempts.
         var requests = findAll(getRequestedFor(urlPathEqualTo(RUN_PATH))).size();
-        assertThat(requests % 3, is(0));
-        assertThat(requests >= 3, is(true));
+        assertThat(requests % 6, is(0));
+        assertThat(requests >= 6, is(true));
     }
 
     private HttpConfiguration fastRetry(int maxAttempts) {

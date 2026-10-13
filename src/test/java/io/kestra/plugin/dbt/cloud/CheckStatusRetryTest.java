@@ -66,7 +66,23 @@ class CheckStatusRetryTest {
 
         assertTrue(byMethod.get("GET").containsAll(List.of(429, 500, 501, 599)));
         assertTrue(byMethod.get("HEAD").containsAll(List.of(429, 500, 501, 599)));
-        assertFalse(byMethod.containsKey("POST"));
+        // Core only retries a non-idempotent method on status codes when it is listed here.
+        assertTrue(byMethod.get("POST").containsAll(List.of(429, 502, 503, 504)));
+        assertFalse(byMethod.get("POST").contains(500));
+    }
+
+    @Test
+    void retryConfigurationReattachKeepsPostOffAmbiguousGatewayCodes() throws Exception {
+        var runContext = runContextFactory.of(Map.of());
+
+        var config = checkStatus(null).retryConfiguration(3, 100L, true);
+
+        var post = runContext
+            .render(config.getRetryOnStatusCodesByMethod())
+            .asMap(String.class, List.class)
+            .get("POST");
+        assertTrue(post.containsAll(List.of(429, 503)));
+        assertFalse(post.contains(502) || post.contains(504));
     }
 
     @Test
