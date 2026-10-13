@@ -8,6 +8,7 @@ import java.net.UnknownHostException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -30,6 +31,7 @@ import io.kestra.core.http.client.configurations.HttpConfiguration;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.Task;
+import io.kestra.core.models.tasks.retrys.AbstractRetry;
 import io.kestra.core.models.tasks.retrys.Exponential;
 import io.kestra.core.runners.RunContext;
 
@@ -224,10 +226,25 @@ public abstract class AbstractDbtCloud extends Task {
      * When reattachEnabled is true, the default write status codes drop 502/504, leaving them to surface
      * to the caller.
      */
+    private static boolean isUnsetRetry(AbstractRetry retry, AbstractRetry coreDefault) {
+        if (retry == null) {
+            return true;
+        }
+        return retry instanceof Exponential e && coreDefault instanceof Exponential d
+            && Objects.equals(e.getInterval(), d.getInterval())
+            && Objects.equals(e.getMaxInterval(), d.getMaxInterval())
+            && Objects.equals(e.getDelayFactor(), d.getDelayFactor())
+            && Objects.equals(e.getMaxAttempts(), d.getMaxAttempts());
+    }
+
     HttpConfiguration retryConfiguration(int maxAttempts, long initialDelayMs, boolean reattachEnabled) {
         var builder = this.options != null ? this.options.toBuilder() : HttpConfiguration.builder();
 
-        if (this.options == null || this.options.getRetry() == null) {
+        // Core's builder fills retry fields with defaults, so a field left untouched by the user is
+        // never null: treat a value equal to the core default as unset.
+        var defaults = HttpConfiguration.builder().build();
+
+        if (this.options == null || isUnsetRetry(this.options.getRetry(), defaults.getRetry())) {
             builder.retry(Exponential.builder()
                 .delayFactor(2.0)
                 .interval(Duration.ofMillis(initialDelayMs))
@@ -236,20 +253,20 @@ public abstract class AbstractDbtCloud extends Task {
                 .build());
         }
 
-        if (this.options == null || this.options.getRetryOnStatusCodes() == null) {
+        if (this.options == null || this.options.getRetryOnStatusCodes() == null || this.options.getRetryOnStatusCodes().equals(defaults.getRetryOnStatusCodes())) {
             builder.retryOnStatusCodes(Property.ofValue(
                 reattachEnabled ? WRITE_RETRIABLE_CODES_EXCLUDING_AMBIGUOUS : WRITE_RETRIABLE_CODES
             ));
         }
 
-        if (this.options == null || this.options.getRetryOnStatusCodesByMethod() == null) {
+        if (this.options == null || this.options.getRetryOnStatusCodesByMethod() == null || this.options.getRetryOnStatusCodesByMethod().equals(defaults.getRetryOnStatusCodesByMethod())) {
             builder.retryOnStatusCodesByMethod(Property.ofValue(Map.of(
                 "GET", READ_ONLY_RETRIABLE_CODES,
                 "HEAD", READ_ONLY_RETRIABLE_CODES
             )));
         }
 
-        if (this.options == null || this.options.getRetryableTransportFailureMethods() == null) {
+        if (this.options == null || this.options.getRetryableTransportFailureMethods() == null || this.options.getRetryableTransportFailureMethods().equals(defaults.getRetryableTransportFailureMethods())) {
             builder.retryableTransportFailureMethods(Property.ofValue(TRANSPORT_RETRIABLE_METHODS));
         }
 

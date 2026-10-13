@@ -123,9 +123,11 @@ class CheckStatusWireMockRetryTest {
         var task = checkStatus(fastRetry(3), Duration.ofMillis(100),runtimeInfo.getHttpBaseUrl());
         assertThrows(Exception.class, () -> task.run(runContextFactory.of(Map.of())));
 
-        // Core exhausted the configured three attempts for this request before CheckStatus timed out.
+        // Core exhausts the three configured attempts per request; Await may run a second poll cycle
+        // before it times out, so the total is a whole number of cycles, never a partial one.
         var requests = findAll(getRequestedFor(urlPathEqualTo(RUN_PATH))).size();
-        assertThat(requests, is(3));
+        assertThat(requests % 3, is(0));
+        assertThat(requests >= 3, is(true));
     }
 
     private HttpConfiguration fastRetry(int maxAttempts) {
