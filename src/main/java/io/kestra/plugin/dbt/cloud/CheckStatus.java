@@ -126,7 +126,7 @@ import static java.lang.Math.max;
                     runId: "98765"
                     options:
                       retry:
-                        type: io.kestra.core.models.tasks.retrys.Constant
+                        type: constant
                         interval: PT2S
                         maxAttempts: 5
                 """

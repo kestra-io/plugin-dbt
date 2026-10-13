@@ -74,7 +74,7 @@ import lombok.experimental.SuperBuilder;
                     jobId: "67890"
                     options:
                       retry:
-                        type: io.kestra.core.models.tasks.retrys.Constant
+                        type: constant
                         interval: PT2S
                         maxAttempts: 5
                 """
