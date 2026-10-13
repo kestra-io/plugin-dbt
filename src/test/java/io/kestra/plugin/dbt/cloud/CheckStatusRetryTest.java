@@ -181,4 +181,8 @@ class CheckStatusRetryTest {
             Thread.interrupted();
         }
     }
+
+    private static IOException status(int code) {
+        return new IOException("dbt Cloud responded with HTTP " + code);
+    }
 }
