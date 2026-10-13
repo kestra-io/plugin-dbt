@@ -36,7 +36,6 @@ import io.kestra.core.storages.kv.KVStore;
 import io.kestra.core.storages.kv.KVValue;
 import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.core.utils.Await;
-import io.kestra.core.utils.RetryUtils;
 import io.kestra.plugin.dbt.ResultParser;
 import io.kestra.plugin.dbt.cloud.models.Job;
 import io.kestra.plugin.dbt.cloud.models.JobStatus;
@@ -71,6 +70,7 @@ import static java.lang.Math.max;
         environment, which keeps lineage fresh for runs Kestra did not trigger.
         Fails on non-successful statuses unless `failOnUnsuccessful` is false.
         Defaults to 5s polling and a 60m timeout.
+        Configure `options.retry` to customize retries for each dbt Cloud API request.
         """
 )
 @Plugin(
@@ -109,6 +109,26 @@ import static java.lang.Math.max;
                     jobId: "4321"
                     assets:
                       enableAuto: true
+                """
+        ),
+        @Example(
+            title = "Customize retries for dbt Cloud API requests.",
+            full = true,
+            code = """
+                id: dbt_check_status_with_retry
+                namespace: company.team
+
+                tasks:
+                  - id: check_status
+                    type: io.kestra.plugin.dbt.cloud.CheckStatus
+                    accountId: "12345"
+                    token: "{{ secret('DBT_TOKEN') }}"
+                    runId: "98765"
+                    options:
+                      retry:
+                        type: constant
+                        interval: PT2S
+                        maxAttempts: 5
                 """
         )
     }
@@ -608,15 +628,11 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     }
 
     /**
-     * Whether a failed status read is transient, meaning polling should continue rather than fail the
-     * task. The run keeps executing on dbt Cloud while we cannot read its status, so a transient read
-     * failure is not a run failure. Non-transient errors (e.g. 401/403/404, bad config) never resolve
-     * by waiting, so they propagate and the task fails fast.
+     * Whether a failed status read is transient, so polling continues instead of failing the task.
+     * The run keeps executing on dbt Cloud, so non-transient errors (401/403/404, bad config) fail fast.
      */
     static boolean isTransientReadFailure(Throwable e) {
-        // request() surfaces an exhausted retry as RetryFailed wrapping the last error, so unwrap it.
-        Throwable cause = e instanceof RetryUtils.RetryFailed && e.getCause() != null ? e.getCause() : e;
-        return isRetriableTransientError(cause, "GET");
+        return AbstractDbtCloud.isRetriableReadFailure(e);
     }
 
     static boolean isInterruption(Throwable e) {

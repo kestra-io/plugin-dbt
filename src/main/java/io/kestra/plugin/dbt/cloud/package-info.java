@@ -1,7 +1,8 @@
 @PluginSubGroup(
     title = "dbt Cloud",
     description = "This sub-group of plugins contains tasks for using dbt Cloud.\n" +
-        "dbt is a data transformation tool that enables data analysts and engineers to transform, test and document data in the cloud data warehouse.",
+        "dbt is a data transformation tool that enables data analysts and engineers to transform, test and document data in the cloud data warehouse.\n" +
+        "Use `options.retry` on dbt Cloud tasks to customize retries for each API request.",
     categories = {
         PluginSubGroup.PluginCategory.DATA
     }
