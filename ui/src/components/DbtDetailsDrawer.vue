@@ -8,7 +8,7 @@ import { type GraphNode, REV_KEY, useModelGraph } from "../composables/useModelG
 // `fetchEndpoint` is a newer host prop than the published artifact-sdk types.
 const props = defineProps<KnownSlotProps["topology-task-drawer"] & { fetchEndpoint?: FetchEndpoint }>();
 
-const { graph, status, isRunning } = useModelGraph(
+const { graph, message } = useModelGraph(
     () => props.task?.id,
     () => props.execution,
     () => props.tenant,
@@ -46,15 +46,10 @@ function openSql(node: GraphNode) {
             </button>
         </nav>
 
-        <p v-if="!execution?.id" class="dbt-drawer__empty">Run the flow to see the dbt model graph.</p>
-        <p v-else-if="isRunning" class="dbt-drawer__empty">dbt is still running. The graph appears when the task finishes.</p>
-        <p v-else-if="status === 'idle'" class="dbt-drawer__empty">This task has not run in this execution.</p>
-        <p v-else-if="status === 'missing'" class="dbt-drawer__empty">This run produced no model graph (no readable manifest.json).</p>
-        <p v-else-if="status === 'error'" class="dbt-drawer__empty">Could not load the dbt model graph.</p>
-        <p v-else-if="status !== 'loaded' || !graph" class="dbt-drawer__empty">Loading the dbt model graph...</p>
+        <p v-if="message || !graph" class="dbt-drawer__empty">{{ message }}</p>
         <template v-else>
             <!-- v-show keeps the graph mounted, so its zoom and selection survive a trip to the other tab. -->
-            <DbtModelGraph v-show="tab === 'graph'" :graph="graph" :selectedId="selected?.uniqueId" @select="selected = $event" @open-sql="openSql" />
+            <DbtModelGraph v-show="tab === 'graph'" :graph="graph" :selectedId="selected?.uniqueId" sqlAction @select="selected = $event" @open-sql="openSql" />
             <DbtCompiledSql v-if="tab === 'sql'" :node="selected" :nodes="graph.nodes" :fetchEndpoint="fetchEndpoint" @select="selected = $event" />
         </template>
     </div>

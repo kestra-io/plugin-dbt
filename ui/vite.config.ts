@@ -17,6 +17,17 @@ export default defaultViteConfig({
         slotName: "topology-task-drawer",
         path: "./src/components/DbtDetailsDrawer.vue",
       },
+      // One entry per artifact in the execution Artifacts tab (kestra-io/kestra#21611).
+      {
+        slotName: "execution-artifact/model-graph",
+        path: "./src/components/DbtModelGraphArtifact.vue",
+        additionalProperties: { title: "Model graph" },
+      },
+      {
+        slotName: "execution-artifact/compiled-sql",
+        path: "./src/components/DbtCompiledSqlArtifact.vue",
+        additionalProperties: { title: "Compiled SQL" },
+      },
     ],
   },
 });

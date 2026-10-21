@@ -106,7 +106,18 @@ export function useModelGraph(
         { immediate: true },
     );
 
-    return { graph, status, isRunning };
+    // Why no graph is shown, or null once it loaded. Shared by the drawer and the Artifacts tab views.
+    const message = computed(() => {
+        if (!execution()?.id) return "Run the flow to see the dbt model graph.";
+        if (isRunning.value) return "dbt is still running. The graph appears when the task finishes.";
+        if (status.value === "idle") return "This task has not run in this execution.";
+        if (status.value === "missing") return "This run produced no model graph (no readable manifest.json).";
+        if (status.value === "error") return "Could not load the dbt model graph.";
+        if (status.value !== "loaded" || !graph.value) return "Loading the dbt model graph...";
+        return null;
+    });
+
+    return { graph, status, isRunning, message };
 }
 
 // The logo on a white rounded tile, like the icon of a topology task node. Built once: every card shares it.
