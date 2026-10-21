@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "add": "artifact-sdk",
-    "storybook": "storybook dev -p 6006"
+    "storybook": "storybook dev -p 6006",
+    "postinstall": "node scripts/allow-execution-artifact.mjs"
   },
   "dependencies": {
     "@kestra-io/artifact-sdk": "0.2.2",

@@ -5,7 +5,8 @@ import ContentCopy from "vue-material-design-icons/ContentCopy.vue";
 import type { KsGraphEdge, KsGraphNode } from "@kestra-io/design-system/components/Charts/KsGraph";
 import { DBT_ICON as ICON, type GraphNode, type ModelGraph, kestraState, statusTitle } from "../composables/useModelGraph";
 
-const props = defineProps<{ graph: ModelGraph; selectedId?: string }>();
+// `sqlAction` shows the Compiled SQL button, only where the host can switch to that view (the drawer tabs).
+const props = defineProps<{ graph: ModelGraph; selectedId?: string; sqlAction?: boolean }>();
 const emit = defineEmits<{ select: [node: GraphNode | null]; "open-sql": [node: GraphNode] }>();
 
 const NODE_WIDTH = 300;
@@ -493,7 +494,7 @@ function copy(key: string, value?: string) {
                     </div>
                     <KsExecutionStatus :status="kestraState(selected.status)" :title="statusTitle(selected.status)" size="small" />
                     <span v-if="selected.executionTime !== undefined && ['success', 'error', 'warn'].includes(selected.status)" class="dbt-graph__muted">{{ formatSeconds(selected.executionTime) }}</span>
-                    <button v-if="selected.resourceType === 'model' || selected.resourceType === 'snapshot'" type="button" class="dbt-graph__text-button" @click="emit('open-sql', selected)">Compiled SQL</button>
+                    <button v-if="sqlAction && (selected.resourceType === 'model' || selected.resourceType === 'snapshot')" type="button" class="dbt-graph__text-button" @click="emit('open-sql', selected)">Compiled SQL</button>
                     <button type="button" class="dbt-graph__icon-button dbt-graph__close" title="Close (Esc)" @click="select(null)">×</button>
                 </header>
 
