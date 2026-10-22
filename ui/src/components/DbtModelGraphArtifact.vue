@@ -5,7 +5,8 @@ type ArtifactContext = { fetchOutputs?: () => Promise<Record<string, unknown>> }
 export async function getSubtitle({ fetchOutputs }: ArtifactContext): Promise<string | undefined> {
     const summary = (await fetchOutputs?.())?.graphSummary as { nodes?: number; edges?: number } | undefined;
     if (summary?.nodes === undefined) return undefined;
-    return `${summary.nodes} nodes · ${summary.edges ?? 0} dependencies`;
+    const edges = summary.edges ?? 0;
+    return `${summary.nodes} ${summary.nodes === 1 ? "node" : "nodes"} · ${edges} ${edges === 1 ? "dependency" : "dependencies"}`;
 }
 </script>
 
@@ -28,15 +29,19 @@ const selected = ref<GraphNode | null>(null);
 </script>
 
 <template>
-    <div :data-dbt-rev="(execution as Record<string, unknown> | undefined)?.[REV_KEY]">
+    <div class="dbt-artifact" :data-dbt-rev="(execution as Record<string, unknown> | undefined)?.[REV_KEY]">
         <p v-if="message || !graph" class="dbt-artifact__empty">{{ message }}</p>
-        <DbtModelGraph v-else :graph="graph" :selectedId="selected?.uniqueId" @select="selected = $event" />
+        <DbtModelGraph v-else :graph="graph" :selectedId="selected?.uniqueId" embedded @select="selected = $event" />
     </div>
 </template>
 
 <style>
+.dbt-artifact {
+    height: 100%;
+}
+
 .dbt-artifact__empty {
-    margin: 1rem 0;
+    margin: 1rem;
     color: var(--ks-text-secondary);
 }
 </style>

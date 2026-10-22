@@ -34,8 +34,8 @@ watch(graph, (g) => {
 </script>
 
 <template>
-    <div :data-dbt-rev="(execution as Record<string, unknown> | undefined)?.[REV_KEY]">
+    <div class="dbt-artifact" :data-dbt-rev="(execution as Record<string, unknown> | undefined)?.[REV_KEY]">
         <p v-if="message || !graph" class="dbt-artifact__empty">{{ message }}</p>
-        <DbtCompiledSql v-else :node="selected" :nodes="graph.nodes" :fetchEndpoint="fetchEndpoint" @select="selected = $event" />
+        <DbtCompiledSql v-else :node="selected" :nodes="graph.nodes" :fetchEndpoint="fetchEndpoint" embedded @select="selected = $event" />
     </div>
 </template>

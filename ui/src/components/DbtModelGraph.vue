@@ -6,7 +6,8 @@ import type { KsGraphEdge, KsGraphNode } from "@kestra-io/design-system/componen
 import { DBT_ICON as ICON, type GraphNode, type ModelGraph, kestraState, statusTitle } from "../composables/useModelGraph";
 
 // `sqlAction` shows the Compiled SQL button, only where the host can switch to that view (the drawer tabs).
-const props = defineProps<{ graph: ModelGraph; selectedId?: string; sqlAction?: boolean }>();
+// `embedded` fills a host panel that already has a frame (the Artifacts tab): no own border, details on the side.
+const props = defineProps<{ graph: ModelGraph; selectedId?: string; sqlAction?: boolean; embedded?: boolean }>();
 const emit = defineEmits<{ select: [node: GraphNode | null]; "open-sql": [node: GraphNode] }>();
 
 const NODE_WIDTH = 300;
@@ -452,9 +453,9 @@ function copy(key: string, value?: string) {
 </script>
 
 <template>
-    <div class="dbt-graph">
+    <div :class="['dbt-graph', { 'dbt-graph--embedded': embedded }]">
         <!-- KsGraph sizes itself to 100% of its parent, so the height lives on this wrapper. -->
-        <div ref="canvas" class="dbt-graph__canvas" :style="{ height: canvasHeight }" @wheel.capture="onWheel" @pointerdown.capture="markTouched">
+        <div ref="canvas" class="dbt-graph__canvas" :style="embedded ? undefined : { height: canvasHeight }" @wheel.capture="onWheel" @pointerdown.capture="markTouched">
             <KsGraph
                 v-if="sized"
                 ref="chart"
@@ -466,7 +467,7 @@ function copy(key: string, value?: string) {
                 @node-click="onNodeClick"
             />
 
-            <p class="dbt-graph__count">
+            <p v-if="!embedded" class="dbt-graph__count">
                 {{ graph.nodes.length }} {{ graph.nodes.length === 1 ? "node" : "nodes" }} · {{ graph.edges.length }}
                 {{ graph.edges.length === 1 ? "dependency" : "dependencies" }}
             </p>
@@ -566,6 +567,60 @@ function copy(key: string, value?: string) {
     background-image: radial-gradient(var(--ks-topology-bg) 1px, transparent 1px);
     background-size: 20px 20px;
     overflow: hidden;
+}
+
+/* Artifacts tab: core's panel is the frame, so the graph fills it edge to edge and details sit in a side column. */
+.dbt-graph--embedded {
+    flex-direction: row;
+    gap: 0;
+    height: 100%;
+}
+
+.dbt-graph--embedded .dbt-graph__canvas {
+    flex: 1;
+    min-width: 0;
+    /* Guards against a host panel without a definite height: a 0px canvas never renders the graph. */
+    min-height: 320px;
+    border: 0;
+    border-radius: 0;
+}
+
+.dbt-graph--embedded .dbt-graph__card {
+    flex: 0 0 340px;
+    margin: 0;
+    overflow-y: auto;
+    border: 0;
+    border-left: 1px solid var(--ks-border-default);
+    border-radius: 0;
+}
+
+/* The column is narrow: name and close on the first row, status and duration on a second row under the name. */
+.dbt-graph--embedded .dbt-graph__card-head {
+    flex-wrap: wrap;
+    row-gap: 8px;
+}
+
+.dbt-graph--embedded .dbt-graph__card-title {
+    flex: 1 1 calc(100% - 100px);
+}
+
+.dbt-graph--embedded .dbt-graph__close {
+    order: 1;
+}
+
+.dbt-graph--embedded .dbt-graph__card-head > :not(.dbt-graph__card-icon):not(.dbt-graph__card-title):not(.dbt-graph__close) {
+    order: 2;
+}
+
+.dbt-graph--embedded .dbt-graph__card-head > :nth-child(3) {
+    margin-left: 48px;
+}
+
+.dbt-graph--embedded .dbt-graph__card--empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-style: solid;
 }
 
 .dbt-graph__zoom-hint {
