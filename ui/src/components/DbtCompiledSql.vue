@@ -10,7 +10,8 @@ import { DBT_ICON, type GraphNode, kestraState, statusTitle } from "../composabl
 /** The host-bound call to one of this plugin's endpoints (core `fetchEndpoint`), absent on older Kestra. */
 export type FetchEndpoint = (name: string, params?: Record<string, string>) => Promise<unknown>;
 
-const props = defineProps<{ node: GraphNode | null; nodes: GraphNode[]; fetchEndpoint?: FetchEndpoint }>();
+// `embedded` fills a host panel that already has a frame (the Artifacts tab): no own borders, padded toolbar rows.
+const props = defineProps<{ node: GraphNode | null; nodes: GraphNode[]; fetchEndpoint?: FetchEndpoint; embedded?: boolean }>();
 const emit = defineEmits<{ select: [node: GraphNode] }>();
 
 interface CompiledSql {
@@ -230,8 +231,8 @@ function copy() {
 </script>
 
 <template>
-    <p v-if="!fetchEndpoint" class="dbt-sql__message">This Kestra version cannot load compiled SQL yet.</p>
-    <div v-else class="dbt-sql">
+    <p v-if="!fetchEndpoint" :class="['dbt-sql__message', { 'dbt-sql__message--embedded': embedded }]">This Kestra version cannot load compiled SQL yet.</p>
+    <div v-else :class="['dbt-sql', { 'dbt-sql--embedded': embedded }]">
         <div class="dbt-sql__bar">
             <div ref="switcher" class="dbt-sql__switcher">
                 <button type="button" class="dbt-sql__current" aria-haspopup="listbox" :aria-expanded="open" @click="toggleOpen">
@@ -320,6 +321,37 @@ function copy() {
     display: flex;
     flex-direction: column;
     gap: 14px;
+}
+
+/* Artifacts tab: core's panel is the frame, so toolbar rows are padded strips and the code fills the rest. */
+.dbt-sql--embedded {
+    height: 100%;
+    gap: 0;
+}
+
+.dbt-sql--embedded .dbt-sql__bar,
+.dbt-sql--embedded .dbt-sql__head {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--ks-border-default);
+}
+
+.dbt-sql--embedded .dbt-sql__main {
+    flex: 1;
+    min-height: 0;
+    gap: 0;
+}
+
+.dbt-sql--embedded .dbt-sql__code,
+.dbt-sql--embedded .dbt-sql__empty {
+    flex: 1;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+}
+
+.dbt-sql--embedded .dbt-sql__message,
+.dbt-sql__message.dbt-sql__message--embedded {
+    margin: 12px 16px;
 }
 
 .dbt-sql__bar {
