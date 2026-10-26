@@ -316,6 +316,39 @@ import lombok.extern.jackson.Jacksonized;
                 """
         ),
         @Example(
+            title = "Run `dbt build` and show the model graph and each model's compiled SQL in the execution's Artifacts tab. `outputCompiledSql` is off by default because compiled SQL can contain literal `--vars` values.",
+            full = true,
+            code = """
+                id: dbt_model_graph
+                namespace: company.team
+
+                tasks:
+                  - id: dbt
+                    type: io.kestra.plugin.core.flow.WorkingDirectory
+                    tasks:
+                      - id: clone_repository
+                        type: io.kestra.plugin.git.Clone
+                        url: https://github.com/dbt-labs/jaffle_shop_duckdb
+                        branch: duckdb
+
+                      - id: dbt_build
+                        type: io.kestra.plugin.dbt.cli.DbtCLI
+                        containerImage: ghcr.io/kestra-io/dbt-duckdb:latest
+                        outputCompiledSql: true
+                        taskRunner:
+                          type: io.kestra.plugin.scripts.runner.docker.Docker
+                        commands:
+                          - dbt build --no-version-check
+                        profiles: |
+                          jaffle_shop:
+                            outputs:
+                              dev:
+                                type: duckdb
+                                path: ":memory:"
+                            target: dev
+                """
+        ),
+        @Example(
             title = "Run `dbt build` and get a near-real-time Slack notification for every distinct WARN/ERROR log line, instead of waiting for the task to finish.",
             full = true,
             code = """
