@@ -1,18 +1,16 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import type { KnownSlotProps } from "@kestra-io/artifact-sdk";
-import DbtCompiledSql, { type FetchEndpoint } from "./DbtCompiledSql.vue";
+import DbtCompiledSql from "./DbtCompiledSql.vue";
 import DbtModelGraph from "./DbtModelGraph.vue";
 import { type GraphNode, REV_KEY, useModelGraph } from "../composables/useModelGraph";
 
-// `fetchEndpoint` is a newer host prop than the published artifact-sdk types.
-const props = defineProps<KnownSlotProps["topology-task-drawer"] & { fetchEndpoint?: FetchEndpoint }>();
+const props = defineProps<KnownSlotProps["topology-task-drawer"]>();
 
 const { graph, message } = useModelGraph(
     () => props.task?.id,
     () => props.execution,
-    () => props.tenant,
-    () => props.fetchOutputs,
+    () => props.fetchEndpoint,
 );
 
 // One tab per artifact. Tabs are drawn here rather than with KsTabs, whose styles do not reach the host.

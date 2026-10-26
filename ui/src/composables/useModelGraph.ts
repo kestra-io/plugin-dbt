@@ -1,6 +1,6 @@
 import { computed, ref, shallowRef, watch } from "vue";
+import type { KnownSlotProps } from "@kestra-io/artifact-sdk";
 import type { Execution, TaskRun } from "@kestra-io/kestra-sdk";
-import { downloadFileFromExecution } from "@kestra-io/kestra-sdk/executions";
 // The plugin icon Kestra shows on the dbt task node, so the drawer uses the same logo as the topology.
 import dbtLogo from "../../../src/main/resources/icons/plugin-icon.svg?raw";
 
@@ -27,7 +27,8 @@ export interface ModelGraph {
     edges: GraphEdge[];
 }
 
-type FetchOutputs = (query?: { taskRunId?: string }) => Promise<Record<string, unknown>>;
+/** The host-bound call to one of this plugin's endpoints, see ModelGraphEndpoint.java and CompiledSqlEndpoint.java. */
+export type FetchEndpoint = NonNullable<KnownSlotProps["topology-details"]["fetchEndpoint"]>;
 
 // The host may render these slots under its own Vue runtime, so plugin-side refs do not always repaint
 // them. Reading this key off the shared `execution` prop in the template, then bumping it after the
@@ -37,11 +38,14 @@ export const REV_KEY = "__dbtGraphRev";
 const TERMINAL_STATES = ["SUCCESS", "WARNING", "FAILED", "KILLED", "CANCELLED", "SKIPPED"];
 
 export function useModelGraph(
-    taskId: () => string | undefined,
-    execution: () => Execution | undefined,
-    tenant: () => string | undefined,
-    fetchOutputs: () => FetchOutputs | undefined,
+    // artifact-sdk types `task` as a plain record, so its id is `unknown`.
+    taskId: () => unknown,
+    slotExecution: () => KnownSlotProps["topology-details"]["execution"],
+    fetchEndpoint: () => FetchEndpoint | undefined,
 ) {
+    // The host passes a real Execution, but artifact-sdk types it as a plain record.
+    const execution = () => slotExecution() as Execution | undefined;
+
     // Per-model child task runs carry the dbt unique_id as taskId, so this only matches the dbt task itself.
     const taskRun = computed<TaskRun | undefined>(() => {
         const runs = execution()?.taskRunList?.filter((tr) => tr.taskId === taskId()) ?? [];
@@ -50,7 +54,7 @@ export function useModelGraph(
 
     // Thousands of nodes are read-only data, deep reactivity would only add proxy overhead.
     const graph = shallowRef<ModelGraph | null>(null);
-    const status = ref<"idle" | "loading" | "loaded" | "missing" | "error">("idle");
+    const status = ref<"idle" | "loading" | "loaded" | "missing" | "too_large" | "unsupported" | "error">("idle");
     let requestId = 0;
 
     function repaint() {
@@ -63,20 +67,23 @@ export function useModelGraph(
         }
     }
 
-    async function load(executionId: string) {
+    async function load() {
+        const call = fetchEndpoint();
+        if (!call) {
+            status.value = "unsupported";
+            repaint();
+            return;
+        }
         // Drop responses from an earlier request that resolves after a newer one.
         const current = ++requestId;
         status.value = "loading";
         try {
-            const outputs = await fetchOutputs()?.({ taskRunId: taskRun.value?.id });
-            const uri = outputs?.graph;
-            if (typeof uri !== "string") {
-                if (current === requestId) status.value = "missing";
+            const parsed = (await call("model-graph", {}, { taskRunId: taskRun.value?.id })) as Partial<ModelGraph> & { error?: string };
+            if (current !== requestId) return;
+            if (parsed.error === "no_graph" || parsed.error === "too_large") {
+                status.value = parsed.error === "no_graph" ? "missing" : "too_large";
                 return;
             }
-            const file = await downloadFileFromExecution({ executionId, path: uri, tenant: tenant() });
-            const parsed = JSON.parse(await file.text()) as Partial<ModelGraph>;
-            if (current !== requestId) return;
             if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
                 throw new Error("graph.json has no nodes or edges");
             }
@@ -101,7 +108,7 @@ export function useModelGraph(
         () => [execution()?.id, taskRun.value?.state?.current] as const,
         ([id]) => {
             // No task run yet means the task has not started, so there is nothing to fetch.
-            if (id && taskRun.value && !isRunning.value) load(id);
+            if (id && taskRun.value && !isRunning.value) load();
         },
         { immediate: true },
     );
@@ -112,6 +119,8 @@ export function useModelGraph(
         if (isRunning.value) return "dbt is still running. The graph appears when the task finishes.";
         if (status.value === "idle") return "This task has not run in this execution.";
         if (status.value === "missing") return "This run produced no model graph (no readable manifest.json).";
+        if (status.value === "too_large") return "This model graph is too large to show here.";
+        if (status.value === "unsupported") return "This Kestra version cannot load the model graph yet.";
         if (status.value === "error") return "Could not load the dbt model graph.";
         if (status.value !== "loaded" || !graph.value) return "Loading the dbt model graph...";
         return null;

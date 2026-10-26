@@ -16,14 +16,12 @@ import type { KnownSlotProps } from "@kestra-io/artifact-sdk";
 import DbtModelGraph from "./DbtModelGraph.vue";
 import { type GraphNode, REV_KEY, useModelGraph } from "../composables/useModelGraph";
 
-// The execution-artifact slot gets the topology-details props, which the published SDK types already cover.
-const props = defineProps<KnownSlotProps["topology-details"]>();
+const props = defineProps<KnownSlotProps["execution-artifact"]>();
 
 const { graph, message } = useModelGraph(
     () => props.task?.id,
     () => props.execution,
-    () => props.tenant,
-    () => props.fetchOutputs,
+    () => props.fetchEndpoint,
 );
 const selected = ref<GraphNode | null>(null);
 </script>

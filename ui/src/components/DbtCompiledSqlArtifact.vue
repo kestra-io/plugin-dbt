@@ -11,18 +11,16 @@ export async function getSubtitle({ fetchOutputs }: ArtifactContext): Promise<st
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import type { KnownSlotProps } from "@kestra-io/artifact-sdk";
-import DbtCompiledSql, { type FetchEndpoint } from "./DbtCompiledSql.vue";
+import DbtCompiledSql from "./DbtCompiledSql.vue";
 import { type GraphNode, REV_KEY, useModelGraph } from "../composables/useModelGraph";
 
-// `fetchEndpoint` is a newer host prop than the published artifact-sdk types.
-const props = defineProps<KnownSlotProps["topology-details"] & { fetchEndpoint?: FetchEndpoint }>();
+const props = defineProps<KnownSlotProps["execution-artifact"]>();
 
 // The graph lists the models to pick from and their run status.
 const { graph, message } = useModelGraph(
     () => props.task?.id,
     () => props.execution,
-    () => props.tenant,
-    () => props.fetchOutputs,
+    () => props.fetchEndpoint,
 );
 
 // Opens on the first failed model, else the first model, like the graph does.

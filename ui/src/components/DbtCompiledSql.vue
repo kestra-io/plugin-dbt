@@ -5,10 +5,7 @@ import ChevronDown from "vue-material-design-icons/ChevronDown.vue";
 import CodeBraces from "vue-material-design-icons/CodeBraces.vue";
 import Magnify from "vue-material-design-icons/Magnify.vue";
 import { KsExecutionStatus } from "@kestra-io/design-system";
-import { DBT_ICON, type GraphNode, kestraState, statusTitle } from "../composables/useModelGraph";
-
-/** The host-bound call to one of this plugin's endpoints (core `fetchEndpoint`), absent on older Kestra. */
-export type FetchEndpoint = (name: string, params?: Record<string, string>) => Promise<unknown>;
+import { DBT_ICON, type FetchEndpoint, type GraphNode, kestraState, statusTitle } from "../composables/useModelGraph";
 
 // `embedded` fills a host panel that already has a frame (the Artifacts tab): no own borders, padded toolbar rows.
 const props = defineProps<{ node: GraphNode | null; nodes: GraphNode[]; fetchEndpoint?: FetchEndpoint; embedded?: boolean }>();
