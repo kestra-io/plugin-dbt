@@ -20,6 +20,7 @@ import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.retrys.Constant;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.utils.RetryUtils;
+import io.kestra.plugin.dbt.ModelGraph;
 import io.kestra.plugin.dbt.cloud.models.JobStatus;
 import io.kestra.plugin.dbt.cloud.models.Run;
 import io.kestra.plugin.dbt.cloud.models.RunListResponse;
@@ -204,6 +205,14 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     )
     @PluginProperty(group = "advanced")
     protected Property<Boolean> parseRunResults = Property.ofValue(Boolean.TRUE);
+
+    @Schema(
+        title = "Serve compiled SQL",
+        description = "When true, the Show details drawer can show a model's compiled SQL, read on demand from the stored `manifest.json`. Off by default because compiled SQL can embed literal `--vars` values."
+    )
+    @Builder.Default
+    @PluginProperty(group = "advanced")
+    protected Property<Boolean> outputCompiledSql = Property.ofValue(false);
 
     @Override
     public TriggerRun.Output run(RunContext runContext) throws Exception {
@@ -462,6 +471,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
             .pollFrequency(getPollFrequency())
             .maxDuration(getMaxDuration())
             .parseRunResults(getParseRunResults())
+            .outputCompiledSql(getOutputCompiledSql())
             .build();
 
         CheckStatus.Output runOutput = checkStatusJob.run(runContext);
@@ -470,6 +480,9 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
             .runId(runId)
             .runResults(runOutput.getRunResults())
             .manifest(runOutput.getManifest())
+            .graph(runOutput.getGraph())
+            .graphSummary(runOutput.getGraphSummary())
+            .compiledSqlEnabled(runOutput.getCompiledSqlEnabled())
             .build();
     }
 
@@ -493,5 +506,17 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
             description = "Internal storage URI for `manifest.json`, when available."
         )
         private URI manifest;
+
+        @Schema(
+            title = "Model dependency graph",
+            description = "Internal storage URI of `graph.json`: models, seeds, snapshots and sources with their run status and execution time, and the edges between them. Absent when the manifest could not be read."
+        )
+        private URI graph;
+
+        @Schema(title = "Counts of the model dependency graph")
+        private ModelGraph.Summary graphSummary;
+
+        @Schema(title = "Whether the compiled SQL of this run's models can be shown, from `outputCompiledSql`")
+        private Boolean compiledSqlEnabled;
     }
 }

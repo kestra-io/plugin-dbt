@@ -21,6 +21,7 @@ import io.kestra.core.queues.DispatchQueueInterface;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.runners.WorkerTaskResult;
+import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
 
@@ -159,6 +160,53 @@ class CheckStatusTest {
         assertThat(output.getRunResults(), is(notNullValue()));
         // manifest was 404 — URI must be absent
         assertThat(output.getManifest(), is(nullValue()));
+        assertThat(output.getGraph(), is(nullValue()));
+    }
+
+    @Test
+    void shouldStoreTheModelGraphOfTheRun() throws Exception {
+        stubFor(
+            get(urlMatching("/api/v2/accounts/123/runs/6666/\\?.*"))
+                .willReturn(okJson("""
+                        { "data": { "id": 6666, "status": 10, "status_humanized": "Success", "duration_humanized": "1s", "run_steps": [] } }
+                    """))
+        );
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/6666/artifacts/manifest.json"))
+                .willReturn(okJson("""
+                        {
+                          "metadata": {"project_name": "analytics"},
+                          "nodes": {"model.analytics.stg_orders": {"resource_type": "model", "name": "stg_orders", "unique_id": "model.analytics.stg_orders"}},
+                          "parent_map": {"model.analytics.stg_orders": []}
+                        }
+                    """))
+        );
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/6666/artifacts/run_results.json"))
+                .willReturn(okJson("""
+                        {"metadata": {}, "results": [{"status": "success", "unique_id": "model.analytics.stg_orders", "timing": []}]}
+                    """))
+        );
+
+        var runContext = runContextFactory.of(Map.of());
+        var output = CheckStatus.builder()
+            .id(IdUtils.create())
+            .type(CheckStatus.class.getName())
+            .baseUrl(Property.ofValue("http://localhost:8089"))
+            .runId(Property.ofValue("6666"))
+            .accountId(Property.ofValue("123"))
+            .token(Property.ofValue("fake-token"))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(5)))
+            .parseRunResults(Property.ofValue(false))
+            .outputCompiledSql(Property.ofValue(true))
+            .build()
+            .run(runContext);
+
+        assertThat(output.getGraphSummary().getNodes(), is(1));
+        assertThat(output.getCompiledSqlEnabled(), is(true));
+        // run statuses are joined even with parseRunResults off
+        var graph = JacksonMapper.ofJson().readTree(runContext.storage().getFile(output.getGraph()));
+        assertThat(graph.path("nodes").path(0).path("status").asText(), is("success"));
     }
 
     /**
@@ -625,8 +673,10 @@ class CheckStatusTest {
         TestsUtils.awaitLog(logs, l -> l.getMessage() != null && l.getMessage().contains("polled step output"));
 
         assertThat(output, is(notNullValue()));
-        verify(2, getRequestedFor(urlPathEqualTo("/api/v2/accounts/123/runs/2223/"))
-            .withQueryParam("include_related", containing("debug_logs")));
+        verify(
+            2, getRequestedFor(urlPathEqualTo("/api/v2/accounts/123/runs/2223/"))
+                .withQueryParam("include_related", containing("debug_logs"))
+        );
     }
 
     // A kill during the final debug_logs fetch must propagate, not be swallowed as a fallback.
@@ -661,7 +711,8 @@ class CheckStatusTest {
         RunContext runContext = mockRunContext(checkStatus);
 
         Thread runner = Thread.currentThread();
-        var interrupter = new Thread(() -> {
+        var interrupter = new Thread(() ->
+        {
             try {
                 Thread.sleep(1000);
             } catch (InterruptedException ignored) {

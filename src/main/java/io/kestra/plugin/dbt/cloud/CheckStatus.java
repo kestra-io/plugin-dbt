@@ -15,6 +15,7 @@ import java.util.HexFormat;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.slf4j.Logger;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -22,7 +23,6 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.client.HttpClientException;
-import org.apache.commons.lang3.exception.ExceptionUtils;
 import io.kestra.core.http.client.HttpClientResponseException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
@@ -36,6 +36,7 @@ import io.kestra.core.storages.kv.KVStore;
 import io.kestra.core.storages.kv.KVValue;
 import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.core.utils.Await;
+import io.kestra.plugin.dbt.ModelGraph;
 import io.kestra.plugin.dbt.ResultParser;
 import io.kestra.plugin.dbt.cloud.models.Job;
 import io.kestra.plugin.dbt.cloud.models.JobStatus;
@@ -210,6 +211,14 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     @PluginProperty(group = "advanced")
     protected Property<Boolean> parseRunResults = Property.ofValue(Boolean.TRUE);
 
+    @Schema(
+        title = "Serve compiled SQL",
+        description = "When true, the Show details drawer can show a model's compiled SQL, read on demand from the stored `manifest.json`. Off by default because compiled SQL can embed literal `--vars` values."
+    )
+    @Builder.Default
+    @PluginProperty(group = "advanced")
+    protected Property<Boolean> outputCompiledSql = Property.ofValue(false);
+
     @Builder.Default
     @Schema(
         title = "Fail if the run ends in a non-successful state",
@@ -317,6 +326,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         // dynamic taskruns/logs (issue #315) — those must land even though the task ends up throwing.
         URI runResultsUri = null;
         URI manifestUri = null;
+        ModelGraph.Stored graph = null;
         List<String> assets = List.of();
         boolean artifactsProcessed = false;
         boolean lineageLanded = false;
@@ -352,6 +362,9 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                     runResultsUri = runContext.storage().putFile(runResultsArtifact.path().toFile());
                 }
             }
+
+            // The graph needs run statuses even when `parseRunResults` is off, otherwise every node would read `not-run`.
+            graph = ModelGraph.store(runContext, manifest, runResultsArtifact == null ? null : runResultsArtifact.body());
 
             artifactsProcessed = true;
         } catch (Exception e) {
@@ -391,6 +404,9 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             .assets(assets)
             .runResults(runResultsUri)
             .manifest(manifestUri)
+            .graph(graph == null ? null : graph.uri())
+            .graphSummary(graph == null ? null : graph.summary())
+            .compiledSqlEnabled(runContext.render(this.outputCompiledSql).as(Boolean.class).orElse(false))
             .build();
     }
 
@@ -777,5 +793,17 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             description = "Internal storage URI for the downloaded `manifest.json`, when present."
         )
         private URI manifest;
+
+        @Schema(
+            title = "Model dependency graph",
+            description = "Internal storage URI of `graph.json`: models, seeds, snapshots and sources with their run status and execution time, and the edges between them. Absent when the manifest could not be read."
+        )
+        private URI graph;
+
+        @Schema(title = "Counts of the model dependency graph")
+        private ModelGraph.Summary graphSummary;
+
+        @Schema(title = "Whether the compiled SQL of this run's models can be shown, from `outputCompiledSql`")
+        private Boolean compiledSqlEnabled;
     }
 }
