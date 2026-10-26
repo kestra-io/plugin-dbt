@@ -144,6 +144,18 @@ class ModelGraphTest {
     }
 
     @Test
+    void mapsFailureAndPassAliasesToErrorAndSuccess() {
+        var manifest = manifest(null, node("model.shop.a", "model"), node("model.shop.b", "model"), node("model.shop.c", "model"));
+        var runResult = runResult(result("model.shop.a", "fail"), result("model.shop.b", "runtime_error"), result("model.shop.c", "pass"));
+
+        var nodes = byId(ModelGraph.from(manifest, runResult));
+
+        assertThat(nodes.get("model.shop.a").getStatus(), is("error"));
+        assertThat(nodes.get("model.shop.b").getStatus(), is("error"));
+        assertThat(nodes.get("model.shop.c").getStatus(), is("success"));
+    }
+
+    @Test
     void parentMapWinsOverDependsOn() {
         var manifest = manifest(
             Map.of("model.shop.orders", List.of("model.shop.customers")),
