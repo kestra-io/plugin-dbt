@@ -30,18 +30,18 @@ public class CompiledSqlEndpoint implements PluginEndpoint {
 
     @Override
     public PluginEndpointResponse handle(PluginEndpointContext context) {
-        String uniqueId = context.param("uniqueId");
+        var uniqueId = context.param("uniqueId");
         if (uniqueId == null || uniqueId.isBlank()) {
             return error("missing_unique_id", "Pass the dbt node to read as `uniqueId`, e.g. `model.shop.orders`.");
         }
 
-        Map<String, Object> outputs = context.outputs().get();
+        var outputs = context.outputs().get();
         // Compiled SQL can embed literal `--vars` values, so it is only served when the task opted in.
         if (!Boolean.TRUE.equals(outputs.get("compiledSqlEnabled"))) {
             return error("disabled", "Compiled SQL is off for this task. Set `outputCompiledSql: true` to show it.");
         }
 
-        URI manifest = manifestUri(outputs);
+        var manifest = manifestUri(outputs);
         if (manifest == null) {
             return error("no_manifest", "This task run stored no manifest.json.");
         }
@@ -68,7 +68,7 @@ public class CompiledSqlEndpoint implements PluginEndpoint {
 
     // DbtCLI keeps the manifest under outputFiles, the dbt Cloud tasks under `manifest`.
     private static URI manifestUri(Map<String, Object> outputs) {
-        Object uri = outputs.get("manifest");
+        var uri = outputs.get("manifest");
         if (uri == null && outputs.get("outputFiles") instanceof Map<?, ?> files) {
             uri = files.get("manifest.json");
         }
@@ -82,14 +82,14 @@ public class CompiledSqlEndpoint implements PluginEndpoint {
                 return null;
             }
             while (parser.nextToken() == JsonToken.FIELD_NAME) {
-                String field = parser.currentName();
+                var field = parser.currentName();
                 parser.nextToken();
                 if (!"nodes".equals(field) || parser.currentToken() != JsonToken.START_OBJECT) {
                     parser.skipChildren();
                     continue;
                 }
                 while (parser.nextToken() == JsonToken.FIELD_NAME) {
-                    String id = parser.currentName();
+                    var id = parser.currentName();
                     parser.nextToken();
                     if (!uniqueId.equals(id)) {
                         parser.skipChildren();
@@ -109,7 +109,7 @@ public class CompiledSqlEndpoint implements PluginEndpoint {
         }
         String legacy = null;
         while (parser.nextToken() == JsonToken.FIELD_NAME) {
-            String field = parser.currentName();
+            var field = parser.currentName();
             parser.nextToken();
             // dbt 1.3 renamed compiled_sql to compiled_code
             if ("compiled_code".equals(field) && parser.currentToken() == JsonToken.VALUE_STRING) {
