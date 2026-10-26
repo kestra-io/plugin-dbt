@@ -79,8 +79,8 @@ public class ModelGraph {
         }
 
         try {
-            ModelGraph graph = from(manifest, runResult);
-            URI uri = runContext.storage().putFile(new ByteArrayInputStream(ResultParser.MAPPER.writeValueAsBytes(graph)), "graph.json");
+            var graph = from(manifest, runResult);
+            var uri = runContext.storage().putFile(new ByteArrayInputStream(ResultParser.MAPPER.writeValueAsBytes(graph)), "graph.json");
             return new Stored(uri, graph.getSummary());
         } catch (Exception e) {
             runContext.logger().warn("Unable to build the dbt model graph, the `graph` output is skipped", e);
@@ -90,7 +90,7 @@ public class ModelGraph {
 
     /** @param runResult null when run_results was not produced or not parsed: every node is then `not-run`. */
     static ModelGraph from(Manifest manifest, RunResult runResult) {
-        Map<String, Manifest.Node> graphNodes = new TreeMap<>();
+        var graphNodes = new TreeMap<String, Manifest.Node>();
         if (manifest.getNodes() != null) {
             manifest.getNodes().forEach((key, node) ->
             {
@@ -99,7 +99,7 @@ public class ModelGraph {
                 }
             });
         }
-        Map<String, Manifest.Source> sources = new TreeMap<>();
+        var sources = new TreeMap<String, Manifest.Source>();
         if (manifest.getSources() != null) {
             manifest.getSources().forEach((key, source) ->
             {
@@ -109,10 +109,10 @@ public class ModelGraph {
             });
         }
 
-        Set<String> ids = new HashSet<>(graphNodes.keySet());
+        var ids = new HashSet<String>(graphNodes.keySet());
         ids.addAll(sources.keySet());
 
-        List<Edge> edges = new ArrayList<>();
+        var edges = new ArrayList<Edge>();
         graphNodes.forEach(
             (id, node) -> parents(manifest, node, id).stream()
                 .filter(ids::contains)
@@ -121,11 +121,11 @@ public class ModelGraph {
                 .forEach(parent -> edges.add(new Edge(parent, id)))
         );
 
-        Map<String, Integer> levels = levels(ids, edges);
-        Map<String, String> statuses = statuses(runResult);
-        Map<String, Double> times = executionTimes(runResult);
+        var levels = levels(ids, edges);
+        var statuses = statuses(runResult);
+        var times = executionTimes(runResult);
 
-        List<Node> nodes = new ArrayList<>();
+        var nodes = new ArrayList<Node>();
         graphNodes.forEach((id, node) ->
         {
             nodes.add(
@@ -182,8 +182,8 @@ public class ModelGraph {
 
     // Longest path from a root (Kahn order). A node on a cycle, which dbt rejects anyway, stays at 0.
     private static Map<String, Integer> levels(Set<String> ids, List<Edge> edges) {
-        Map<String, List<String>> children = new HashMap<>();
-        Map<String, Integer> inDegree = new HashMap<>();
+        var children = new HashMap<String, List<String>>();
+        var inDegree = new HashMap<String, Integer>();
         ids.forEach(id -> inDegree.put(id, 0));
         edges.forEach(edge ->
         {
@@ -191,8 +191,8 @@ public class ModelGraph {
             inDegree.merge(edge.to(), 1, Integer::sum);
         });
 
-        Map<String, Integer> levels = new HashMap<>();
-        Deque<String> ready = new ArrayDeque<>();
+        var levels = new HashMap<String, Integer>();
+        var ready = new ArrayDeque<String>();
         inDegree.forEach((id, degree) ->
         {
             if (degree == 0) {
@@ -200,7 +200,7 @@ public class ModelGraph {
             }
         });
         while (!ready.isEmpty()) {
-            String id = ready.poll();
+            var id = ready.poll();
             int level = levels.getOrDefault(id, 0);
             for (String child : children.getOrDefault(id, List.of())) {
                 levels.merge(child, level + 1, Math::max);
@@ -217,7 +217,7 @@ public class ModelGraph {
             return Map.of();
         }
 
-        Map<String, String> statuses = new HashMap<>();
+        var statuses = new HashMap<String, String>();
         for (RunResult.Result result : runResult.getResults()) {
             if (result.getUniqueId() != null && result.getStatus() != null) {
                 statuses.put(result.getUniqueId(), status(result));
@@ -231,7 +231,7 @@ public class ModelGraph {
             return Map.of();
         }
 
-        Map<String, Double> times = new HashMap<>();
+        var times = new HashMap<String, Double>();
         for (RunResult.Result result : runResult.getResults()) {
             if (result.getUniqueId() != null && result.getExecutionTime() != null) {
                 times.put(result.getUniqueId(), result.getExecutionTime());
@@ -256,7 +256,7 @@ public class ModelGraph {
     }
 
     private static String relation(String... parts) {
-        String relation = Arrays.stream(parts)
+        var relation = Arrays.stream(parts)
             .filter(part -> part != null && !part.isBlank())
             .collect(Collectors.joining("."));
         return relation.isEmpty() ? null : relation;
