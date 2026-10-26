@@ -1,10 +1,6 @@
 package io.kestra.plugin.dbt;
 
-import java.io.ByteArrayInputStream;
-import java.io.FileNotFoundException;
-import java.io.InputStream;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -12,10 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import io.kestra.core.models.executions.LogEntry;
 import io.kestra.core.plugins.endpoint.DefaultPluginEndpointContext;
-import io.kestra.core.plugins.endpoint.PluginEndpointResponse;
-import io.kestra.core.plugins.endpoint.ScopedStorage;
 import io.kestra.core.serializers.JacksonMapper;
-import io.kestra.core.storages.FileAttributes;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
@@ -37,35 +30,7 @@ class CompiledSqlEndpointTest {
         """;
 
     private static Map<?, ?> call(Map<String, Object> outputs, String uniqueId, String manifestJson) throws Exception {
-        ScopedStorage storage = new ScopedStorage() {
-            @Override
-            public InputStream getFile(URI uri) throws FileNotFoundException {
-                if (!uri.equals(MANIFEST)) {
-                    throw new FileNotFoundException(uri.toString());
-                }
-                return new ByteArrayInputStream(manifestJson.getBytes(StandardCharsets.UTF_8));
-            }
-
-            @Override
-            public List<FileAttributes> list(URI uri) {
-                return List.of();
-            }
-
-            @Override
-            public boolean exists(URI uri) {
-                return uri.equals(MANIFEST);
-            }
-
-            @Override
-            public URI putFile(URI uri, InputStream data) {
-                throw new UnsupportedOperationException();
-            }
-
-            @Override
-            public boolean deleteFile(URI uri) {
-                throw new UnsupportedOperationException();
-            }
-        };
+        var storage = EndpointTestStorage.singleFile(MANIFEST, manifestJson);
         var context = new DefaultPluginEndpointContext(
             uniqueId == null ? Map.of() : Map.of("uniqueId", List.of(uniqueId)),
             Map.of(),
@@ -76,7 +41,7 @@ class CompiledSqlEndpointTest {
             storage
         );
 
-        PluginEndpointResponse response = new CompiledSqlEndpoint().handle(context);
+        var response = new CompiledSqlEndpoint().handle(context);
         assertThat(response.contentType(), is("application/json"));
         return JacksonMapper.ofJson().readValue(response.body(), Map.class);
     }
@@ -117,8 +82,8 @@ class CompiledSqlEndpointTest {
 
     @Test
     void capsVeryLargeSql() throws Exception {
-        String sql = "x".repeat(CompiledSqlEndpoint.MAX_SQL_CHARS + 10);
-        String manifest = "{\"nodes\": {\"model.shop.big\": {\"compiled_code\": \"" + sql + "\"}}}";
+        var sql = "x".repeat(CompiledSqlEndpoint.MAX_SQL_CHARS + 10);
+        var manifest = "{\"nodes\": {\"model.shop.big\": {\"compiled_code\": \"%s\"}}}".formatted(sql);
 
         var body = call(cliOutputs(true), "model.shop.big", manifest);
 
