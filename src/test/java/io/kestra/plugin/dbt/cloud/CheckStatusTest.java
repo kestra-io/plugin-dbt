@@ -16,6 +16,7 @@ import io.kestra.core.models.assets.Custom;
 import io.kestra.core.models.executions.LogEntry;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.models.tasks.RunnableTaskException;
 import io.kestra.core.models.validations.ModelValidator;
 import io.kestra.core.queues.DispatchQueueInterface;
 import io.kestra.core.runners.RunContext;
@@ -295,6 +296,45 @@ class CheckStatusTest {
 
         var ex = assertThrows(Exception.class, () -> checkStatus.run(runContext));
         assertThat(ex.getMessage(), containsString("Compilation failed in step 1"));
+    }
+
+    @Test
+    void shouldKeepTheModelGraphOnAFailedRun() throws Exception {
+        stubFor(
+            get(urlMatching("/api/v2/accounts/123/runs/6667/\\?.*"))
+                .willReturn(okJson("""
+                        { "data": { "id": 6667, "status": 20, "status_humanized": "Error", "duration_humanized": "1s", "run_steps": [] } }
+                    """))
+        );
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/6667/artifacts/manifest.json"))
+                .willReturn(okJson("""
+                        {"nodes": {"model.analytics.stg_orders": {"resource_type": "model", "name": "stg_orders", "unique_id": "model.analytics.stg_orders"}}}
+                    """))
+        );
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/6667/artifacts/run_results.json"))
+                .willReturn(okJson("""
+                        {"metadata": {}, "results": [{"status": "error", "unique_id": "model.analytics.stg_orders", "adapter_response": {}, "timing": []}]}
+                    """))
+        );
+
+        var checkStatus = CheckStatus.builder()
+            .id(IdUtils.create())
+            .type(CheckStatus.class.getName())
+            .baseUrl(Property.ofValue("http://localhost:8089"))
+            .runId(Property.ofValue("6667"))
+            .accountId(Property.ofValue("123"))
+            .token(Property.ofValue("fake-token"))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(5)))
+            .parseRunResults(Property.ofValue(false))
+            .build();
+
+        var ex = assertThrows(RunnableTaskException.class, () -> checkStatus.run(runContextFactory.of(Map.of())));
+
+        var output = (CheckStatus.Output) ex.getOutput();
+        assertThat(output.getGraph(), is(notNullValue()));
+        assertThat(output.getGraphSummary().getByStatus().get("error"), is(1));
     }
 
     /**

@@ -17,6 +17,7 @@ import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
+import io.kestra.core.models.tasks.RunnableTaskException;
 import io.kestra.core.models.tasks.retrys.Constant;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.utils.RetryUtils;
@@ -474,15 +475,25 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
             .outputCompiledSql(getOutputCompiledSql())
             .build();
 
-        CheckStatus.Output runOutput = checkStatusJob.run(runContext);
+        try {
+            return output(runId, checkStatusJob.run(runContext));
+        } catch (RunnableTaskException e) {
+            if (!(e.getOutput() instanceof CheckStatus.Output checkStatus)) {
+                throw e;
+            }
+            // Rethrown with this task's own outputs, so a failed run keeps its graph on the TriggerRun task run.
+            throw new RunnableTaskException(e.getMessage(), e.getCause(), output(runId, checkStatus));
+        }
+    }
 
+    private static Output output(Long runId, CheckStatus.Output checkStatus) {
         return Output.builder()
             .runId(runId)
-            .runResults(runOutput.getRunResults())
-            .manifest(runOutput.getManifest())
-            .graph(runOutput.getGraph())
-            .graphSummary(runOutput.getGraphSummary())
-            .compiledSqlEnabled(runOutput.getCompiledSqlEnabled())
+            .runResults(checkStatus.getRunResults())
+            .manifest(checkStatus.getManifest())
+            .graph(checkStatus.getGraph())
+            .graphSummary(checkStatus.getGraphSummary())
+            .compiledSqlEnabled(checkStatus.getCompiledSqlEnabled())
             .build();
     }
 

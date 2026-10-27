@@ -29,6 +29,7 @@ import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
+import io.kestra.core.models.tasks.RunnableTaskException;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.storages.kv.KVMetadata;
@@ -355,6 +356,9 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                 lineageLanded = manifestResult.fullyEmitted();
             }
 
+            // Built before run_results is parsed so a parse failure cannot drop it, and from raw statuses even with `parseRunResults` off.
+            graph = ModelGraph.store(runContext, manifest, runResultsArtifact == null ? null : runResultsArtifact.body());
+
             if (runResultsArtifact != null) {
                 if (rParseRunResults) {
                     runResultsUri = ResultParser.parseRunResult(runContext, runResultsArtifact.path().toFile(), manifest, !alreadyEmitted, preParsedRunResults);
@@ -362,9 +366,6 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                     runResultsUri = runContext.storage().putFile(runResultsArtifact.path().toFile());
                 }
             }
-
-            // The graph needs run statuses even when `parseRunResults` is off, otherwise every node would read `not-run`.
-            graph = ModelGraph.store(runContext, manifest, runResultsArtifact == null ? null : runResultsArtifact.body());
 
             artifactsProcessed = true;
         } catch (Exception e) {
@@ -381,6 +382,17 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             rememberProcessed(runContext, processedKey, runIdRendered);
         }
 
+        var output = Output.builder()
+            .runId(runIdRendered)
+            .lineageEmitted(!alreadyEmitted && lineageLanded)
+            .assets(assets)
+            .runResults(runResultsUri)
+            .manifest(manifestUri)
+            .graph(graph == null ? null : graph.uri())
+            .graphSummary(graph == null ? null : graph.summary())
+            .compiledSqlEnabled(runContext.render(this.outputCompiledSql).as(Boolean.class).orElse(false))
+            .build();
+
         if (!successful) {
             String failure = "Failed run with status '" + finalRunResponse.getData().getStatusHumanized() +
                 "' after " + finalRunResponse.getData().getDurationHumanized() +
@@ -391,23 +403,15 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                 ": " + finalRunResponse;
 
             if (runContext.render(this.failOnUnsuccessful).as(Boolean.class).orElse(Boolean.TRUE)) {
-                throw new Exception(failure);
+                // Carries the outputs onto the failed task run: the graph matters most when the run failed.
+                throw new RunnableTaskException(failure, output);
             }
 
             // Artifacts and lineage already landed above, so the caller keeps the run's data.
             logger.warn("{}", failure);
         }
 
-        return Output.builder()
-            .runId(runIdRendered)
-            .lineageEmitted(!alreadyEmitted && lineageLanded)
-            .assets(assets)
-            .runResults(runResultsUri)
-            .manifest(manifestUri)
-            .graph(graph == null ? null : graph.uri())
-            .graphSummary(graph == null ? null : graph.summary())
-            .compiledSqlEnabled(runContext.render(this.outputCompiledSql).as(Boolean.class).orElse(false))
-            .build();
+        return output;
     }
 
     /**
