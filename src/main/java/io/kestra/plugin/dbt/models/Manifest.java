@@ -21,6 +21,9 @@ public class Manifest {
     // Sources are raw tables dbt reads but does not build, resolved so model-to-source edges survive.
     Map<String, Source> sources;
 
+    // Downstream uses of the project declared in YAML (dashboards, ML jobs), emitted as their own assets.
+    Map<String, Exposure> exposures;
+
     @JsonProperty("parent_map")
     Map<String, List<String>> parentMap;
 
@@ -52,6 +55,10 @@ public class Manifest {
 
         @JsonProperty("unique_id")
         String uniqueId;
+
+        // Set on a column-level test, such as `not_null` on `amount`.
+        @JsonProperty("column_name")
+        String columnName;
     }
 
     @Value
@@ -75,6 +82,27 @@ public class Manifest {
 
         // The physical table name of the source. Prefer this over `name` (the dbt source name) when present.
         String identifier;
+
+        @JsonProperty("unique_id")
+        String uniqueId;
+    }
+
+    @Value
+    @Jacksonized
+    @SuperBuilder
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class Exposure {
+        String name;
+
+        String label;
+
+        // dashboard, notebook, analysis, ml or application
+        String type;
+
+        String url;
+
+        @JsonProperty("depends_on")
+        DependsOn dependsOn;
 
         @JsonProperty("unique_id")
         String uniqueId;

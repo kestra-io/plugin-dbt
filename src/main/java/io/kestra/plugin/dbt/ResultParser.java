@@ -30,6 +30,11 @@ import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.WorkerTaskResult;
 import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.utils.IdUtils;
+import io.kestra.plugin.dbt.assets.DbtExposure;
+import io.kestra.plugin.dbt.assets.DbtModel;
+import io.kestra.plugin.dbt.assets.DbtSeed;
+import io.kestra.plugin.dbt.assets.DbtSnapshot;
+import io.kestra.plugin.dbt.assets.DbtTest;
 import io.kestra.plugin.dbt.models.Manifest;
 import io.kestra.plugin.dbt.models.RunResult;
 
@@ -46,9 +51,15 @@ public abstract class ResultParser {
     private static final String RESOURCE_TYPE_SNAPSHOT = "snapshot";
     private static final String RESOURCE_TYPE_SOURCE = "source";
     private static final String RESOURCE_TYPE_TEST = "test";
+    private static final String RESOURCE_TYPE_EXPOSURE = "exposure";
 
     // dbt node resource types that map to a physical table dbt builds.
     private static final Set<String> PRODUCED_RESOURCE_TYPES = Set.of(RESOURCE_TYPE_MODEL, RESOURCE_TYPE_SEED, RESOURCE_TYPE_SNAPSHOT);
+
+    // Resource types emitted as assets of their own: everything except sources, which other tools own.
+    private static final Set<String> EMITTED_RESOURCE_TYPES = Set.of(
+        RESOURCE_TYPE_MODEL, RESOURCE_TYPE_SEED, RESOURCE_TYPE_SNAPSHOT, RESOURCE_TYPE_TEST, RESOURCE_TYPE_EXPOSURE
+    );
 
     // Values are strings, not booleans: EventTrigger (kestra-ee) filters asset metadata with only
     // EQUAL_TO/NOT_EQUAL_TO via String.valueOf, so a numeric or boolean status could not be matched.
@@ -59,7 +70,7 @@ public abstract class ResultParser {
     private static final String TEST_STATUS_WARN = "warn";
     private static final String TEST_STATUS_PASS = "pass";
 
-    // Tells a seed from a model, since every node shares the Table asset type.
+    // Kept for metadata filters written before the dbt asset types existed.
     private static final String METADATA_RESOURCE_TYPE = "dbtResourceType";
 
     // Asset metadata merges, and only an explicit null removes a key, so "no tests" must be sent as nulls.
@@ -377,7 +388,11 @@ public abstract class ResultParser {
 
         for (Map.Entry<String, ModelAsset> entry : assetNodes.entrySet()) {
             ModelAsset asset = entry.getValue();
-            if (!asset.produced()) {
+            if (!asset.emitted()) {
+                continue;
+            }
+            // A test is emitted only when it ran: unselected or skipped tests keep their last result, and big projects stay cheap.
+            if (RESOURCE_TYPE_TEST.equals(asset.resourceType()) && !testMetadata.containsKey(entry.getKey())) {
                 continue;
             }
 
@@ -420,7 +435,7 @@ public abstract class ResultParser {
 
         return Custom.builder()
             .id(asset.assetId())
-            .type(TABLE_ASSET_TYPE)
+            .type(assetType(asset.resourceType()))
             .metadata(metadata)
             .build();
     }
@@ -512,8 +527,11 @@ public abstract class ResultParser {
                 continue;
             }
 
-            for (String modelId : testTargets(manifest, testNode, result.getUniqueId())) {
-                int[] tally = tallies.computeIfAbsent(modelId, id -> new int[3]);
+            // The test's own id is tallied too, so its DbtTest asset carries its result with the same keys as the model.
+            var targets = new ArrayList<>(testTargets(manifest, testNode, result.getUniqueId()));
+            targets.add(result.getUniqueId());
+            for (String targetId : targets) {
+                int[] tally = tallies.computeIfAbsent(targetId, id -> new int[3]);
                 tally[0]++;
                 if (state == State.Type.FAILED) {
                     tally[1]++;
@@ -560,11 +578,12 @@ public abstract class ResultParser {
         return modelAsset.dependsOn().stream()
             .map(modelAssets::get)
             .filter(Objects::nonNull)
-            .map(dep -> new AssetIdentifier(null, null, dep.assetId(), TABLE_ASSET_TYPE))
+            // The parent's own type: an input typed differently would retype the stored parent asset.
+            .map(dep -> new AssetIdentifier(null, null, dep.assetId(), assetType(dep.resourceType())))
             .toList();
     }
 
-    // Every model/seed/snapshot/source as an asset node keyed by unique_id, deps filtered to nodes in this set.
+    // Every model, seed, snapshot, test, source and exposure as an asset node keyed by unique_id, deps filtered to nodes in this set.
     private static Map<String, ModelAsset> extractAssetNodes(Manifest manifest) {
         if (manifest == null) {
             return Map.of();
@@ -573,11 +592,13 @@ public abstract class ResultParser {
         String system = adapterType(manifest);
         Map<String, ModelAsset> assetNodes = new HashMap<>();
 
-        // Table-producing nodes (models, seeds, snapshots) from `nodes`.
+        // Table-producing nodes (models, seeds, snapshots) and tests from `nodes`.
         if (manifest.getNodes() != null) {
             for (Map.Entry<String, Manifest.Node> entry : manifest.getNodes().entrySet()) {
                 Manifest.Node node = entry.getValue();
-                if (node == null || node.getResourceType() == null || !PRODUCED_RESOURCE_TYPES.contains(lower(node.getResourceType()))) {
+                var resourceType = node == null ? null : lower(node.getResourceType());
+                var test = RESOURCE_TYPE_TEST.equals(resourceType);
+                if (resourceType == null || (!PRODUCED_RESOURCE_TYPES.contains(resourceType) && !test)) {
                     continue;
                 }
 
@@ -587,12 +608,14 @@ public abstract class ResultParser {
                 }
 
                 String name = firstNonBlank(node.getAlias(), node.getName(), uniqueId);
-                String assetId = assetIdFor(node.getDatabase(), node.getSchema(), name, uniqueId);
+                // A test is keyed like a model: its audit schema differs per target, and its name survives argument edits that change the unique_id hash.
+                var assetId = assetIdFor(node.getDatabase(), node.getSchema(), name, uniqueId);
 
                 // Use parent_map from manifest (the canonical DAG) when available,
                 // falling back to node-level depends_on for older manifests.
                 List<String> dependsOn;
-                if (manifest.getParentMap() != null && manifest.getParentMap().containsKey(uniqueId)) {
+                // An explicit null entry in a partial manifest falls back to depends_on, as testTargets does.
+                if (manifest.getParentMap() != null && manifest.getParentMap().get(uniqueId) != null) {
                     dependsOn = manifest.getParentMap().get(uniqueId);
                 } else if (node.getDependsOn() != null && node.getDependsOn().getNodes() != null) {
                     dependsOn = node.getDependsOn().getNodes();
@@ -600,7 +623,11 @@ public abstract class ResultParser {
                     dependsOn = List.of();
                 }
 
-                assetNodes.put(uniqueId, new ModelAsset(assetId, metadataFor(system, node.getDatabase(), node.getSchema(), name), dependsOn, lower(node.getResourceType())));
+                var metadata = metadataFor(system, node.getDatabase(), node.getSchema(), name);
+                if (test && hasValue(node.getColumnName())) {
+                    metadata.put("column", node.getColumnName());
+                }
+                assetNodes.put(uniqueId, new ModelAsset(assetId, metadata, dependsOn, resourceType));
             }
         }
 
@@ -622,6 +649,27 @@ public abstract class ResultParser {
                 String assetId = assetIdFor(source.getDatabase(), source.getSchema(), name, uniqueId);
 
                 assetNodes.put(uniqueId, new ModelAsset(assetId, metadataFor(system, source.getDatabase(), source.getSchema(), name), List.of(), RESOURCE_TYPE_SOURCE));
+            }
+        }
+
+        // Exposures (dashboards, ML jobs) live outside the warehouse, keyed by their dbt unique_id.
+        if (manifest.getExposures() != null) {
+            for (Map.Entry<String, Manifest.Exposure> entry : manifest.getExposures().entrySet()) {
+                var exposure = entry.getValue();
+                var uniqueId = exposure == null ? null : firstNonBlank(exposure.getUniqueId(), entry.getKey());
+                if (uniqueId == null) {
+                    continue;
+                }
+
+                var metadata = metadataFor(null, null, null, firstNonBlank(exposure.getLabel(), exposure.getName(), uniqueId));
+                if (hasValue(exposure.getType())) {
+                    metadata.put("exposureType", exposure.getType());
+                }
+                if (hasValue(exposure.getUrl())) {
+                    metadata.put("url", exposure.getUrl());
+                }
+                var dependsOn = exposure.getDependsOn() == null || exposure.getDependsOn().getNodes() == null ? List.<String> of() : exposure.getDependsOn().getNodes();
+                assetNodes.put(uniqueId, new ModelAsset(uniqueId, metadata, dependsOn, RESOURCE_TYPE_EXPOSURE));
             }
         }
 
@@ -654,6 +702,18 @@ public abstract class ResultParser {
             metadata.put("name", name);
         }
         return metadata;
+    }
+
+    // Sources stay generic tables: Fivetran or Airbyte own them, dbt only reads them.
+    private static String assetType(String resourceType) {
+        return switch (resourceType == null ? "" : resourceType) {
+            case RESOURCE_TYPE_MODEL -> DbtModel.ASSET_TYPE;
+            case RESOURCE_TYPE_SEED -> DbtSeed.ASSET_TYPE;
+            case RESOURCE_TYPE_SNAPSHOT -> DbtSnapshot.ASSET_TYPE;
+            case RESOURCE_TYPE_TEST -> DbtTest.ASSET_TYPE;
+            case RESOURCE_TYPE_EXPOSURE -> DbtExposure.ASSET_TYPE;
+            default -> TABLE_ASSET_TYPE;
+        };
     }
 
     private static String lower(String value) {
@@ -705,6 +765,10 @@ public abstract class ResultParser {
         // True for nodes dbt builds (models, seeds, snapshots), not read-only sources.
         boolean produced() {
             return PRODUCED_RESOURCE_TYPES.contains(resourceType);
+        }
+
+        boolean emitted() {
+            return EMITTED_RESOURCE_TYPES.contains(resourceType);
         }
     }
 }
