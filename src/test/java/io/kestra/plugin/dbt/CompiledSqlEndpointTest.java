@@ -91,7 +91,7 @@ class CompiledSqlEndpointTest {
 
     @Test
     void neverSplitsASurrogatePairWhenCapping() throws Exception {
-        var sql = "x".repeat(CompiledSqlEndpoint.MAX_SQL_CHARS - 1) + "😀" + "tail";
+        var sql = "%s😀tail".formatted("x".repeat(CompiledSqlEndpoint.MAX_SQL_CHARS - 1));
         var manifest = "{\"nodes\": {\"model.shop.emoji\": {\"compiled_code\": \"%s\"}}}".formatted(sql);
 
         var compiled = (String) call(cliOutputs(true), "model.shop.emoji", manifest).get("compiledSql");
