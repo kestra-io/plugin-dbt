@@ -4,7 +4,8 @@ type ArtifactContext = { fetchOutputs?: () => Promise<Record<string, unknown>> }
 /** Tells from the Artifacts list that compiled SQL is off, before the user opens it. */
 export async function getSubtitle({ fetchOutputs }: ArtifactContext): Promise<string | undefined> {
     const outputs = await fetchOutputs?.();
-    return outputs && outputs.compiledSqlEnabled !== true ? "Off, set outputCompiledSql: true" : undefined;
+    // Only an explicit false means off: a TriggerRun that did not wait has no such output at all.
+    return outputs?.compiledSqlEnabled === false ? "Off, set outputCompiledSql: true" : undefined;
 }
 </script>
 

@@ -299,6 +299,59 @@ class CheckStatusTest {
     }
 
     @Test
+    void shouldMergeTheRunResultsOfEveryDbtStepIntoTheGraph() throws Exception {
+        stubFor(
+            get(urlMatching("/api/v2/accounts/123/runs/6668/\\?.*"))
+                .willReturn(okJson("""
+                        { "data": { "id": 6668, "status": 10, "status_humanized": "Success", "duration_humanized": "1s", "run_steps": [
+                            {"id": 11, "index": 1, "name": "Invoke dbt with `dbt run`", "status": 10, "logs": ""},
+                            {"id": 12, "index": 2, "name": "Invoke dbt with `dbt test`", "status": 10, "logs": ""}
+                        ] } }
+                    """))
+        );
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/6668/artifacts/manifest.json?step=2"))
+                .willReturn(okJson("""
+                        {"nodes": {
+                            "model.analytics.stg_orders": {"resource_type": "model", "name": "stg_orders", "unique_id": "model.analytics.stg_orders"},
+                            "test.analytics.not_null_stg_orders_id": {"resource_type": "test", "name": "not_null_stg_orders_id", "unique_id": "test.analytics.not_null_stg_orders_id"}
+                        }}
+                    """))
+        );
+        // each dbt step writes its own run_results: the model ran in step 1, its test in step 2
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/6668/artifacts/run_results.json?step=1"))
+                .willReturn(okJson("""
+                        {"metadata": {}, "results": [{"status": "success", "unique_id": "model.analytics.stg_orders", "adapter_response": {}, "timing": []}]}
+                    """))
+        );
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/6668/artifacts/run_results.json?step=2"))
+                .willReturn(okJson("""
+                        {"metadata": {}, "results": [{"status": "pass", "unique_id": "test.analytics.not_null_stg_orders_id", "adapter_response": {}, "timing": []}]}
+                    """))
+        );
+
+        var runContext = runContextFactory.of(Map.of());
+        var output = CheckStatus.builder()
+            .id(IdUtils.create())
+            .type(CheckStatus.class.getName())
+            .baseUrl(Property.ofValue("http://localhost:8089"))
+            .runId(Property.ofValue("6668"))
+            .accountId(Property.ofValue("123"))
+            .token(Property.ofValue("fake-token"))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(5)))
+            .parseRunResults(Property.ofValue(false))
+            .build()
+            .run(runContext);
+
+        var graph = JacksonMapper.ofJson().readTree(runContext.storage().getFile(output.getGraph()));
+        var model = graph.path("nodes").path(0);
+        assertThat(model.path("uniqueId").asText(), is("model.analytics.stg_orders"));
+        assertThat(model.path("status").asText(), is("success"));
+    }
+
+    @Test
     void shouldKeepTheModelGraphOnAFailedRun() throws Exception {
         stubFor(
             get(urlMatching("/api/v2/accounts/123/runs/6667/\\?.*"))

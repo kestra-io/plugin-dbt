@@ -212,14 +212,6 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     @PluginProperty(group = "advanced")
     protected Property<Boolean> parseRunResults = Property.ofValue(Boolean.TRUE);
 
-    @Schema(
-        title = "Serve compiled SQL",
-        description = "When true, the Show details drawer can show a model's compiled SQL, read on demand from the stored `manifest.json`. Off by default because compiled SQL can embed literal `--vars` values."
-    )
-    @Builder.Default
-    @PluginProperty(group = "advanced")
-    protected Property<Boolean> outputCompiledSql = Property.ofValue(false);
-
     @Builder.Default
     @Schema(
         title = "Fail if the run ends in a non-successful state",
@@ -247,6 +239,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     @Override
     public CheckStatus.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
+        // Rendered before polling, so a bad template fails fast instead of replacing the dbt failure later.
+        var rOutputCompiledSql = runContext.render(this.outputCompiledSql).as(Boolean.class).orElse(false);
 
         // Fresh per invocation: run() is called more than once on one instance, and stale entries here
         // would suppress a later run's status logs.
@@ -335,7 +329,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             // Artifacts are uploaded asynchronously by dbt Cloud and manifest.json is absent for some
             // run shapes (e.g. dbt source freshness). Tolerate 404 so a legitimate success is not
             // reported as a failure.
-            var artifactStep = artifactStep(finalRunResponse.getData());
+            var dbtSteps = dbtSteps(finalRunResponse.getData());
+            var artifactStep = dbtSteps.isEmpty() ? null : dbtSteps.getLast();
             DownloadedArtifact<RunResult> runResultsArtifact = downloadArtifacts(runContext, runIdRendered, "run_results.json", artifactStep, RunResult.class);
             DownloadedArtifact<ManifestArtifact> manifestArtifact = downloadArtifacts(runContext, runIdRendered, "manifest.json", artifactStep, ManifestArtifact.class);
 
@@ -357,7 +352,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             }
 
             // Built before run_results is parsed so a parse failure cannot drop it, and from raw statuses even with `parseRunResults` off.
-            graph = ModelGraph.store(runContext, manifest, runResultsArtifact == null ? null : runResultsArtifact.body());
+            graph = manifest == null ? null : ModelGraph.store(runContext, manifest, graphRunResult(runContext, runIdRendered, dbtSteps, runResultsArtifact));
 
             if (runResultsArtifact != null) {
                 if (rParseRunResults) {
@@ -390,7 +385,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             .manifest(manifestUri)
             .graph(graph == null ? null : graph.uri())
             .graphSummary(graph == null ? null : graph.summary())
-            .compiledSqlEnabled(runContext.render(this.outputCompiledSql).as(Boolean.class).orElse(false))
+            .compiledSqlEnabled(rOutputCompiledSql)
             .build();
 
         if (!successful) {
@@ -700,9 +695,10 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         return Optional.ofNullable(this.request(runContext, requestBuilder, RunResponse.class).getBody());
     }
 
-    private static Integer artifactStep(Run run) {
+    // Every dbt step that produced artifacts, in run order: the last one holds the run's artifacts.
+    private static List<Integer> dbtSteps(Run run) {
         if (run.getRunSteps() == null) {
-            return null;
+            return List.of();
         }
 
         // The API takes the one-based step index, not its database id or position in run_steps.
@@ -712,8 +708,40 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             .filter(step -> step.getName() != null && DBT_STEP.matcher(step.getName()).find())
             .filter(step -> !EXCLUDED_ARTIFACT_STEP.matcher(step.getName()).find())
             .map(Step::getIndex)
-            .max(Integer::compareTo)
-            .orElse(null);
+            .sorted()
+            .toList();
+    }
+
+    // Each dbt step writes its own run_results.json, so the graph merges them in step order: the models of a
+    // `dbt run` step keep their status next to the tests of a later `dbt test` step.
+    private RunResult graphRunResult(RunContext runContext, Long runId, List<Integer> steps, DownloadedArtifact<RunResult> lastStep) {
+        if (lastStep == null || steps.size() < 2) {
+            return lastStep == null ? null : lastStep.body();
+        }
+
+        var byId = new LinkedHashMap<String, RunResult.Result>();
+        for (var step : steps.subList(0, steps.size() - 1)) {
+            try {
+                var earlier = downloadArtifacts(runContext, runId, "run_results.json", step, RunResult.class);
+                if (earlier != null) {
+                    putResults(byId, earlier.body());
+                }
+            } catch (Exception e) {
+                // The graph is a view of the run: a missing earlier step only leaves its nodes `not-run`.
+                runContext.logger().warn("Unable to read run_results.json of step {} for the dbt model graph", step, e);
+            }
+        }
+        putResults(byId, lastStep.body());
+        return RunResult.builder().results(new ArrayList<>(byId.values())).build();
+    }
+
+    private static void putResults(Map<String, RunResult.Result> byId, RunResult runResult) {
+        if (runResult == null || runResult.getResults() == null) {
+            return;
+        }
+        runResult.getResults().stream()
+            .filter(result -> result.getUniqueId() != null)
+            .forEach(result -> byId.put(result.getUniqueId(), result));
     }
 
     /**

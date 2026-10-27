@@ -207,14 +207,6 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     @PluginProperty(group = "advanced")
     protected Property<Boolean> parseRunResults = Property.ofValue(Boolean.TRUE);
 
-    @Schema(
-        title = "Serve compiled SQL",
-        description = "When true, the Show details drawer can show a model's compiled SQL, read on demand from the stored `manifest.json`. Off by default because compiled SQL can embed literal `--vars` values."
-    )
-    @Builder.Default
-    @PluginProperty(group = "advanced")
-    protected Property<Boolean> outputCompiledSql = Property.ofValue(false);
-
     @Override
     public TriggerRun.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
@@ -482,7 +474,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
                 throw e;
             }
             // Rethrown with this task's own outputs, so a failed run keeps its graph on the TriggerRun task run.
-            throw new RunnableTaskException(e.getMessage(), e.getCause(), output(runId, checkStatus));
+            throw new RunnableTaskException(e.getMessage(), e, output(runId, checkStatus));
         }
     }
 

@@ -85,6 +85,14 @@ public abstract class AbstractDbtCloud extends Task {
     Property<String> token;
 
     @Schema(
+        title = "Serve compiled SQL",
+        description = "When true, the Show details drawer and the Artifacts tab show each model's compiled SQL, read on demand from the stored `manifest.json`. Off by default because compiled SQL can embed literal `--vars` values. This only controls the display: `manifest.json` itself stays downloadable from the task outputs."
+    )
+    @Builder.Default
+    @PluginProperty(group = "advanced")
+    Property<Boolean> outputCompiledSql = Property.ofValue(false);
+
+    @Schema(
         title = "The HTTP client configuration",
         description = "Set `options.retry` to customize the retry policy of every call to dbt Cloud. When " +
             "`options.retry` is left unset, an `Exponential` policy built from the deprecated `maxRetries` " +
@@ -245,35 +253,46 @@ public abstract class AbstractDbtCloud extends Task {
         var defaults = HttpConfiguration.builder().build();
 
         if (this.options == null || isUnsetRetry(this.options.getRetry(), defaults.getRetry())) {
-            builder.retry(Exponential.builder()
-                .delayFactor(2.0)
-                .interval(Duration.ofMillis(initialDelayMs))
-                .maxInterval(Duration.ofSeconds(30))
-                .maxAttempts(maxAttempts)
-                .build());
+            builder.retry(
+                Exponential.builder()
+                    .delayFactor(2.0)
+                    .interval(Duration.ofMillis(initialDelayMs))
+                    .maxInterval(Duration.ofSeconds(30))
+                    .maxAttempts(maxAttempts)
+                    .build()
+            );
         }
 
         if (this.options == null || this.options.getRetryOnStatusCodes() == null || this.options.getRetryOnStatusCodes().equals(defaults.getRetryOnStatusCodes())) {
-            builder.retryOnStatusCodes(Property.ofValue(
-                reattachEnabled ? WRITE_RETRIABLE_CODES_EXCLUDING_AMBIGUOUS : WRITE_RETRIABLE_CODES
-            ));
+            builder.retryOnStatusCodes(
+                Property.ofValue(
+                    reattachEnabled ? WRITE_RETRIABLE_CODES_EXCLUDING_AMBIGUOUS : WRITE_RETRIABLE_CODES
+                )
+            );
         }
 
         if (this.options == null || this.options.getRetryOnStatusCodesByMethod() == null || this.options.getRetryOnStatusCodesByMethod().equals(defaults.getRetryOnStatusCodesByMethod())) {
             // Core never retries a non-idempotent method on a status code unless it is listed here,
             // so each write method needs its own entry or a POST 503 is never retried.
             var writeCodes = reattachEnabled ? WRITE_RETRIABLE_CODES_EXCLUDING_AMBIGUOUS : WRITE_RETRIABLE_CODES;
-            builder.retryOnStatusCodesByMethod(Property.ofValue(Map.of(
-                "GET", READ_ONLY_RETRIABLE_CODES,
-                "HEAD", READ_ONLY_RETRIABLE_CODES,
-                "POST", writeCodes,
-                "PUT", writeCodes,
-                "PATCH", writeCodes,
-                "DELETE", writeCodes
-            )));
+            builder.retryOnStatusCodesByMethod(
+                Property.ofValue(
+                    Map.of(
+                        "GET", READ_ONLY_RETRIABLE_CODES,
+                        "HEAD", READ_ONLY_RETRIABLE_CODES,
+                        "POST", writeCodes,
+                        "PUT", writeCodes,
+                        "PATCH", writeCodes,
+                        "DELETE", writeCodes
+                    )
+                )
+            );
         }
 
-        if (this.options == null || this.options.getRetryableTransportFailureMethods() == null || this.options.getRetryableTransportFailureMethods().equals(defaults.getRetryableTransportFailureMethods())) {
+        if (
+            this.options == null || this.options.getRetryableTransportFailureMethods() == null
+                || this.options.getRetryableTransportFailureMethods().equals(defaults.getRetryableTransportFailureMethods())
+        ) {
             builder.retryableTransportFailureMethods(Property.ofValue(TRANSPORT_RETRIABLE_METHODS));
         }
 
