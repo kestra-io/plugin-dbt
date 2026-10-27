@@ -492,7 +492,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
     @Schema(
         title = "Serve compiled SQL",
-        description = "When true, the Show details drawer can show a model's compiled SQL, read on demand from the stored `manifest.json`. Off by default because compiled SQL can embed literal `--vars` values."
+        description = "When true, the Show details drawer and the Artifacts tab show each model's compiled SQL, read on demand from the stored `manifest.json`. Off by default because compiled SQL can embed literal `--vars` values. This only controls the display: `manifest.json` itself stays downloadable from the task outputs."
     )
     @Builder.Default
     @PluginProperty(group = "advanced")

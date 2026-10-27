@@ -12,7 +12,7 @@ export async function getSubtitle({ fetchOutputs }: ArtifactContext): Promise<st
 import { ref, watch } from "vue";
 import type { KnownSlotProps } from "@kestra-io/artifact-sdk";
 import DbtCompiledSql from "./DbtCompiledSql.vue";
-import { type GraphNode, REV_KEY, useModelGraph } from "../composables/useModelGraph";
+import { type GraphNode, initialNode, REV_KEY, useModelGraph } from "../composables/useModelGraph";
 
 const props = defineProps<KnownSlotProps["execution-artifact"]>();
 
@@ -23,12 +23,8 @@ const { graph, message } = useModelGraph(
     () => props.fetchEndpoint,
 );
 
-// Opens on the first failed model, else the first model, like the graph does.
 const selected = ref<GraphNode | null>(null);
-watch(graph, (g) => {
-    const withSql = g?.nodes.filter((n) => n.resourceType === "model" || n.resourceType === "snapshot") ?? [];
-    selected.value = withSql.find((n) => n.status === "error") ?? withSql[0] ?? null;
-}, { immediate: true });
+watch(graph, (g) => (selected.value = g ? initialNode(g.nodes) : null), { immediate: true });
 </script>
 
 <template>

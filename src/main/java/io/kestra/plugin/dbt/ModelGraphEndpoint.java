@@ -3,7 +3,6 @@ package io.kestra.plugin.dbt;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.URI;
-import java.util.Map;
 
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.plugins.endpoint.PluginEndpoint;
@@ -26,24 +25,20 @@ public class ModelGraphEndpoint implements PluginEndpoint {
     public PluginEndpointResponse handle(PluginEndpointContext context) {
         var graph = context.outputs().get().get("graph");
         if (graph == null) {
-            return error("no_graph", "This task run stored no model graph.");
+            return EndpointError.of("no_graph", "This task run stored no model graph.");
         }
 
         try (var in = context.storage().getFile(URI.create(graph.toString()))) {
             var bytes = in.readNBytes(MAX_GRAPH_BYTES + 1);
             if (bytes.length > MAX_GRAPH_BYTES) {
-                return error("too_large", "The model graph is larger than %d MB.".formatted(MAX_GRAPH_BYTES / 1024 / 1024));
+                return EndpointError.of("too_large", "The model graph is larger than %d MB.".formatted(MAX_GRAPH_BYTES / 1024 / 1024));
             }
             return PluginEndpointResponse.ofBytes(bytes, "application/json");
         } catch (FileNotFoundException e) {
             // The output can outlive its file, for example after a storage purge.
-            return error("no_graph", "The stored model graph no longer exists.");
+            return EndpointError.of("no_graph", "The stored model graph no longer exists.");
         } catch (IOException e) {
             throw new IllegalStateException("Unable to read the stored dbt model graph", e);
         }
-    }
-
-    private static PluginEndpointResponse error(String code, String message) {
-        return PluginEndpointResponse.of(Map.of("error", code, "message", message));
     }
 }

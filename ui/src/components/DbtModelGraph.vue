@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { KsExecutionStatus, KsGraph, KsId } from "@kestra-io/design-system";
 import ContentCopy from "vue-material-design-icons/ContentCopy.vue";
 import type { KsGraphEdge, KsGraphNode } from "@kestra-io/design-system/components/Charts/KsGraph";
-import { DBT_ICON as ICON, type GraphNode, type ModelGraph, kestraState, statusTitle } from "../composables/useModelGraph";
+import { DBT_ICON as ICON, type GraphNode, type ModelGraph, initialNode, kestraState, statusColor, statusTitle } from "../composables/useModelGraph";
 
 // `sqlAction` shows the Compiled SQL button, only where the host can switch to that view (the drawer tabs).
 // `embedded` fills a host panel that already has a frame (the Artifacts tab): no own border, details on the side.
@@ -25,12 +25,12 @@ const LABEL_MIN_ZOOM = 0.25;
 const CARD_PATH = `path://M8,0H${NODE_WIDTH - 8}A8,8,0,0,1,${NODE_WIDTH},8V${NODE_HEIGHT - 8}A8,8,0,0,1,${NODE_WIDTH - 8},${NODE_HEIGHT}H8A8,8,0,0,1,0,${NODE_HEIGHT - 8}V8A8,8,0,0,1,8,0Z`;
 
 // Run status -> the topology tokens core uses for task nodes, so the cards match Kestra in light and dark.
-const STATUSES: { key: string; label: string; border: string; borderFallback: string; bg: string; bgFallback: string }[] = [
-    { key: "success", label: "Success", border: "--ks-topology-border-success", borderFallback: "#15b983", bg: "--ks-topology-bg-success", bgFallback: "#ecfff5" },
-    { key: "error", label: "Error", border: "--ks-topology-border-errors", borderFallback: "#ed0011", bg: "--ks-topology-bg-errors", bgFallback: "rgba(247, 58, 61, 0.1)" },
-    { key: "warn", label: "Warning", border: "--ks-topology-border-killing", borderFallback: "#f0b429", bg: "--ks-topology-bg-killing", bgFallback: "#fffceb" },
-    { key: "skipped", label: "Skipped", border: "--ks-topology-border-cancelled", borderFallback: "#9797a6", bg: "--ks-topology-bg-cancelled", bgFallback: "#e9e9ee" },
-    { key: "not-run", label: "Not run", border: "--ks-topology-border-cancelled", borderFallback: "#d0d0da", bg: "--ks-bg-surface", bgFallback: "#ffffff" },
+const STATUSES: { key: string; border: string; borderFallback: string; bg: string; bgFallback: string }[] = [
+    { key: "success", border: "--ks-topology-border-success", borderFallback: "#15b983", bg: "--ks-topology-bg-success", bgFallback: "#ecfff5" },
+    { key: "error", border: "--ks-topology-border-errors", borderFallback: "#ed0011", bg: "--ks-topology-bg-errors", bgFallback: "rgba(247, 58, 61, 0.1)" },
+    { key: "warn", border: "--ks-topology-border-killing", borderFallback: "#f0b429", bg: "--ks-topology-bg-killing", bgFallback: "#fffceb" },
+    { key: "skipped", border: "--ks-topology-border-cancelled", borderFallback: "#9797a6", bg: "--ks-topology-bg-cancelled", bgFallback: "#e9e9ee" },
+    { key: "not-run", border: "--ks-topology-border-cancelled", borderFallback: "#d0d0da", bg: "--ks-bg-surface", bgFallback: "#ffffff" },
 ];
 
 function formatSeconds(seconds?: number): string | undefined {
@@ -68,10 +68,6 @@ function plain(text: string): string {
 function typeLabel(node: GraphNode): string {
     const type = node.resourceType ?? "node";
     return node.materialized ? `${type} · ${node.materialized}` : type;
-}
-
-function statusLabel(status: string): string {
-    return STATUSES.find((s) => s.key === status)?.label ?? status;
 }
 
 // Top-down layout from the server-side `level`. Rows are ordered by the mean position of their neighbours
@@ -386,11 +382,7 @@ function select(node: GraphNode | null) {
 // Open with a model already selected (the first failure, else the first model), so details show at once and the
 // highlighted card shows what clicking does.
 onMounted(() => {
-    const nodes = props.graph.nodes;
-    const initial = nodes.find((n) => n.status === "error")
-        ?? nodes.find((n) => n.resourceType === "model")
-        ?? nodes[0]
-        ?? null;
+    const initial = initialNode(props.graph.nodes);
     selected.value = initial;
     emit("select", initial);
 });
@@ -415,8 +407,9 @@ function bindBlankClick() {
     });
     blankClickBound = true;
 }
+// The graph stays mounted behind a hidden drawer tab, so Esc only counts while it is on screen.
 function onKeydown(event: KeyboardEvent) {
-    if (event.key === "Escape") select(null);
+    if (event.key === "Escape" && canvas.value?.offsetParent) select(null);
 }
 onMounted(() => window.addEventListener("keydown", onKeydown));
 onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
@@ -430,14 +423,6 @@ const lineage = computed(() => {
         downstream: pick(props.graph.edges.filter((e) => e.from === id).map((e) => e.to)),
     };
 });
-
-// Status text colours, readable on the card in light and dark (the topology border greens are too dim as text).
-const STATUS_TEXT: Record<string, string> = {
-    success: "var(--ks-text-success, #0f8a5f)",
-    error: "var(--ks-text-error, #d0021b)",
-    warn: "var(--ks-text-warning, #b36b00)",
-};
-const statusColor = (status: string) => STATUS_TEXT[status] ?? "var(--ks-text-secondary, #6b6b7b)";
 
 // Same feedback as Kestra's CopyToClipboard: the icon stays, a "Copied" hint shows for 2 seconds.
 const copied = ref<string | null>(null);
@@ -475,9 +460,9 @@ function copy(key: string, value?: string) {
             <p v-if="zoomHint" class="dbt-graph__zoom-hint">Hold Ctrl or ⌘ and scroll to zoom</p>
 
             <div class="dbt-graph__toolbar">
-                <button type="button" title="Zoom in" @click="zoomIn">+</button>
-                <button type="button" title="Zoom out" @click="zoomOut">−</button>
-                <button type="button" title="Fit to view" @click="fit">⤢</button>
+                <button type="button" title="Zoom in" aria-label="Zoom in" @click="zoomIn">+</button>
+                <button type="button" title="Zoom out" aria-label="Zoom out" @click="zoomOut">−</button>
+                <button type="button" title="Fit to view" aria-label="Fit to view" @click="fit">⤢</button>
             </div>
 
 
@@ -496,7 +481,7 @@ function copy(key: string, value?: string) {
                     <KsExecutionStatus :status="kestraState(selected.status)" :title="statusTitle(selected.status)" size="small" />
                     <span v-if="selected.executionTime !== undefined && ['success', 'error', 'warn'].includes(selected.status)" class="dbt-graph__muted">{{ formatSeconds(selected.executionTime) }}</span>
                     <button v-if="sqlAction && (selected.resourceType === 'model' || selected.resourceType === 'snapshot')" type="button" class="dbt-graph__text-button" @click="emit('open-sql', selected)">Compiled SQL</button>
-                    <button type="button" class="dbt-graph__icon-button dbt-graph__close" title="Close (Esc)" @click="select(null)">×</button>
+                    <button type="button" class="dbt-graph__icon-button dbt-graph__close" title="Close (Esc)" aria-label="Close" @click="select(null)">×</button>
                 </header>
 
                 <div class="dbt-graph__card-grid">

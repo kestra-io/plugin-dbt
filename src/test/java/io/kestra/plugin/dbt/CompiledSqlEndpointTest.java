@@ -81,6 +81,25 @@ class CompiledSqlEndpointTest {
     }
 
     @Test
+    void reportsAManifestOutputWhoseFileIsGone() throws Exception {
+        var purged = "kestra:///shop/flow/executions/e1/tasks/dbt/t1/purged.json";
+
+        var body = call(Map.of("compiledSqlEnabled", true, "manifest", purged), "model.shop.orders", MANIFEST_JSON);
+
+        assertThat(body.get("error"), is("no_manifest"));
+    }
+
+    @Test
+    void neverSplitsASurrogatePairWhenCapping() throws Exception {
+        var sql = "x".repeat(CompiledSqlEndpoint.MAX_SQL_CHARS - 1) + "😀" + "tail";
+        var manifest = "{\"nodes\": {\"model.shop.emoji\": {\"compiled_code\": \"%s\"}}}".formatted(sql);
+
+        var compiled = (String) call(cliOutputs(true), "model.shop.emoji", manifest).get("compiledSql");
+
+        assertThat(compiled.length(), is(CompiledSqlEndpoint.MAX_SQL_CHARS - 1));
+    }
+
+    @Test
     void capsVeryLargeSql() throws Exception {
         var sql = "x".repeat(CompiledSqlEndpoint.MAX_SQL_CHARS + 10);
         var manifest = "{\"nodes\": {\"model.shop.big\": {\"compiled_code\": \"%s\"}}}".formatted(sql);

@@ -35,7 +35,8 @@ export type FetchEndpoint = NonNullable<KnownSlotProps["topology-details"]["fetc
 // fetch, forces the host re-render (same workaround as plugin-ee-gcp).
 export const REV_KEY = "__dbtGraphRev";
 
-const TERMINAL_STATES = ["SUCCESS", "WARNING", "FAILED", "KILLED", "CANCELLED", "SKIPPED"];
+// Same set as core State.Type.isTerminated().
+const TERMINAL_STATES = ["SUCCESS", "WARNING", "FAILED", "KILLED", "CANCELLED", "SKIPPED", "RETRIED", "RESUBMITTED"];
 
 export function useModelGraph(
     // artifact-sdk types `task` as a plain record, so its id is `unknown`.
@@ -145,4 +146,25 @@ export function kestraState(status: string): string {
 }
 export function statusTitle(status: string): string {
     return STATUS_TITLES[status] ?? status;
+}
+
+// Status text colours, readable on cards and lists in light and dark (the topology border greens are too dim as text).
+const STATUS_TEXT: Record<string, string> = {
+    success: "var(--ks-text-success, #0f8a5f)",
+    error: "var(--ks-text-error, #d0021b)",
+    warn: "var(--ks-text-warning, #b36b00)",
+};
+export function statusColor(status: string): string {
+    return STATUS_TEXT[status] ?? "var(--ks-text-secondary, #6b6b7b)";
+}
+
+// Only models and snapshots have SQL: seeds are CSV files, sources are raw tables.
+export function hasSql(node: GraphNode): boolean {
+    return node.resourceType === "model" || node.resourceType === "snapshot";
+}
+
+// The node every view opens on: the first failed model, else the first model, so all tabs agree.
+export function initialNode(nodes: GraphNode[]): GraphNode | null {
+    const withSql = nodes.filter(hasSql);
+    return withSql.find((n) => n.status === "error") ?? withSql[0] ?? nodes[0] ?? null;
 }
