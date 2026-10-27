@@ -1,5 +1,5 @@
 id: dbt_cli_assets_kv_test
-namespace: company.team
+namespace: sanitychecks.plugin-dbt
 
 inputs:
   - id: kv_namespace
