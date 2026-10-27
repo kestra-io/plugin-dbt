@@ -5,7 +5,7 @@ import ChevronDown from "vue-material-design-icons/ChevronDown.vue";
 import CodeBraces from "vue-material-design-icons/CodeBraces.vue";
 import Magnify from "vue-material-design-icons/Magnify.vue";
 import { KsExecutionStatus } from "@kestra-io/design-system";
-import { DBT_ICON, type FetchEndpoint, type GraphNode, kestraState, statusTitle } from "../composables/useModelGraph";
+import { DBT_ICON, type FetchEndpoint, type GraphNode, kestraState, statusColor, statusTitle } from "../composables/useModelGraph";
 
 // `embedded` fills a host panel that already has a frame (the Artifacts tab): no own borders, padded toolbar rows.
 const props = defineProps<{ node: GraphNode | null; nodes: GraphNode[]; fetchEndpoint?: FetchEndpoint; embedded?: boolean }>();
@@ -25,15 +25,6 @@ const MESSAGES: Record<string, string> = {
     not_found: "dbt did not compile this model in this run.",
     no_manifest: "This run stored no manifest.json.",
 };
-
-const STATUS_COLORS: Record<string, string> = {
-    success: "var(--ks-text-success, #0f8a5f)",
-    error: "var(--ks-text-error, #d0021b)",
-    warn: "var(--ks-text-warning, #b36b00)",
-};
-const STATUS_LABELS: Record<string, string> = { success: "Success", error: "Error", warn: "Warning", skipped: "Skipped", "not-run": "Not run" };
-const statusColor = (status: string) => STATUS_COLORS[status] ?? "var(--ks-text-secondary, #6b6b7b)";
-const statusLabel = (status: string) => STATUS_LABELS[status] ?? status;
 
 // --- model list: only models and snapshots have SQL (seeds are CSV files, sources are raw tables), grouped by
 // type, sorted by name and filtered by the search.
@@ -109,6 +100,8 @@ function choose(node: GraphNode) {
 // In the panel: arrows move through the list, Enter keeps the choice and closes, Esc clears then closes.
 function onKeydown(event: KeyboardEvent) {
     if (event.key === "Escape") {
+        // Handled here, so the graph's window-level Esc does not also clear the selection.
+        event.stopPropagation();
         if (query.value) query.value = "";
         else close();
         return;
@@ -236,7 +229,7 @@ function copy() {
                     <img :src="DBT_ICON" alt="" class="dbt-sql__item-icon">
                     <span v-if="node" class="dbt-sql__item-text">
                         <span class="dbt-sql__item-name">{{ node.name ?? node.uniqueId }}</span>
-                        <span class="dbt-sql__item-meta"><template v-if="node.materialized">{{ node.materialized }} · </template><span :style="{ color: statusColor(node.status) }">{{ statusLabel(node.status) }}</span></span>
+                        <span class="dbt-sql__item-meta"><template v-if="node.materialized">{{ node.materialized }} · </template><span :style="{ color: statusColor(node.status) }">{{ statusTitle(node.status) }}</span></span>
                     </span>
                     <span v-else class="dbt-sql__item-text"><span class="dbt-sql__item-name">Select a model</span></span>
                     <ChevronDown :size="18" :class="['dbt-sql__chevron', { 'dbt-sql__chevron--open': open }]" />
@@ -273,13 +266,12 @@ function copy() {
                                     <span class="dbt-sql__item-text">
                                         <span class="dbt-sql__item-name"><span v-for="(p, i) in parts(n.name ?? n.uniqueId)" :key="i" :class="{ 'dbt-sql__match': p.match }">{{ p.text }}</span></span>
                                         <span class="dbt-sql__item-meta">
-                                            <template v-if="n.materialized">{{ n.materialized }} · </template><span :style="{ color: statusColor(n.status) }">{{ statusLabel(n.status) }}</span>
+                                            <template v-if="n.materialized">{{ n.materialized }} · </template><span :style="{ color: statusColor(n.status) }">{{ statusTitle(n.status) }}</span>
                                         </span>
                                     </span>
                                 </button>
                             </template>
                         </section>
-                        <p v-if="!groups.length" class="dbt-sql__message dbt-sql__none">No model matches "{{ query }}".</p>
                         <p v-if="!groups.length" class="dbt-sql__message dbt-sql__none">No model matches "{{ query }}".</p>
                     </div>
                 </div>

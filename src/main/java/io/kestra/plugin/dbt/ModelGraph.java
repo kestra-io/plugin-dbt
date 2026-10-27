@@ -4,6 +4,7 @@ import java.io.ByteArrayInputStream;
 import java.net.URI;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -201,8 +202,8 @@ public class ModelGraph {
         });
         while (!ready.isEmpty()) {
             var id = ready.poll();
-            int level = levels.getOrDefault(id, 0);
-            for (String child : children.getOrDefault(id, List.of())) {
+            var level = levels.getOrDefault(id, 0);
+            for (var child : children.getOrDefault(id, List.of())) {
                 levels.merge(child, level + 1, Math::max);
                 if (inDegree.merge(child, -1, Integer::sum) == 0) {
                     ready.add(child);
@@ -218,7 +219,7 @@ public class ModelGraph {
         }
 
         var statuses = new HashMap<String, String>();
-        for (RunResult.Result result : runResult.getResults()) {
+        for (var result : runResult.getResults()) {
             if (result.getUniqueId() != null && result.getStatus() != null) {
                 statuses.put(result.getUniqueId(), status(result));
             }
@@ -232,7 +233,7 @@ public class ModelGraph {
         }
 
         var times = new HashMap<String, Double>();
-        for (RunResult.Result result : runResult.getResults()) {
+        for (var result : runResult.getResults()) {
             if (result.getUniqueId() != null && result.getExecutionTime() != null) {
                 times.put(result.getUniqueId(), result.getExecutionTime());
             }
@@ -262,7 +263,7 @@ public class ModelGraph {
         return relation.isEmpty() ? null : relation;
     }
 
-    private static Map<String, Integer> count(java.util.stream.Stream<String> values) {
+    private static Map<String, Integer> count(Stream<String> values) {
         return values.collect(Collectors.toMap(value -> value, value -> 1, Integer::sum, TreeMap::new));
     }
 }

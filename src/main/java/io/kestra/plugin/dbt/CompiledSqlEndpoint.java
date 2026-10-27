@@ -1,5 +1,6 @@
 package io.kestra.plugin.dbt;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -13,11 +14,7 @@ import io.kestra.core.plugins.endpoint.PluginEndpoint;
 import io.kestra.core.plugins.endpoint.PluginEndpointContext;
 import io.kestra.core.plugins.endpoint.PluginEndpointResponse;
 
-/**
- * Serves the compiled SQL of one dbt node from the task run's stored `manifest.json`, so the Show details
- * drawer never downloads the whole manifest. The response cannot carry a status code, so refusals come back
- * as {@code {"error": ...}}.
- */
+/** Serves one dbt node's compiled SQL from the stored `manifest.json`, so the UI never downloads the whole manifest. */
 @Plugin
 public class CompiledSqlEndpoint implements PluginEndpoint {
     static final String NAME = "compiled-sql";
@@ -32,35 +29,37 @@ public class CompiledSqlEndpoint implements PluginEndpoint {
     public PluginEndpointResponse handle(PluginEndpointContext context) {
         var uniqueId = context.param("uniqueId");
         if (uniqueId == null || uniqueId.isBlank()) {
-            return error("missing_unique_id", "Pass the dbt node to read as `uniqueId`, e.g. `model.shop.orders`.");
+            return EndpointError.of("missing_unique_id", "Pass the dbt node to read as `uniqueId`, e.g. `model.shop.orders`.");
         }
 
         var outputs = context.outputs().get();
-        // Compiled SQL can embed literal `--vars` values, so it is only served when the task opted in.
         if (!Boolean.TRUE.equals(outputs.get("compiledSqlEnabled"))) {
-            return error("disabled", "Compiled SQL is off for this task. Set `outputCompiledSql: true` to show it.");
+            return EndpointError.of("disabled", "Compiled SQL is off for this task. Set `outputCompiledSql: true` to show it.");
         }
 
         var manifest = manifestUri(outputs);
         if (manifest == null) {
-            return error("no_manifest", "This task run stored no manifest.json.");
+            return EndpointError.of("no_manifest", "This task run stored no manifest.json.");
         }
 
         String sql;
-        try (InputStream in = context.storage().getFile(manifest)) {
+        try (var in = context.storage().getFile(manifest)) {
             sql = compiledSql(in, uniqueId);
+        } catch (FileNotFoundException e) {
+            // The output can outlive its file, for example after a storage purge.
+            return EndpointError.of("no_manifest", "The stored manifest.json no longer exists.");
         } catch (IOException e) {
             throw new IllegalStateException("Unable to read the stored dbt manifest", e);
         }
         if (sql == null) {
-            return error("not_found", "No compiled SQL for `%s` in this run's manifest.".formatted(uniqueId));
+            return EndpointError.of("not_found", "No compiled SQL for `%s` in this run's manifest.".formatted(uniqueId));
         }
 
-        boolean truncated = sql.length() > MAX_SQL_CHARS;
+        var truncated = sql.length() > MAX_SQL_CHARS;
         return PluginEndpointResponse.of(
             Map.of(
                 "uniqueId", uniqueId,
-                "compiledSql", truncated ? sql.substring(0, MAX_SQL_CHARS) : sql,
+                "compiledSql", truncated ? truncate(sql) : sql,
                 "truncated", truncated
             )
         );
@@ -75,9 +74,15 @@ public class CompiledSqlEndpoint implements PluginEndpoint {
         return uri == null ? null : URI.create(uri.toString());
     }
 
+    // Never cuts between the two halves of a surrogate pair, which would leave an invalid character.
+    private static String truncate(String sql) {
+        var end = Character.isHighSurrogate(sql.charAt(MAX_SQL_CHARS - 1)) ? MAX_SQL_CHARS - 1 : MAX_SQL_CHARS;
+        return sql.substring(0, end);
+    }
+
     /** Streams the manifest and keeps only `nodes[uniqueId].compiled_code`, so a large manifest is never held in memory. */
     static String compiledSql(InputStream manifest, String uniqueId) throws IOException {
-        try (JsonParser parser = ResultParser.MAPPER.getFactory().createParser(manifest)) {
+        try (var parser = ResultParser.MAPPER.getFactory().createParser(manifest)) {
             if (parser.nextToken() != JsonToken.START_OBJECT) {
                 return null;
             }
@@ -122,9 +127,5 @@ public class CompiledSqlEndpoint implements PluginEndpoint {
             }
         }
         return legacy;
-    }
-
-    private static PluginEndpointResponse error(String code, String message) {
-        return PluginEndpointResponse.of(Map.of("error", code, "message", message));
     }
 }
