@@ -4,16 +4,13 @@ import defaultViteConfig from "@kestra-io/artifact-sdk/vite.config";
 const assetCardFooter = {
   slotName: "asset-card-footer",
   path: "./src/components/DbtAssetTestBadge.vue",
-  // One 1.25rem line, so core grows every card by the same height.
+  // A 1rem line plus the card body's 0.25rem gap.
   additionalProperties: { footerHeight: 20 },
 };
 
 const ASSET_PRODUCERS = [
   "cli.Build",
   "cli.Compile",
-  "cli.Deps",
-  "cli.Freshness",
-  "cli.List",
   "cli.Run",
   "cli.Seed",
   "cli.Snapshot",

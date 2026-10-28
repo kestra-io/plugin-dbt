@@ -25,3 +25,10 @@ export const SingleTest: Story = model({ dbtTestStatus: "pass", dbtTestsTotal: 1
 export const NoTests: Story = model({});
 export const Cleared: Story = model({ dbtTestStatus: null, dbtTestsTotal: null, dbtTestsFailed: null });
 export const UnknownStatus: Story = model({ dbtTestStatus: "error", dbtTestsTotal: 3, dbtTestsFailed: 1 });
+export const TestAsset: Story = {
+  args: {
+    assetId: "shop.main_dbt_test__audit.unique_stg_customers_id",
+    assetType: "io.kestra.plugin.dbt.assets.DbtTest",
+    metadata: { dbtResourceType: "test", dbtTestStatus: "pass", dbtTestsTotal: 1, dbtTestsFailed: 0 },
+  },
+};

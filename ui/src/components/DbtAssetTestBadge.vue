@@ -1,14 +1,17 @@
-<script lang="ts">
-export type TestBadge = { status: "pass" | "warn" | "fail"; label: string; tooltip: string };
+<script setup lang="ts">
+import { computed } from "vue";
+import type { KnownSlotProps } from "@kestra-io/artifact-sdk";
+import TestTube from "vue-material-design-icons/TestTube.vue";
+import TestTubeOff from "vue-material-design-icons/TestTubeOff.vue";
+
+const props = defineProps<KnownSlotProps["asset-card-footer"]>();
 
 const STATES = ["pass", "warn", "fail"] as const;
 const count = (value: unknown): number | undefined => (typeof value === "number" ? value : undefined);
 
-/**
- * Test roll-up written by ResultParser (plugin-dbt#343), worded as core showed it before kestra#21101.
- * All three keys or nothing: no tests, cleared values or an unknown status render no badge, never a pass.
- */
-export function testBadge(metadata: Record<string, unknown> | undefined): TestBadge | null {
+// All three keys or nothing, worded as core showed it before kestra#21101: missing or unknown values never read as a pass.
+const badge = computed(() => {
+    const metadata = props.metadata;
     const total = count(metadata?.dbtTestsTotal);
     const failed = count(metadata?.dbtTestsFailed);
     const status = STATES.find((known) => known === metadata?.dbtTestStatus);
@@ -28,25 +31,12 @@ export function testBadge(metadata: Record<string, unknown> | undefined): TestBa
         case "fail":
             return { status, label: `${failed}/${total} failed`, tooltip: one ? "The dbt test failed" : `${failed} of ${total} dbt tests failed` };
     }
-}
-</script>
-
-<script setup lang="ts">
-import { computed } from "vue";
-import type { KnownSlotProps } from "@kestra-io/artifact-sdk";
-import TestTube from "vue-material-design-icons/TestTube.vue";
-import TestTubeOff from "vue-material-design-icons/TestTubeOff.vue";
-
-const props = defineProps<KnownSlotProps["asset-card-footer"]>();
-
-const badge = computed(() => testBadge(props.metadata));
-// Colour is reserved for bad news: a pass keeps the muted card text colour.
-const COLOR = { pass: undefined, warn: "var(--ks-status-warning)", fail: "var(--ks-status-error)" } as const;
+});
 </script>
 
 <template>
-    <span v-if="badge" class="dbt-test-badge" :title="badge.tooltip" :style="{ color: COLOR[badge.status] }">
-        <component :is="badge.status === 'fail' ? TestTubeOff : TestTube" :size="14" />
+    <span v-if="badge" :class="['dbt-test-badge', badge.status]" :title="badge.tooltip">
+        <component :is="badge.status === 'fail' ? TestTubeOff : TestTube" :size="12" class="dbt-test-badge__icon" />
         {{ badge.label }}
     </span>
 </template>
@@ -55,9 +45,26 @@ const COLOR = { pass: undefined, warn: "var(--ks-status-warning)", fail: "var(--
 .dbt-test-badge {
     display: flex;
     align-items: center;
-    gap: 0.25rem;
-    font-size: 0.75rem;
-    line-height: 1.25rem;
+    gap: var(--ks-spacing-2);
+    font-size: var(--ks-font-size-xs);
+    line-height: 1rem;
+    color: var(--ks-text-secondary);
     white-space: nowrap;
+}
+
+.dbt-test-badge.warn {
+    color: var(--ks-text-warning);
+}
+
+.dbt-test-badge.fail {
+    color: var(--ks-text-error);
+}
+
+.dbt-test-badge.warn .dbt-test-badge__icon {
+    color: var(--ks-status-warning);
+}
+
+.dbt-test-badge.fail .dbt-test-badge__icon {
+    color: var(--ks-status-error);
 }
 </style>
