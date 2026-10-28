@@ -323,6 +323,7 @@ class ResultParserTest {
         var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
         Files.writeString(manifestFile, """
             {
+              "metadata": {"adapter_type": "snowflake"},
               "nodes": {
                 "model.p.fct_orders": {
                   "resource_type": "model", "database": "analytics", "schema": "marts",
@@ -341,9 +342,11 @@ class ResultParserTest {
 
         ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile());
 
-        var exposureEmit = findEmitWithOutput(runContext.assets().emitted(), "exposure.p.weekly_revenue");
+        // keyed under its first parent's database and schema, so a dev run and a prod run get separate exposures
+        var exposureEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.exposure.p.weekly_revenue");
         var exposure = exposureEmit.outputs().getFirst();
         assertThat(exposure.getType(), is(DbtExposure.ASSET_TYPE));
+        assertThat(exposure.getMetadata().get("system"), is("snowflake"));
         assertThat(exposure.getMetadata().get("name"), is("weekly_revenue"));
         assertThat(exposure.getMetadata().get("label"), is("Weekly revenue"));
         assertThat(exposure.getMetadata().get("exposureType"), is("dashboard"));

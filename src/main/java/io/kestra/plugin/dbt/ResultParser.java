@@ -646,7 +646,7 @@ public abstract class ResultParser {
             }
         }
 
-        // Exposures (dashboards, ML jobs) live outside the warehouse, keyed by their dbt unique_id.
+        // Exposures (dashboards, ML jobs) live outside the warehouse.
         if (manifest.getExposures() != null) {
             for (var entry : manifest.getExposures().entrySet()) {
                 var exposure = entry.getValue();
@@ -655,7 +655,7 @@ public abstract class ResultParser {
                     continue;
                 }
 
-                var metadata = metadataFor(null, null, null, firstNonBlank(exposure.getName(), uniqueId));
+                var metadata = metadataFor(system, null, null, firstNonBlank(exposure.getName(), uniqueId));
                 if (hasValue(exposure.getLabel())) {
                     metadata.put("label", exposure.getLabel());
                 }
@@ -666,7 +666,11 @@ public abstract class ResultParser {
                     metadata.put("url", exposure.getUrl());
                 }
                 var dependsOn = exposure.getDependsOn() == null || exposure.getDependsOn().getNodes() == null ? List.<String> of() : exposure.getDependsOn().getNodes();
-                assetNodes.put(uniqueId, new ModelAsset(uniqueId, metadata, dependsOn, RESOURCE_TYPE_EXPOSURE));
+                // Keyed under its first parent's database and schema, like a test, so dev and prod exposures stay apart.
+                var parent = dependsOn.stream().map(assetNodes::get).filter(Objects::nonNull).findFirst().map(ModelAsset::metadata).orElse(Map.of());
+                var database = parent.get("database") instanceof String value ? value : null;
+                var schema = parent.get("schema") instanceof String value ? value : null;
+                assetNodes.put(uniqueId, new ModelAsset(assetIdFor(database, schema, uniqueId, uniqueId), metadata, dependsOn, RESOURCE_TYPE_EXPOSURE));
             }
         }
 
