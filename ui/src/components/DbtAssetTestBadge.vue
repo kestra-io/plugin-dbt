@@ -37,7 +37,7 @@ const badge = computed(() => {
 <template>
     <span v-if="badge" :class="['dbt-test-badge', badge.status]" :title="badge.tooltip">
         <component :is="badge.status === 'fail' ? TestTubeOff : TestTube" :size="12" class="dbt-test-badge__icon" />
-        {{ badge.label }}
+        <span class="dbt-test-badge__label">{{ badge.label }}</span>
     </span>
 </template>
 
@@ -49,9 +49,14 @@ const badge = computed(() => {
     font-size: var(--ks-font-size-xs);
     line-height: 1rem;
     min-width: 0;
+    color: var(--ks-text-secondary);
+}
+
+/* text-overflow only applies to a block box, not the flex container. */
+.dbt-test-badge__label {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-    color: var(--ks-text-secondary);
     white-space: nowrap;
 }
 

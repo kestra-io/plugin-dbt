@@ -1,6 +1,7 @@
 import defaultViteConfig from "@kestra-io/artifact-sdk/vite.config";
 
 // Core picks the asset card footer by the task that produced the asset, so every dbt task that emits assets lists it.
+// Deps, Freshness and List are left out: their parseResults is empty, so they emit no assets.
 const assetCardFooter = {
   slotName: "asset-card-footer" as const,
   path: "./src/components/DbtAssetTestBadge.vue",
