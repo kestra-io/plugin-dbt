@@ -519,7 +519,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         KVStore storeManifestKvStore = null;
         AtomicBoolean hasWarning = new AtomicBoolean(false);
         // dbt overwrites run_results.json on each command, so the logs keep the status of nodes an earlier command ran.
-        Map<String, String> loggedStatuses = new ConcurrentHashMap<>();
+        var loggedStatuses = new ConcurrentHashMap<String, String>();
         WebhookAlerter alerter = this.buildAlerter(runContext);
 
         try {
