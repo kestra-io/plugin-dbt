@@ -2,7 +2,7 @@ import defaultViteConfig from "@kestra-io/artifact-sdk/vite.config";
 
 // Core picks the asset card footer by the task that produced the asset, so every dbt task that emits assets lists it.
 const assetCardFooter = {
-  slotName: "asset-card-footer",
+  slotName: "asset-card-footer" as const,
   path: "./src/components/DbtAssetTestBadge.vue",
   // A 1rem line plus the card body's 0.25rem gap.
   additionalProperties: { footerHeight: 20 },

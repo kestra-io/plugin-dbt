@@ -48,6 +48,9 @@ const badge = computed(() => {
     gap: var(--ks-spacing-2);
     font-size: var(--ks-font-size-xs);
     line-height: 1rem;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     color: var(--ks-text-secondary);
     white-space: nowrap;
 }
