@@ -1,6 +1,7 @@
 package io.kestra.plugin.dbt.cloud;
 
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -314,21 +315,28 @@ class CheckStatusTest {
                 .willReturn(okJson("""
                         {"nodes": {
                             "model.analytics.stg_orders": {"resource_type": "model", "name": "stg_orders", "unique_id": "model.analytics.stg_orders"},
+                            "model.analytics.fct_orders": {"resource_type": "model", "name": "fct_orders", "unique_id": "model.analytics.fct_orders"},
                             "test.analytics.not_null_stg_orders_id": {"resource_type": "test", "name": "not_null_stg_orders_id", "unique_id": "test.analytics.not_null_stg_orders_id"}
                         }}
                     """))
         );
-        // each dbt step writes its own run_results: the model ran in step 1, its test in step 2
+        // each dbt step writes its own run_results: stg_orders ran in step 1 only, fct_orders failed in step 1 then succeeded in step 2
         stubFor(
             get(urlEqualTo("/api/v2/accounts/123/runs/6668/artifacts/run_results.json?step=1"))
                 .willReturn(okJson("""
-                        {"metadata": {}, "results": [{"status": "success", "unique_id": "model.analytics.stg_orders", "adapter_response": {}, "timing": []}]}
+                        {"metadata": {}, "results": [
+                            {"status": "success", "unique_id": "model.analytics.stg_orders", "adapter_response": {}, "timing": []},
+                            {"status": "error", "unique_id": "model.analytics.fct_orders", "adapter_response": {}, "timing": []}
+                        ]}
                     """))
         );
         stubFor(
             get(urlEqualTo("/api/v2/accounts/123/runs/6668/artifacts/run_results.json?step=2"))
                 .willReturn(okJson("""
-                        {"metadata": {}, "results": [{"status": "pass", "unique_id": "test.analytics.not_null_stg_orders_id", "adapter_response": {}, "timing": []}]}
+                        {"metadata": {}, "results": [
+                            {"status": "success", "unique_id": "model.analytics.fct_orders", "adapter_response": {}, "timing": []},
+                            {"status": "pass", "unique_id": "test.analytics.not_null_stg_orders_id", "adapter_response": {}, "timing": []}
+                        ]}
                     """))
         );
 
@@ -346,9 +354,11 @@ class CheckStatusTest {
             .run(runContext);
 
         var graph = JacksonMapper.ofJson().readTree(runContext.storage().getFile(output.getGraph()));
-        var model = graph.path("nodes").path(0);
-        assertThat(model.path("uniqueId").asText(), is("model.analytics.stg_orders"));
-        assertThat(model.path("status").asText(), is("success"));
+        var statuses = new HashMap<String, String>();
+        graph.path("nodes").forEach(node -> statuses.put(node.path("uniqueId").asText(), node.path("status").asText()));
+        assertThat(statuses.get("model.analytics.stg_orders"), is("success"));
+        // a later step wins over an earlier one
+        assertThat(statuses.get("model.analytics.fct_orders"), is("success"));
     }
 
     @Test

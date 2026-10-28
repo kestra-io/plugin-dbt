@@ -86,7 +86,8 @@ public abstract class AbstractDbtCloud extends Task {
 
     @Schema(
         title = "Serve compiled SQL",
-        description = "When true, the Show details drawer and the Artifacts tab show each model's compiled SQL, read on demand from the stored `manifest.json`. Off by default because compiled SQL can embed literal `--vars` values. This only controls the display: `manifest.json` itself stays downloadable from the task outputs."
+        description = """
+            When true, the Show details drawer and the Artifacts tab show each model's compiled SQL, read on demand from the stored `manifest.json`. Off by default because compiled SQL can embed literal `--vars` values. This only controls the display: `manifest.json` itself stays downloadable from the task outputs."""
     )
     @Builder.Default
     @PluginProperty(group = "advanced")

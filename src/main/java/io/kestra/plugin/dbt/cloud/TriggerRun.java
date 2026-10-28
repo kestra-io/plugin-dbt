@@ -210,6 +210,8 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     @Override
     public TriggerRun.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
+        // Rendered before the job is triggered, so a bad template never leaves a dbt Cloud run behind.
+        var rOutputCompiledSql = runContext.render(this.getOutputCompiledSql()).as(Boolean.class).orElse(false);
 
         boolean reattachEnabled = Boolean.TRUE.equals(runContext.render(this.reattach).as(Boolean.class).orElse(Boolean.FALSE));
 
@@ -223,7 +225,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
                     "Reattached to run {} (status {}) already started by this taskrun instead of triggering a new one",
                     lookup.adoptableRun().getId(), lookup.adoptableRun().getStatus()
                 );
-                return this.waitOrReturn(runContext, lookup.adoptableRun().getId());
+                return this.waitOrReturn(runContext, lookup.adoptableRun().getId(), rOutputCompiledSql);
             }
             baseline = lookup.baseline();
         }
@@ -286,7 +288,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
                         "Trigger call failed ({}) but dbt Cloud already has a matching run {} (status {}); adopting it instead of failing",
                         e.getMessage(), adoptedRun.getId(), adoptedRun.getStatus()
                     );
-                    return this.waitOrReturn(runContext, adoptedRun.getId());
+                    return this.waitOrReturn(runContext, adoptedRun.getId(), rOutputCompiledSql);
                 }
             }
             throw e;
@@ -299,7 +301,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
         logger.info("Job status {} with response: {}", triggerResponse.getStatus(), triggerRunResponse);
 
-        return this.waitOrReturn(runContext, triggerRunResponse.getData().getId());
+        return this.waitOrReturn(runContext, triggerRunResponse.getData().getId(), rOutputCompiledSql);
     }
 
     // Page size for the run-list lookup, newest first (order_by=-id).
@@ -449,7 +451,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         return "[taskrun:" + runContext.taskRunInfo().taskRunId() + "]";
     }
 
-    private Output waitOrReturn(RunContext runContext, Long runId) throws Exception {
+    private Output waitOrReturn(RunContext runContext, Long runId, boolean rOutputCompiledSql) throws Exception {
         if (Boolean.FALSE.equals(runContext.render(this.wait).as(Boolean.class).orElse(Boolean.TRUE))) {
             return Output.builder()
                 .runId(runId)
@@ -464,7 +466,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
             .pollFrequency(getPollFrequency())
             .maxDuration(getMaxDuration())
             .parseRunResults(getParseRunResults())
-            .outputCompiledSql(getOutputCompiledSql())
+            .outputCompiledSql(Property.ofValue(rOutputCompiledSql))
             .build();
 
         try {
@@ -512,7 +514,8 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
         @Schema(
             title = "Model dependency graph",
-            description = "Internal storage URI of `graph.json`: models, seeds, snapshots and sources with their run status and execution time, and the edges between them. Absent when the manifest could not be read."
+            description = """
+                Internal storage URI of `graph.json`: models, seeds, snapshots and sources with their run status and execution time, and the edges between them. Absent when the manifest could not be read."""
         )
         private URI graph;
 
