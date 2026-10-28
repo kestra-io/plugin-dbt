@@ -16,8 +16,8 @@ class LogService {
     static final protected ObjectMapper MAPPER = JacksonMapper.ofJson()
         .setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
-    // Statuses dbt logs while a node is still running, before its result.
-    private static final Set<String> RUNNING_STATUSES = Set.of("started", "compiling", "executing");
+    // Not a node result: statuses logged while a node runs, and the "None" dbt logs on end-of-command summary events.
+    private static final Set<String> NOT_A_RESULT = Set.of("started", "compiling", "executing", "None");
 
     protected static void parse(RunContext runContext, String line, AtomicBoolean hasWarning) {
         parse(runContext, line, hasWarning, null, null);
@@ -157,7 +157,7 @@ class LogService {
         var nodeInfo = jsonLog.get("data") instanceof Map<?, ?> data && data.get("node_info") instanceof Map<?, ?> info ? info : jsonLog.get("node_info");
         if (
             nodeInfo instanceof Map<?, ?> info && info.get("unique_id") instanceof String id && info.get("node_status") instanceof String status
-                && !status.isBlank() && !RUNNING_STATUSES.contains(status)
+                && !status.isBlank() && !NOT_A_RESULT.contains(status)
         ) {
             nodeStatuses.put(id, status);
         }

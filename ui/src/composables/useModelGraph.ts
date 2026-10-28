@@ -30,9 +30,7 @@ export interface ModelGraph {
 /** The host-bound call to one of this plugin's endpoints, see ModelGraphEndpoint.java and CompiledSqlEndpoint.java. */
 export type FetchEndpoint = NonNullable<KnownSlotProps["topology-details"]["fetchEndpoint"]>;
 
-// The host may render these slots under its own Vue runtime, so plugin-side refs do not always repaint
-// them. Reading this key off the shared `execution` prop in the template, then bumping it after the
-// fetch, forces the host re-render (same workaround as plugin-ee-gcp).
+// Bumped on the shared `execution` prop after a fetch, since the host's Vue runtime does not always repaint plugin refs (as in plugin-ee-gcp).
 export const REV_KEY = "__dbtGraphRev";
 
 // Same set as core State.Type.isTerminated().
