@@ -31,6 +31,7 @@ class RunResultTest {
             "error, FAILED",
             "fail, FAILED",
             "runtime_error, FAILED",
+            "runtime error, FAILED",
             "warn, WARNING",
             "skipped, SKIPPED"
         }
