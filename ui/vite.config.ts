@@ -1,5 +1,27 @@
 import defaultViteConfig from "@kestra-io/artifact-sdk/vite.config";
 
+// Core picks the asset card footer by the task that produced the asset, so every dbt task that emits assets lists it.
+const assetCardFooter = {
+  slotName: "asset-card-footer",
+  path: "./src/components/DbtAssetTestBadge.vue",
+  // One 1.25rem line, so core grows every card by the same height.
+  additionalProperties: { footerHeight: 20 },
+};
+
+const ASSET_PRODUCERS = [
+  "cli.Build",
+  "cli.Compile",
+  "cli.Deps",
+  "cli.Freshness",
+  "cli.List",
+  "cli.Run",
+  "cli.Seed",
+  "cli.Snapshot",
+  "cli.Test",
+  "cloud.CheckStatus",
+  "cloud.TriggerRun",
+];
+
 export default defaultViteConfig({
   plugin: "io.kestra.plugin.dbt",
 
@@ -28,6 +50,8 @@ export default defaultViteConfig({
         path: "./src/components/DbtCompiledSqlArtifact.vue",
         additionalProperties: { title: "Compiled SQL" },
       },
+      assetCardFooter,
     ],
+    ...Object.fromEntries(ASSET_PRODUCERS.map((task) => [task, [assetCardFooter]])),
   },
 });
