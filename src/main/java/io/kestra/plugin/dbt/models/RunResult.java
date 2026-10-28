@@ -59,6 +59,8 @@ public class RunResult {
                 case "skipped" -> State.Type.SKIPPED;
                 // Fusion v2.0 emits "run" for a successfully executed model
                 case "success", "pass", "run" -> State.Type.SUCCESS;
+                // dbt build reports nodes with nothing to run, such as exposures, as "no-op"
+                case "no-op" -> State.Type.SUCCESS;
                 default -> throw new IllegalStateException("No suitable status for '" + this.status + "'");
             };
         }
