@@ -8,7 +8,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -516,6 +518,8 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
         KVStore storeManifestKvStore = null;
         AtomicBoolean hasWarning = new AtomicBoolean(false);
+        // dbt overwrites run_results.json on each command, so the logs keep the status of nodes an earlier command ran.
+        Map<String, String> loggedStatuses = new ConcurrentHashMap<>();
         WebhookAlerter alerter = this.buildAlerter(runContext);
 
         try {
@@ -533,7 +537,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
             CommandsWrapper builtCommandsWrapper = this.commands(runContext)
                 .withEnableOutputDirectory(true) // force the output dir, so we can get the run_results.json and manifest.json files on each task runners
-                .withLogConsumer(new DbtLogConsumer(runContext, hasWarning, alerter));
+                .withLogConsumer(new DbtLogConsumer(runContext, hasWarning, alerter, loggedStatuses));
 
             final CommandsWrapper commandsWrapper = builtCommandsWrapper.getContainerImage() == null
                 ? builtCommandsWrapper.withContainerImage(rEngine == Engine.FUSION ? FUSION_IMAGE : CORE_IMAGE)
@@ -621,7 +625,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                     ? so
                     : ScriptOutput.builder().exitCode(1).outputFiles(new HashMap<>()).build();
 
-                var failedGraph = parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore);
+                var failedGraph = parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, loggedStatuses);
                 Output dbtOutput = Output.builder()
                     .warningDetected(hasWarning.get())
                     .outputFiles(runResults.getOutputFiles())
@@ -635,7 +639,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                 throw new RunnableTaskException(e.getMessage(), dbtOutput);
             }
 
-            var graph = parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore);
+            var graph = parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, loggedStatuses);
 
             return Output.builder()
                 .warningDetected(hasWarning.get())
@@ -665,7 +669,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         return new WebhookAlerter(runContext, rUrl, rLevel);
     }
 
-    private ModelGraph.Stored parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore)
+    private ModelGraph.Stored parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore, Map<String, String> loggedStatuses)
         throws IllegalVariableEvaluationException, IOException {
         File manifestFile = projectWorkingDirectory.resolve("target/manifest.json").toFile();
         File runResultsFile = projectWorkingDirectory.resolve("target/run_results.json").toFile();
@@ -707,7 +711,22 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
         // The graph needs run statuses even when `parseRunResults` is off, otherwise every node would read `not-run`.
         var graphRunResults = preParsedRunResults != null ? preParsedRunResults : ResultParser.readRunResultQuietly(runResultsFile);
-        return ModelGraph.store(runContext, manifest, graphRunResults);
+        return ModelGraph.store(runContext, manifest, withLoggedStatuses(graphRunResults, loggedStatuses));
+    }
+
+    // Nodes missing from the last command's run_results.json take the last result status dbt logged for them.
+    static RunResult withLoggedStatuses(RunResult runResult, Map<String, String> loggedStatuses) {
+        var results = new ArrayList<RunResult.Result>(runResult == null || runResult.getResults() == null ? List.of() : runResult.getResults());
+        var known = results.stream().map(RunResult.Result::getUniqueId).collect(Collectors.toSet());
+        var missing = loggedStatuses.entrySet().stream()
+            .filter(logged -> !known.contains(logged.getKey()))
+            .map(logged -> RunResult.Result.builder().uniqueId(logged.getKey()).status(logged.getValue()).build())
+            .toList();
+        if (missing.isEmpty()) {
+            return runResult;
+        }
+        results.addAll(missing);
+        return RunResult.builder().results(results).build();
     }
 
     private void fetchAndStoreManifestIfExists(RunContext runContext, KVStore loadManifestKvStore, Path projectWorkingDirectory)

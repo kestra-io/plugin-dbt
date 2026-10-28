@@ -131,17 +131,24 @@ const loading = ref(false);
 const failed = ref(false);
 let requestId = 0;
 
+// Arrow keys select one model per keypress, and each request reads the whole stored manifest on the server.
+const FETCH_DELAY_MS = 150;
+
 async function load(node: GraphNode | null) {
+    // Bumped first, so a response still in flight for the previous model is dropped even on a cache hit.
+    const current = ++requestId;
     result.value = null;
     failed.value = false;
+    loading.value = false;
     if (!node || !props.fetchEndpoint) return;
     const cached = cache.get(node.uniqueId);
     if (cached) {
         result.value = cached;
         return;
     }
-    const current = ++requestId;
     loading.value = true;
+    await new Promise((resolve) => setTimeout(resolve, FETCH_DELAY_MS));
+    if (current !== requestId) return;
     try {
         const body = (await props.fetchEndpoint("compiled-sql", { uniqueId: node.uniqueId })) as CompiledSql;
         if (current !== requestId) return;
@@ -156,6 +163,11 @@ async function load(node: GraphNode | null) {
     }
 }
 watch(() => props.node?.uniqueId, () => load(props.node), { immediate: true });
+// A new graph (a restarted task run) means new compiled SQL for the same model ids.
+watch(() => props.nodes, () => {
+    cache.clear();
+    load(props.node);
+});
 
 // --- light SQL colouring: the text is split into typed tokens rendered as text, never as HTML.
 const KEYWORDS = new Set(("select from where and or not as with join left right inner outer full cross on using group by order " +
