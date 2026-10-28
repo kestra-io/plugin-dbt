@@ -714,15 +714,10 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
 
     // Each dbt step writes its own run_results.json, so the graph merges them by unique_id, later steps win.
     private RunResult graphRunResult(RunContext runContext, Long runId, List<Integer> steps, DownloadedArtifact<RunResult> lastStep) throws Exception {
-        var lastRunResult = lastStep == null ? null : lastStep.body();
-        if (steps.size() < 2) {
-            return lastRunResult;
-        }
-
-        var byId = new LinkedHashMap<String, RunResult.Result>();
-        for (var step : steps.subList(0, steps.size() - 1)) {
+        var inRunOrder = new ArrayList<RunResult>();
+        for (var step : steps.subList(0, Math.max(steps.size() - 1, 0))) {
             try {
-                putResults(byId, fetchArtifact(runContext, runId, "run_results.json", step, RunResult.class));
+                inRunOrder.add(fetchArtifact(runContext, runId, "run_results.json", step, RunResult.class));
             } catch (Exception e) {
                 if (isInterruption(e)) {
                     Thread.currentThread().interrupt();
@@ -732,17 +727,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                 runContext.logger().warn("Unable to read run_results.json of step {} for the dbt model graph", step, e);
             }
         }
-        putResults(byId, lastRunResult);
-        return byId.isEmpty() ? lastRunResult : RunResult.builder().results(new ArrayList<>(byId.values())).build();
-    }
-
-    private static void putResults(Map<String, RunResult.Result> byId, RunResult runResult) {
-        if (runResult == null || runResult.getResults() == null) {
-            return;
-        }
-        runResult.getResults().stream()
-            .filter(result -> result.getUniqueId() != null)
-            .forEach(result -> byId.put(result.getUniqueId(), result));
+        inRunOrder.add(lastStep == null ? null : lastStep.body());
+        return ModelGraph.merge(inRunOrder.toArray(RunResult[]::new));
     }
 
     /**

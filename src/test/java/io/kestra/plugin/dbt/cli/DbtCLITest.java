@@ -475,6 +475,8 @@ class DbtCLITest {
 
         assertThat(output.getGraphSummary().getNodes(), is(1));
         assertThat(output.getGraphSummary().getByStatus(), is(Map.of("success", 1)));
+        // compiled SQL stays off unless outputCompiledSql is set
+        assertThat(output.getCompiledSqlEnabled(), is(false));
         try (var graph = runContext.storage().getFile(output.getGraph())) {
             var node = JacksonMapper.ofJson().readTree(graph).path("nodes").path(0);
             assertThat(node.path("uniqueId").asText(), is("model.analytics.stg_orders"));

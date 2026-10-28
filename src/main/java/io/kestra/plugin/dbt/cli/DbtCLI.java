@@ -10,7 +10,6 @@ import java.util.*;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.stream.Collectors;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -494,7 +493,8 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
     @Schema(
         title = "Serve compiled SQL",
-        description = "When true, the Show details drawer and the Artifacts tab show each model's compiled SQL, read on demand from the stored `manifest.json`. Off by default because compiled SQL can embed literal `--vars` values. This only controls the display: `manifest.json` itself stays downloadable from the task outputs."
+        description = """
+            When true, the Show details drawer and the Artifacts tab show each model's compiled SQL, read on demand from the stored `manifest.json`. Off by default because compiled SQL can embed literal `--vars` values. This only controls the display: `manifest.json` itself stays downloadable from the task outputs."""
     )
     @Builder.Default
     @PluginProperty(group = "advanced")
@@ -626,30 +626,11 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                     : ScriptOutput.builder().exitCode(1).outputFiles(new HashMap<>()).build();
 
                 var failedGraph = parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, loggedStatuses);
-                Output dbtOutput = Output.builder()
-                    .warningDetected(hasWarning.get())
-                    .outputFiles(runResults.getOutputFiles())
-                    .exitCode(runResults.getExitCode())
-                    .vars(runResults.getVars())
-                    .graph(failedGraph == null ? null : failedGraph.uri())
-                    .graphSummary(failedGraph == null ? null : failedGraph.summary())
-                    .compiledSqlEnabled(rOutputCompiledSql)
-                    .build();
-
-                throw new RunnableTaskException(e.getMessage(), dbtOutput);
+                throw new RunnableTaskException(e.getMessage(), output(runResults, failedGraph, hasWarning.get(), rOutputCompiledSql));
             }
 
             var graph = parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, loggedStatuses);
-
-            return Output.builder()
-                .warningDetected(hasWarning.get())
-                .outputFiles(runResults.getOutputFiles())
-                .exitCode(runResults.getExitCode())
-                .vars(runResults.getVars())
-                .graph(graph == null ? null : graph.uri())
-                .graphSummary(graph == null ? null : graph.summary())
-                .compiledSqlEnabled(rOutputCompiledSql)
-                .build();
+            return output(runResults, graph, hasWarning.get(), rOutputCompiledSql);
         } finally {
             if (alerter != null) {
                 alerter.close();
@@ -714,19 +695,24 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         return ModelGraph.store(runContext, manifest, withLoggedStatuses(graphRunResults, loggedStatuses));
     }
 
+    private static Output output(ScriptOutput run, ModelGraph.Stored graph, boolean warningDetected, boolean compiledSqlEnabled) {
+        return Output.builder()
+            .warningDetected(warningDetected)
+            .outputFiles(run.getOutputFiles())
+            .exitCode(run.getExitCode())
+            .vars(run.getVars())
+            .graph(graph == null ? null : graph.uri())
+            .graphSummary(graph == null ? null : graph.summary())
+            .compiledSqlEnabled(compiledSqlEnabled)
+            .build();
+    }
+
     // Nodes missing from the last command's run_results.json take the last result status dbt logged for them.
     static RunResult withLoggedStatuses(RunResult runResult, Map<String, String> loggedStatuses) {
-        var results = new ArrayList<RunResult.Result>(runResult == null || runResult.getResults() == null ? List.of() : runResult.getResults());
-        var known = results.stream().map(RunResult.Result::getUniqueId).collect(Collectors.toSet());
-        var missing = loggedStatuses.entrySet().stream()
-            .filter(logged -> !known.contains(logged.getKey()))
-            .map(logged -> RunResult.Result.builder().uniqueId(logged.getKey()).status(logged.getValue()).build())
-            .toList();
-        if (missing.isEmpty()) {
-            return runResult;
-        }
-        results.addAll(missing);
-        return RunResult.builder().results(results).build();
+        var fromLogs = RunResult.builder()
+            .results(loggedStatuses.entrySet().stream().<RunResult.Result> map(logged -> RunResult.Result.builder().uniqueId(logged.getKey()).status(logged.getValue()).build()).toList())
+            .build();
+        return ModelGraph.merge(fromLogs, runResult);
     }
 
     private void fetchAndStoreManifestIfExists(RunContext runContext, KVStore loadManifestKvStore, Path projectWorkingDirectory)
@@ -758,7 +744,8 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
         @Schema(
             title = "Model dependency graph",
-            description = "Internal storage URI of `graph.json`: models, seeds, snapshots and sources with their run status and execution time, and the edges between them. Absent when the manifest could not be read."
+            description = """
+                Internal storage URI of `graph.json`: models, seeds, snapshots and sources with their run status and execution time, and the edges between them. Absent when the manifest could not be read."""
         )
         private final URI graph;
 
