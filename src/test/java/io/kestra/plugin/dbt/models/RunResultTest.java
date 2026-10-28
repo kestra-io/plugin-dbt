@@ -26,6 +26,8 @@ class RunResultTest {
             "pass, SUCCESS",
             // Fusion v2.0 emits "run" for a successfully executed model
             "run, SUCCESS",
+            // dbt build reports exposures as "no-op"
+            "no-op, SUCCESS",
             "error, FAILED",
             "fail, FAILED",
             "runtime_error, FAILED",
