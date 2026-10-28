@@ -9,7 +9,7 @@ export default defaultViteConfig({
         slotName: "topology-details",
         path: "./src/components/DbtShowDetails.vue",
         additionalProperties: {
-          // A non-empty taskProp opens the right drawer; core shows that property above the drawer tabs.
+          // A non-empty taskProp opens the right drawer. Core shows that property above the drawer tabs.
           customAction: { label: "Show details", taskProp: "commands", lang: "yaml" },
         },
       },
