@@ -313,8 +313,8 @@ class ResultParserTest {
         assertThat(stgOrdersEmit.inputs(), hasSize(1));
         // source assetId is database.schema.identifier
         assertThat(stgOrdersEmit.inputs().getFirst().id(), is("analytics.raw.orders"));
-        // a source stays a generic Table: Fivetran or Airbyte own it, so dbt must not retype it
-        assertThat(stgOrdersEmit.inputs().getFirst().type(), is("io.kestra.plugin.ee.assets.Table"));
+        // a source input is untyped, so it never retypes a table another project or tool owns
+        assertThat(stgOrdersEmit.inputs().getFirst().type(), is(nullValue()));
     }
 
     @Test
@@ -344,7 +344,8 @@ class ResultParserTest {
         var exposureEmit = findEmitWithOutput(runContext.assets().emitted(), "exposure.p.weekly_revenue");
         var exposure = exposureEmit.outputs().getFirst();
         assertThat(exposure.getType(), is(DbtExposure.ASSET_TYPE));
-        assertThat(exposure.getMetadata().get("name"), is("Weekly revenue"));
+        assertThat(exposure.getMetadata().get("name"), is("weekly_revenue"));
+        assertThat(exposure.getMetadata().get("label"), is("Weekly revenue"));
         assertThat(exposure.getMetadata().get("exposureType"), is("dashboard"));
         assertThat(exposure.getMetadata().get("url"), is("https://bi.example.com/weekly"));
         assertThat(exposureEmit.inputs().getFirst().id(), is("analytics.marts.fct_orders"));
@@ -1142,9 +1143,9 @@ class ResultParserTest {
         assertThat(modelBundle.getOutputs().getFirst().getId(), is("analytics.staging.stg_orders"));
         assertThat(modelBundle.getInputs(), hasSize(1));
         assertThat(modelBundle.getInputs().getFirst().id(), is("analytics.raw.orders"));
-        // the per-model task run carries the dbt type too, and its source input stays a Table
+        // the per-model task run carries the dbt type too, and its source input stays untyped
         assertThat(modelBundle.getOutputs().getFirst().getType(), is(DbtModel.ASSET_TYPE));
-        assertThat(modelBundle.getInputs().getFirst().type(), is("io.kestra.plugin.ee.assets.Table"));
+        assertThat(modelBundle.getInputs().getFirst().type(), is(nullValue()));
 
         // the source-freshness taskrun must NOT claim it produced the source table
         TaskRun sourceTaskRun = byTaskId.get("source.analytics.raw.orders");

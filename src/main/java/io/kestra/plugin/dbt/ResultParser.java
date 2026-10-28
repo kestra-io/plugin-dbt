@@ -45,7 +45,6 @@ public abstract class ResultParser {
     static final protected ObjectMapper MAPPER = JacksonMapper.ofJson(false)
         .setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
-    private static final String TABLE_ASSET_TYPE = "io.kestra.plugin.ee.assets.Table";
     private static final String RESOURCE_TYPE_MODEL = "model";
     private static final String RESOURCE_TYPE_SEED = "seed";
     private static final String RESOURCE_TYPE_SNAPSHOT = "snapshot";
@@ -55,11 +54,6 @@ public abstract class ResultParser {
 
     // dbt node resource types that map to a physical table dbt builds.
     private static final Set<String> PRODUCED_RESOURCE_TYPES = Set.of(RESOURCE_TYPE_MODEL, RESOURCE_TYPE_SEED, RESOURCE_TYPE_SNAPSHOT);
-
-    // Resource types emitted as assets of their own: everything except sources, which other tools own.
-    private static final Set<String> EMITTED_RESOURCE_TYPES = Set.of(
-        RESOURCE_TYPE_MODEL, RESOURCE_TYPE_SEED, RESOURCE_TYPE_SNAPSHOT, RESOURCE_TYPE_TEST, RESOURCE_TYPE_EXPOSURE
-    );
 
     // Values are strings, not booleans: EventTrigger (kestra-ee) filters asset metadata with only
     // EQUAL_TO/NOT_EQUAL_TO via String.valueOf, so a numeric or boolean status could not be matched.
@@ -530,7 +524,7 @@ public abstract class ResultParser {
             // The test's own id is tallied too, so its DbtTest asset carries its result with the same keys as the model.
             var targets = new ArrayList<>(testTargets(manifest, testNode, result.getUniqueId()));
             targets.add(result.getUniqueId());
-            for (String targetId : targets) {
+            for (var targetId : targets) {
                 int[] tally = tallies.computeIfAbsent(targetId, id -> new int[3]);
                 tally[0]++;
                 if (state == State.Type.FAILED) {
@@ -578,8 +572,8 @@ public abstract class ResultParser {
         return modelAsset.dependsOn().stream()
             .map(modelAssets::get)
             .filter(Objects::nonNull)
-            // The parent's own type: an input typed differently would retype the stored parent asset.
-            .map(dep -> new AssetIdentifier(null, null, dep.assetId(), assetType(dep.resourceType())))
+            // The parent's own type, since a typed input retypes the stored asset. A source stays untyped: its table may be another project's DbtModel.
+            .map(dep -> new AssetIdentifier(null, null, dep.assetId(), RESOURCE_TYPE_SOURCE.equals(dep.resourceType()) ? null : assetType(dep.resourceType())))
             .toList();
     }
 
@@ -608,7 +602,7 @@ public abstract class ResultParser {
                 }
 
                 String name = firstNonBlank(node.getAlias(), node.getName(), uniqueId);
-                // A test is keyed like a model: its audit schema differs per target, and its name survives argument edits that change the unique_id hash.
+                // A test is keyed like a model, so its audit schema keeps dev and prod apart.
                 var assetId = assetIdFor(node.getDatabase(), node.getSchema(), name, uniqueId);
 
                 // Use parent_map from manifest (the canonical DAG) when available,
@@ -654,14 +648,17 @@ public abstract class ResultParser {
 
         // Exposures (dashboards, ML jobs) live outside the warehouse, keyed by their dbt unique_id.
         if (manifest.getExposures() != null) {
-            for (Map.Entry<String, Manifest.Exposure> entry : manifest.getExposures().entrySet()) {
+            for (var entry : manifest.getExposures().entrySet()) {
                 var exposure = entry.getValue();
                 var uniqueId = exposure == null ? null : firstNonBlank(exposure.getUniqueId(), entry.getKey());
                 if (uniqueId == null) {
                     continue;
                 }
 
-                var metadata = metadataFor(null, null, null, firstNonBlank(exposure.getLabel(), exposure.getName(), uniqueId));
+                var metadata = metadataFor(null, null, null, firstNonBlank(exposure.getName(), uniqueId));
+                if (hasValue(exposure.getLabel())) {
+                    metadata.put("label", exposure.getLabel());
+                }
                 if (hasValue(exposure.getType())) {
                     metadata.put("exposureType", exposure.getType());
                 }
@@ -704,15 +701,15 @@ public abstract class ResultParser {
         return metadata;
     }
 
-    // Sources stay generic tables: Fivetran or Airbyte own them, dbt only reads them.
+    // Only emitted nodes reach here: sources are never emitted and their inputs stay untyped.
     private static String assetType(String resourceType) {
-        return switch (resourceType == null ? "" : resourceType) {
+        return switch (resourceType) {
             case RESOURCE_TYPE_MODEL -> DbtModel.ASSET_TYPE;
             case RESOURCE_TYPE_SEED -> DbtSeed.ASSET_TYPE;
             case RESOURCE_TYPE_SNAPSHOT -> DbtSnapshot.ASSET_TYPE;
             case RESOURCE_TYPE_TEST -> DbtTest.ASSET_TYPE;
             case RESOURCE_TYPE_EXPOSURE -> DbtExposure.ASSET_TYPE;
-            default -> TABLE_ASSET_TYPE;
+            default -> throw new IllegalArgumentException("No dbt asset type for resource type '%s'".formatted(resourceType));
         };
     }
 
@@ -767,8 +764,9 @@ public abstract class ResultParser {
             return PRODUCED_RESOURCE_TYPES.contains(resourceType);
         }
 
+        // Sources are read, never built, so other tools own them.
         boolean emitted() {
-            return EMITTED_RESOURCE_TYPES.contains(resourceType);
+            return !RESOURCE_TYPE_SOURCE.equals(resourceType);
         }
     }
 }
