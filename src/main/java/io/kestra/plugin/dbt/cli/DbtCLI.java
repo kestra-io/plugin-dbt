@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.commons.io.FileUtils;
@@ -30,6 +31,7 @@ import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.storages.kv.KVStore;
 import io.kestra.core.storages.kv.KVValue;
 import io.kestra.core.storages.kv.KVValueAndMetadata;
+import io.kestra.plugin.dbt.ModelGraph;
 import io.kestra.plugin.dbt.ResultParser;
 import io.kestra.plugin.dbt.models.Manifest;
 import io.kestra.plugin.dbt.models.RunResult;
@@ -315,6 +317,39 @@ import lombok.extern.jackson.Jacksonized;
                 """
         ),
         @Example(
+            title = "Run `dbt build` and show the model graph and each model's compiled SQL in the execution's Artifacts tab. `outputCompiledSql` is off by default because compiled SQL can contain literal `--vars` values.",
+            full = true,
+            code = """
+                id: dbt_model_graph
+                namespace: company.team
+
+                tasks:
+                  - id: dbt
+                    type: io.kestra.plugin.core.flow.WorkingDirectory
+                    tasks:
+                      - id: clone_repository
+                        type: io.kestra.plugin.git.Clone
+                        url: https://github.com/dbt-labs/jaffle_shop_duckdb
+                        branch: duckdb
+
+                      - id: dbt_build
+                        type: io.kestra.plugin.dbt.cli.DbtCLI
+                        containerImage: ghcr.io/kestra-io/dbt-duckdb:latest
+                        outputCompiledSql: true
+                        taskRunner:
+                          type: io.kestra.plugin.scripts.runner.docker.Docker
+                        commands:
+                          - dbt build --no-version-check
+                        profiles: |
+                          jaffle_shop:
+                            outputs:
+                              dev:
+                                type: duckdb
+                                path: ":memory:"
+                            target: dev
+                """
+        ),
+        @Example(
             title = "Run `dbt build` and get a near-real-time Slack notification for every distinct WARN/ERROR log line, instead of waiting for the task to finish.",
             full = true,
             code = """
@@ -457,6 +492,15 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     private Property<Engine> engine = Property.ofValue(Engine.CORE);
 
     @Schema(
+        title = "Serve compiled SQL",
+        description = """
+            When true, the Show details drawer and the Artifacts tab show each model's compiled SQL, read on demand from the stored `manifest.json`. Off by default because compiled SQL can embed literal `--vars` values. This only controls the display: `manifest.json` itself stays downloadable from the task outputs."""
+    )
+    @Builder.Default
+    @PluginProperty(group = "advanced")
+    private Property<Boolean> outputCompiledSql = Property.ofValue(false);
+
+    @Schema(
         title = "Alert webhook",
         description = """
             When set, POSTs a JSON alert to `url` for each distinct WARN/ERROR dbt log line as it happens, \
@@ -474,6 +518,8 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
         KVStore storeManifestKvStore = null;
         AtomicBoolean hasWarning = new AtomicBoolean(false);
+        // dbt overwrites run_results.json on each command, so the logs keep the status of nodes an earlier command ran.
+        var loggedStatuses = new ConcurrentHashMap<String, String>();
         WebhookAlerter alerter = this.buildAlerter(runContext);
 
         try {
@@ -487,10 +533,11 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
             }
 
             var rEngine = runContext.render(this.engine).as(Engine.class).orElse(Engine.CORE);
+            var rOutputCompiledSql = runContext.render(this.outputCompiledSql).as(Boolean.class).orElse(false);
 
             CommandsWrapper builtCommandsWrapper = this.commands(runContext)
                 .withEnableOutputDirectory(true) // force the output dir, so we can get the run_results.json and manifest.json files on each task runners
-                .withLogConsumer(new DbtLogConsumer(runContext, hasWarning, alerter));
+                .withLogConsumer(new DbtLogConsumer(runContext, hasWarning, alerter, loggedStatuses));
 
             final CommandsWrapper commandsWrapper = builtCommandsWrapper.getContainerImage() == null
                 ? builtCommandsWrapper.withContainerImage(rEngine == Engine.FUSION ? FUSION_IMAGE : CORE_IMAGE)
@@ -578,25 +625,12 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                     ? so
                     : ScriptOutput.builder().exitCode(1).outputFiles(new HashMap<>()).build();
 
-                parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore);
-                Output dbtOutput = Output.builder()
-                    .warningDetected(hasWarning.get())
-                    .outputFiles(runResults.getOutputFiles())
-                    .exitCode(runResults.getExitCode())
-                    .vars(runResults.getVars())
-                    .build();
-
-                throw new RunnableTaskException(e.getMessage(), dbtOutput);
+                var failedGraph = parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, loggedStatuses);
+                throw new RunnableTaskException(e.getMessage(), output(runResults, failedGraph, hasWarning.get(), rOutputCompiledSql));
             }
 
-            parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore);
-
-            return Output.builder()
-                .warningDetected(hasWarning.get())
-                .outputFiles(runResults.getOutputFiles())
-                .exitCode(runResults.getExitCode())
-                .vars(runResults.getVars())
-                .build();
+            var graph = parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, loggedStatuses);
+            return output(runResults, graph, hasWarning.get(), rOutputCompiledSql);
         } finally {
             if (alerter != null) {
                 alerter.close();
@@ -616,7 +650,8 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         return new WebhookAlerter(runContext, rUrl, rLevel);
     }
 
-    private void parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore) throws IllegalVariableEvaluationException, IOException {
+    private ModelGraph.Stored parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore, Map<String, String> loggedStatuses)
+        throws IllegalVariableEvaluationException, IOException {
         File manifestFile = projectWorkingDirectory.resolve("target/manifest.json").toFile();
         File runResultsFile = projectWorkingDirectory.resolve("target/run_results.json").toFile();
         DbtArtifacts.restoreIfCaptured(runContext, manifestFile, run.getOutputFiles());
@@ -654,6 +689,30 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
             URI results = ResultParser.parseRunResult(runContext, runResultsFile, manifest, true, preParsedRunResults);
             run.getOutputFiles().put("run_results.json", results);
         }
+
+        // The graph needs run statuses even when `parseRunResults` is off, otherwise every node would read `not-run`.
+        var graphRunResults = preParsedRunResults != null ? preParsedRunResults : ResultParser.readRunResultQuietly(runResultsFile);
+        return ModelGraph.store(runContext, manifest, withLoggedStatuses(graphRunResults, loggedStatuses));
+    }
+
+    private static Output output(ScriptOutput run, ModelGraph.Stored graph, boolean warningDetected, boolean compiledSqlEnabled) {
+        return Output.builder()
+            .warningDetected(warningDetected)
+            .outputFiles(run.getOutputFiles())
+            .exitCode(run.getExitCode())
+            .vars(run.getVars())
+            .graph(graph == null ? null : graph.uri())
+            .graphSummary(graph == null ? null : graph.summary())
+            .compiledSqlEnabled(compiledSqlEnabled)
+            .build();
+    }
+
+    // Nodes missing from the last command's run_results.json take the last result status dbt logged for them.
+    static RunResult withLoggedStatuses(RunResult runResult, Map<String, String> loggedStatuses) {
+        var fromLogs = RunResult.builder()
+            .results(loggedStatuses.entrySet().stream().<RunResult.Result> map(logged -> RunResult.Result.builder().uniqueId(logged.getKey()).status(logged.getValue()).build()).toList())
+            .build();
+        return ModelGraph.merge(fromLogs, runResult);
     }
 
     private void fetchAndStoreManifestIfExists(RunContext runContext, KVStore loadManifestKvStore, Path projectWorkingDirectory)
@@ -682,6 +741,19 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     public static class Output extends ScriptOutput {
         @Builder.Default
         private final transient boolean warningDetected = false;
+
+        @Schema(
+            title = "Model dependency graph",
+            description = """
+                Internal storage URI of `graph.json`: models, seeds, snapshots and sources with their run status and execution time, and the edges between them. Absent when the manifest could not be read."""
+        )
+        private final URI graph;
+
+        @Schema(title = "Counts of the model dependency graph")
+        private final ModelGraph.Summary graphSummary;
+
+        @Schema(title = "Whether the compiled SQL of this run's models can be shown, from `outputCompiledSql`")
+        private final Boolean compiledSqlEnabled;
 
         @Override
         public Optional<State.Type> finalState() {

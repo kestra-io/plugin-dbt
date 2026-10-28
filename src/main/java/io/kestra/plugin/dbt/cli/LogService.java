@@ -2,6 +2,7 @@ package io.kestra.plugin.dbt.cli;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -15,17 +16,28 @@ class LogService {
     static final protected ObjectMapper MAPPER = JacksonMapper.ofJson()
         .setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
+    // Not a node result: statuses logged while a node runs, and the "None" dbt logs on end-of-command summary events.
+    private static final Set<String> NOT_A_RESULT = Set.of("started", "compiling", "executing", "None");
+
     protected static void parse(RunContext runContext, String line, AtomicBoolean hasWarning) {
-        parse(runContext, line, hasWarning, null);
+        parse(runContext, line, hasWarning, null, null);
     }
 
-    @SuppressWarnings("unchecked")
     protected static void parse(RunContext runContext, String line, AtomicBoolean hasWarning, WebhookAlerter alerter) {
+        parse(runContext, line, hasWarning, alerter, null);
+    }
+
+    /** @param nodeStatuses filled with the last result status dbt logged per node unique_id, or null to skip. */
+    @SuppressWarnings("unchecked")
+    protected static void parse(RunContext runContext, String line, AtomicBoolean hasWarning, WebhookAlerter alerter, Map<String, String> nodeStatuses) {
         if (line == null) {
             return;
         }
         try {
             Map<String, Object> jsonLog = (Map<String, Object>) MAPPER.readValue(line, Object.class);
+            if (nodeStatuses != null) {
+                recordNodeStatus(jsonLog, nodeStatuses);
+            }
 
             String level;
             String ts;
@@ -139,6 +151,16 @@ class LogService {
             }
         }
         return jsonLog.get("node_info") instanceof Map<?, ?> nodeInfo ? nodeFromInfo(nodeInfo) : null;
+    }
+
+    private static void recordNodeStatus(Map<String, Object> jsonLog, Map<String, String> nodeStatuses) {
+        var nodeInfo = jsonLog.get("data") instanceof Map<?, ?> data && data.get("node_info") instanceof Map<?, ?> info ? info : jsonLog.get("node_info");
+        if (
+            nodeInfo instanceof Map<?, ?> info && info.get("unique_id") instanceof String id && info.get("node_status") instanceof String status
+                && !status.isBlank() && !NOT_A_RESULT.contains(status)
+        ) {
+            nodeStatuses.put(id, status);
+        }
     }
 
     private static String nodeFromInfo(Map<?, ?> nodeInfo) {

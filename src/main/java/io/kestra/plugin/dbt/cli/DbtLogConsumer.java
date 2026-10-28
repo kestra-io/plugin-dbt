@@ -1,6 +1,7 @@
 package io.kestra.plugin.dbt.cli;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.kestra.core.models.tasks.runners.AbstractLogConsumer;
@@ -19,6 +20,7 @@ class DbtLogConsumer extends AbstractLogConsumer {
     private final RunContext runContext;
     private final AtomicBoolean hasWarning;
     private final WebhookAlerter alerter;
+    private final Map<String, String> nodeStatuses;
 
     DbtLogConsumer(RunContext runContext) {
         this(runContext, new AtomicBoolean(false));
@@ -29,9 +31,14 @@ class DbtLogConsumer extends AbstractLogConsumer {
     }
 
     DbtLogConsumer(RunContext runContext, AtomicBoolean hasWarning, WebhookAlerter alerter) {
+        this(runContext, hasWarning, alerter, null);
+    }
+
+    DbtLogConsumer(RunContext runContext, AtomicBoolean hasWarning, WebhookAlerter alerter, Map<String, String> nodeStatuses) {
         this.runContext = runContext;
         this.hasWarning = hasWarning;
         this.alerter = alerter;
+        this.nodeStatuses = nodeStatuses;
     }
 
     @Override
@@ -40,7 +47,7 @@ class DbtLogConsumer extends AbstractLogConsumer {
             this.outputs.putAll(PluginUtilsService.parseOut(line, runContext.logger(), runContext, isStdErr, instant));
             return;
         }
-        LogService.parse(runContext, line, hasWarning, alerter);
+        LogService.parse(runContext, line, hasWarning, alerter, nodeStatuses);
     }
 
     @Override
