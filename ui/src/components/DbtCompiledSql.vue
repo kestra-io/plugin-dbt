@@ -90,6 +90,8 @@ function toggleOpen() {
     });
 }
 onBeforeUnmount(() => document.removeEventListener("mousedown", onOutside));
+// Drops a fetch still waiting out its delay, so a closed drawer reads no manifest.
+onBeforeUnmount(() => requestId++);
 
 function choose(node: GraphNode) {
     emit("select", node);
@@ -632,7 +634,7 @@ function copy() {
     counter-reset: dbt-line;
 }
 
-/* Long lines wrap instead of scrolling sideways; the number column keeps a wrapped line under its own text. */
+/* Long lines wrap instead of scrolling sideways. The number column keeps a wrapped line under its own text. */
 .dbt-sql__line {
     display: grid;
     grid-template-columns: 3.5em minmax(0, 1fr);

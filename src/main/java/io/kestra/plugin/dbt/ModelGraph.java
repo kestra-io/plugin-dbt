@@ -73,6 +73,22 @@ public class ModelGraph {
     public record Stored(URI uri, Summary summary) {
     }
 
+    // Merges run results by unique_id in run order, a later result wins. One run result is returned as is.
+    public static RunResult merge(RunResult... inRunOrder) {
+        var present = Arrays.stream(inRunOrder).filter(runResult -> runResult != null && runResult.getResults() != null && !runResult.getResults().isEmpty()).toList();
+        if (present.size() < 2) {
+            return present.isEmpty() ? (inRunOrder.length == 0 ? null : inRunOrder[inRunOrder.length - 1]) : present.getFirst();
+        }
+
+        var byId = new LinkedHashMap<String, RunResult.Result>();
+        present.forEach(
+            runResult -> runResult.getResults().stream()
+                .filter(result -> result.getUniqueId() != null)
+                .forEach(result -> byId.put(result.getUniqueId(), result))
+        );
+        return RunResult.builder().results(new ArrayList<>(byId.values())).build();
+    }
+
     /** Never throws: the graph is a view of the run, so failing to build it only logs a warning. */
     public static Stored store(RunContext runContext, Manifest manifest, RunResult runResult) {
         if (manifest == null) {
