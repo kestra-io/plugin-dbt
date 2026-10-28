@@ -9,6 +9,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Assumptions;
@@ -30,6 +31,7 @@ import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
 import io.kestra.plugin.core.runner.Process;
+import io.kestra.plugin.dbt.models.RunResult;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 
 import jakarta.inject.Inject;
@@ -528,5 +530,25 @@ class DbtCLITest {
         var runOutput = task.run(runContext);
 
         assertThat(runOutput.getExitCode(), is(0));
+    }
+
+    @Test
+    void withLoggedStatuses_shouldFillNodesAnEarlierCommandRan() {
+        // `dbt seed`, `dbt run`, `dbt test`: run_results.json only holds the last command's tests
+        var lastCommand = RunResult.builder()
+            .results(List.of(RunResult.Result.builder().uniqueId("test.shop.unique_orders_id").status("pass").build()))
+            .build();
+        var logged = Map.of(
+            "seed.shop.raw_orders", "success",
+            "model.shop.orders", "error",
+            "test.shop.unique_orders_id", "fail"
+        );
+
+        var merged = DbtCLI.withLoggedStatuses(lastCommand, logged);
+
+        var statuses = merged.getResults().stream().collect(Collectors.toMap(RunResult.Result::getUniqueId, RunResult.Result::getStatus));
+        // run_results.json stays the source of truth for the nodes it has
+        assertThat(statuses, is(Map.of("seed.shop.raw_orders", "success", "model.shop.orders", "error", "test.shop.unique_orders_id", "pass")));
+        assertThat(DbtCLI.withLoggedStatuses(lastCommand, Map.of()), is(lastCommand));
     }
 }
