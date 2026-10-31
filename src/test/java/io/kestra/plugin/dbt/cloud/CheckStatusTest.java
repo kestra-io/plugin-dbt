@@ -1,6 +1,7 @@
 package io.kestra.plugin.dbt.cloud;
 
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -16,11 +17,13 @@ import io.kestra.core.models.assets.Custom;
 import io.kestra.core.models.executions.LogEntry;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.models.tasks.RunnableTaskException;
 import io.kestra.core.models.validations.ModelValidator;
 import io.kestra.core.queues.DispatchQueueInterface;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.runners.WorkerTaskResult;
+import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
 
@@ -159,6 +162,53 @@ class CheckStatusTest {
         assertThat(output.getRunResults(), is(notNullValue()));
         // manifest was 404 — URI must be absent
         assertThat(output.getManifest(), is(nullValue()));
+        assertThat(output.getGraph(), is(nullValue()));
+    }
+
+    @Test
+    void shouldStoreTheModelGraphOfTheRun() throws Exception {
+        stubFor(
+            get(urlMatching("/api/v2/accounts/123/runs/6666/\\?.*"))
+                .willReturn(okJson("""
+                        { "data": { "id": 6666, "status": 10, "status_humanized": "Success", "duration_humanized": "1s", "run_steps": [] } }
+                    """))
+        );
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/6666/artifacts/manifest.json"))
+                .willReturn(okJson("""
+                        {
+                          "metadata": {"project_name": "analytics"},
+                          "nodes": {"model.analytics.stg_orders": {"resource_type": "model", "name": "stg_orders", "unique_id": "model.analytics.stg_orders"}},
+                          "parent_map": {"model.analytics.stg_orders": []}
+                        }
+                    """))
+        );
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/6666/artifacts/run_results.json"))
+                .willReturn(okJson("""
+                        {"metadata": {}, "results": [{"status": "success", "unique_id": "model.analytics.stg_orders", "timing": []}]}
+                    """))
+        );
+
+        var runContext = runContextFactory.of(Map.of());
+        var output = CheckStatus.builder()
+            .id(IdUtils.create())
+            .type(CheckStatus.class.getName())
+            .baseUrl(Property.ofValue("http://localhost:8089"))
+            .runId(Property.ofValue("6666"))
+            .accountId(Property.ofValue("123"))
+            .token(Property.ofValue("fake-token"))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(5)))
+            .parseRunResults(Property.ofValue(false))
+            .outputCompiledSql(Property.ofValue(true))
+            .build()
+            .run(runContext);
+
+        assertThat(output.getGraphSummary().getNodes(), is(1));
+        assertThat(output.getCompiledSqlEnabled(), is(true));
+        // run statuses are joined even with parseRunResults off
+        var graph = JacksonMapper.ofJson().readTree(runContext.storage().getFile(output.getGraph()));
+        assertThat(graph.path("nodes").path(0).path("status").asText(), is("success"));
     }
 
     /**
@@ -247,6 +297,107 @@ class CheckStatusTest {
 
         var ex = assertThrows(Exception.class, () -> checkStatus.run(runContext));
         assertThat(ex.getMessage(), containsString("Compilation failed in step 1"));
+    }
+
+    @Test
+    void shouldMergeTheRunResultsOfEveryDbtStepIntoTheGraph() throws Exception {
+        stubFor(
+            get(urlMatching("/api/v2/accounts/123/runs/6668/\\?.*"))
+                .willReturn(okJson("""
+                        { "data": { "id": 6668, "status": 10, "status_humanized": "Success", "duration_humanized": "1s", "run_steps": [
+                            {"id": 11, "index": 1, "name": "Invoke dbt with `dbt run`", "status": 10, "logs": ""},
+                            {"id": 12, "index": 2, "name": "Invoke dbt with `dbt test`", "status": 10, "logs": ""}
+                        ] } }
+                    """))
+        );
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/6668/artifacts/manifest.json?step=2"))
+                .willReturn(okJson("""
+                        {"nodes": {
+                            "model.analytics.stg_orders": {"resource_type": "model", "name": "stg_orders", "unique_id": "model.analytics.stg_orders"},
+                            "model.analytics.fct_orders": {"resource_type": "model", "name": "fct_orders", "unique_id": "model.analytics.fct_orders"},
+                            "test.analytics.not_null_stg_orders_id": {"resource_type": "test", "name": "not_null_stg_orders_id", "unique_id": "test.analytics.not_null_stg_orders_id"}
+                        }}
+                    """))
+        );
+        // each dbt step writes its own run_results: stg_orders ran in step 1 only, fct_orders failed in step 1 then succeeded in step 2
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/6668/artifacts/run_results.json?step=1"))
+                .willReturn(okJson("""
+                        {"metadata": {}, "results": [
+                            {"status": "success", "unique_id": "model.analytics.stg_orders", "adapter_response": {}, "timing": []},
+                            {"status": "error", "unique_id": "model.analytics.fct_orders", "adapter_response": {}, "timing": []}
+                        ]}
+                    """))
+        );
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/6668/artifacts/run_results.json?step=2"))
+                .willReturn(okJson("""
+                        {"metadata": {}, "results": [
+                            {"status": "success", "unique_id": "model.analytics.fct_orders", "adapter_response": {}, "timing": []},
+                            {"status": "pass", "unique_id": "test.analytics.not_null_stg_orders_id", "adapter_response": {}, "timing": []}
+                        ]}
+                    """))
+        );
+
+        var runContext = runContextFactory.of(Map.of());
+        var output = CheckStatus.builder()
+            .id(IdUtils.create())
+            .type(CheckStatus.class.getName())
+            .baseUrl(Property.ofValue("http://localhost:8089"))
+            .runId(Property.ofValue("6668"))
+            .accountId(Property.ofValue("123"))
+            .token(Property.ofValue("fake-token"))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(5)))
+            .parseRunResults(Property.ofValue(false))
+            .build()
+            .run(runContext);
+
+        var graph = JacksonMapper.ofJson().readTree(runContext.storage().getFile(output.getGraph()));
+        var statuses = new HashMap<String, String>();
+        graph.path("nodes").forEach(node -> statuses.put(node.path("uniqueId").asText(), node.path("status").asText()));
+        assertThat(statuses.get("model.analytics.stg_orders"), is("success"));
+        // a later step wins over an earlier one
+        assertThat(statuses.get("model.analytics.fct_orders"), is("success"));
+    }
+
+    @Test
+    void shouldKeepTheModelGraphOnAFailedRun() throws Exception {
+        stubFor(
+            get(urlMatching("/api/v2/accounts/123/runs/6667/\\?.*"))
+                .willReturn(okJson("""
+                        { "data": { "id": 6667, "status": 20, "status_humanized": "Error", "duration_humanized": "1s", "run_steps": [] } }
+                    """))
+        );
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/6667/artifacts/manifest.json"))
+                .willReturn(okJson("""
+                        {"nodes": {"model.analytics.stg_orders": {"resource_type": "model", "name": "stg_orders", "unique_id": "model.analytics.stg_orders"}}}
+                    """))
+        );
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/6667/artifacts/run_results.json"))
+                .willReturn(okJson("""
+                        {"metadata": {}, "results": [{"status": "error", "unique_id": "model.analytics.stg_orders", "adapter_response": {}, "timing": []}]}
+                    """))
+        );
+
+        var checkStatus = CheckStatus.builder()
+            .id(IdUtils.create())
+            .type(CheckStatus.class.getName())
+            .baseUrl(Property.ofValue("http://localhost:8089"))
+            .runId(Property.ofValue("6667"))
+            .accountId(Property.ofValue("123"))
+            .token(Property.ofValue("fake-token"))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(5)))
+            .parseRunResults(Property.ofValue(false))
+            .build();
+
+        var ex = assertThrows(RunnableTaskException.class, () -> checkStatus.run(runContextFactory.of(Map.of())));
+
+        var output = (CheckStatus.Output) ex.getOutput();
+        assertThat(output.getGraph(), is(notNullValue()));
+        assertThat(output.getGraphSummary().getByStatus().get("error"), is(1));
     }
 
     /**
@@ -625,8 +776,10 @@ class CheckStatusTest {
         TestsUtils.awaitLog(logs, l -> l.getMessage() != null && l.getMessage().contains("polled step output"));
 
         assertThat(output, is(notNullValue()));
-        verify(2, getRequestedFor(urlPathEqualTo("/api/v2/accounts/123/runs/2223/"))
-            .withQueryParam("include_related", containing("debug_logs")));
+        verify(
+            2, getRequestedFor(urlPathEqualTo("/api/v2/accounts/123/runs/2223/"))
+                .withQueryParam("include_related", containing("debug_logs"))
+        );
     }
 
     // A kill during the final debug_logs fetch must propagate, not be swallowed as a fallback.
@@ -661,7 +814,8 @@ class CheckStatusTest {
         RunContext runContext = mockRunContext(checkStatus);
 
         Thread runner = Thread.currentThread();
-        var interrupter = new Thread(() -> {
+        var interrupter = new Thread(() ->
+        {
             try {
                 Thread.sleep(1000);
             } catch (InterruptedException ignored) {
