@@ -281,7 +281,7 @@ import lombok.extern.jackson.Jacksonized;
                 """
         ),
         @Example(
-            title = "Run dbt build using the Fusion engine (dbt Core v2.0). The `engine: FUSION` property selects the `ghcr.io/kestra-io/dbt-fusion` image automatically when no `containerImage` is set. Note that `--no-partial-parse` / `--partial-parse` flags are not supported by Fusion and should be omitted from commands. With the `duckdb` adapter, Fusion requires an explicit `database` in the profile (unlike dbt Core, which infers it from the `:memory:` path).",
+            title = "Run dbt build using the Fusion engine (dbt Core v2.0). The `engine: FUSION` property selects the `ghcr.io/kestra-io/dbt-fusion` image automatically when no `containerImage` is set. Note that `--no-partial-parse` / `--partial-parse` flags are not supported by Fusion and should be omitted from commands. With the `duckdb` adapter, Fusion requires an explicit `database` in the profile (unlike dbt Core, which infers it from the `:memory:` path). Fusion may carry commercial or competitive restrictions under its own licence, so check the licence of the image you run.",
             full = true,
             code = """
                 id: dbt_fusion_build
@@ -450,7 +450,10 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
             Selects the fallback image when none is set on the task or runner: \
             CORE → `ghcr.io/kestra-io/dbt` (default), FUSION → `ghcr.io/kestra-io/dbt-fusion`.
             When using FUSION (dbt Core v2.0), the `--no-partial-parse` and `--partial-parse` \
-            flags are silently ignored and should be omitted from commands."""
+            flags are silently ignored and should be omitted from commands.
+            The Fusion engine (dbt Core v2) may carry commercial or competitive restrictions under its own licence. \
+            If you need pure open source with zero competitive or commercial restrictions, install dbt-oss for v2, \
+            or pin dbt-core v1.x, by setting `containerImage` yourself. Check the licence of the image you run."""
     )
     @Builder.Default
     @PluginProperty(group = "advanced")
