@@ -321,7 +321,7 @@ class DbtCLITest {
     }
 
     @Test
-    void run_withFusionEngine_shouldUseFusionImage() throws Exception {
+    void run_withFusionEngineAndNoContainerImage_shouldFail() {
         DbtCLI execute = DbtCLI.builder()
             .id(IdUtils.create())
             .type(DbtCLI.class.getName())
@@ -330,10 +330,12 @@ class DbtCLITest {
             .commands(Property.ofValue(List.of("dbt --version")))
             .build();
 
-        RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
-        ScriptOutput runOutput = execute.run(runContext);
+        var exception = assertThrows(IllegalArgumentException.class, () -> {
+            RunContext runContext = TestsUtils.mockRunContext(runContextFactory, execute, Map.of());
+            execute.run(runContext);
+        });
 
-        assertThat(runOutput.getExitCode(), is(0));
+        assertThat(exception.getMessage(), containsString("requires an explicit `containerImage`"));
     }
 
     @Test

@@ -8,7 +8,6 @@ tasks:
       - dbt_demo
       - dbt_cli_assets_kv_test
       - dbt_cli_complex_dag_test
-      - dbt_cli_fusion_test
     tasks:
       - id: subflow
         type: io.kestra.plugin.core.flow.Subflow

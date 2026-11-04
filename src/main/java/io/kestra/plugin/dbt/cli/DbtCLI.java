@@ -281,7 +281,7 @@ import lombok.extern.jackson.Jacksonized;
                 """
         ),
         @Example(
-            title = "Run dbt build using the Fusion engine (dbt Core v2.0). The `engine: FUSION` property selects the `ghcr.io/kestra-io/dbt-fusion` image automatically when no `containerImage` is set. Note that `--no-partial-parse` / `--partial-parse` flags are not supported by Fusion and should be omitted from commands. With the `duckdb` adapter, Fusion requires an explicit `database` in the profile (unlike dbt Core, which infers it from the `:memory:` path). Fusion may carry commercial or competitive restrictions under its own licence, so check the licence of the image you run.",
+            title = "Run dbt build using the Fusion engine (dbt Core v2.0). Kestra does not ship a Fusion image, so `engine: FUSION` requires you to set `containerImage` to an image whose licence you have reviewed. Note that `--no-partial-parse` / `--partial-parse` flags are not supported by Fusion and should be omitted from commands. With the `duckdb` adapter, Fusion requires an explicit `database` in the profile (unlike dbt Core, which infers it from the `:memory:` path). Fusion may carry commercial or competitive restrictions under its own licence, so check the licence of the image you run.",
             full = true,
             code = """
                 id: dbt_fusion_build
@@ -299,6 +299,7 @@ import lombok.extern.jackson.Jacksonized;
                       - id: dbt_build
                         type: io.kestra.plugin.dbt.cli.DbtCLI
                         engine: FUSION
+                        containerImage: <your-fusion-image>
                         taskRunner:
                           type: io.kestra.plugin.scripts.runner.docker.Docker
                         commands:
@@ -372,7 +373,6 @@ import lombok.extern.jackson.Jacksonized;
 )
 public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Output> {
     private static final String CORE_IMAGE = "ghcr.io/kestra-io/dbt";
-    private static final String FUSION_IMAGE = "ghcr.io/kestra-io/dbt-fusion";
 
     @Schema(
         title = "dbt commands to execute",
@@ -447,8 +447,8 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     @Schema(
         title = "dbt engine",
         description = """
-            Selects the fallback image when none is set on the task or runner: \
-            CORE → `ghcr.io/kestra-io/dbt` (default), FUSION → `ghcr.io/kestra-io/dbt-fusion`.
+            CORE uses `ghcr.io/kestra-io/dbt` as the fallback image when none is set on the task or runner (default). \
+            FUSION has no default image: you must set `containerImage` yourself, otherwise the task fails.
             When using FUSION (dbt Core v2.0), the `--no-partial-parse` and `--partial-parse` \
             flags are silently ignored and should be omitted from commands.
             The Fusion engine (dbt Core v2) may carry commercial or competitive restrictions under its own licence. \
@@ -495,8 +495,16 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                 .withEnableOutputDirectory(true) // force the output dir, so we can get the run_results.json and manifest.json files on each task runners
                 .withLogConsumer(new DbtLogConsumer(runContext, hasWarning, alerter));
 
+            if (rEngine == Engine.FUSION && builtCommandsWrapper.getContainerImage() == null) {
+                throw new IllegalArgumentException(
+                    "engine FUSION requires an explicit `containerImage` (on the task or the runner). "
+                        + "Kestra does not provide a default Fusion image because Fusion may carry commercial or competitive restrictions under its own licence. "
+                        + "Set `containerImage` to an image whose licence you have reviewed, or use an open-source option such as dbt-oss for v2 or a pinned dbt-core v1.x."
+                );
+            }
+
             final CommandsWrapper commandsWrapper = builtCommandsWrapper.getContainerImage() == null
-                ? builtCommandsWrapper.withContainerImage(rEngine == Engine.FUSION ? FUSION_IMAGE : CORE_IMAGE)
+                ? builtCommandsWrapper.withContainerImage(CORE_IMAGE)
                 : builtCommandsWrapper;
 
             var rProjectDir = runContext.render(projectDir).as(String.class);
