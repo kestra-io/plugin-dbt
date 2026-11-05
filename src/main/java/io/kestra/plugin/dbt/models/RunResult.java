@@ -54,11 +54,12 @@ public class RunResult {
             if (this.status == null)
                 return State.Type.FAILED;
             return switch (this.status) {
-                case "error", "fail", "runtime_error" -> State.Type.FAILED;
+                // dbt writes "runtime error" with a space (NodeStatus.RuntimeErr)
+                case "error", "fail", "runtime error", "runtime_error" -> State.Type.FAILED;
                 case "warn" -> State.Type.WARNING;
                 case "skipped" -> State.Type.SKIPPED;
-                // Fusion v2.0 emits "run" for a successfully executed model
-                case "success", "pass", "run" -> State.Type.SUCCESS;
+                // Fusion v2.0 emits "run" for an executed model, and dbt build "no-op" for nodes with nothing to run, such as exposures
+                case "success", "pass", "run", "no-op" -> State.Type.SUCCESS;
                 default -> throw new IllegalStateException("No suitable status for '" + this.status + "'");
             };
         }
