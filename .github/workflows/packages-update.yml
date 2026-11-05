@@ -1,11 +1,14 @@
 name: Update All Packages
 
 on:
+  schedule:
+    - cron: '0 2 * * 1'
   workflow_dispatch:
     inputs:
       image_tag:
         description: 'Image tag to use for all packages'
-        required: true
+        required: false
+        default: 'latest'
       dbt_version:
         description: 'Pin dbt version to install in built images (optional). Example: 1.9.1'
         required: false
@@ -52,7 +55,7 @@ jobs:
       - id: image-tag  # example output: "ghcr.io/kestra-io/dbt-snowflake:<image_tag>"
         run: |
           export IMAGE=$(basename ${{ matrix.image }} .Dockerfile)
-          IMAGE_URL="ghcr.io/kestra-io/$IMAGE:${{ inputs.image_tag }}"
+          IMAGE_URL="ghcr.io/kestra-io/$IMAGE:${{ inputs.image_tag || 'latest' }}"
           TAGS="$IMAGE_URL"
           # If DBT_VERSION is provided, add an additional dbt-tag
           if [ -n "$DBT_VERSION" ]; then
