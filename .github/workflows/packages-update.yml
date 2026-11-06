@@ -53,9 +53,12 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - id: image-tag  # example output: "ghcr.io/kestra-io/dbt-snowflake:<image_tag>"
+        env:
+          DOCKERFILE: ${{ matrix.image }}
+          IMAGE_TAG: ${{ inputs.image_tag || 'latest' }}
         run: |
-          export IMAGE=$(basename ${{ matrix.image }} .Dockerfile)
-          IMAGE_URL="ghcr.io/kestra-io/$IMAGE:${{ inputs.image_tag || 'latest' }}"
+          export IMAGE=$(basename "$DOCKERFILE" .Dockerfile)
+          IMAGE_URL="ghcr.io/kestra-io/$IMAGE:$IMAGE_TAG"
           TAGS="$IMAGE_URL"
           # If DBT_VERSION is provided, add an additional dbt-tag
           if [ -n "$DBT_VERSION" ]; then
@@ -63,7 +66,7 @@ jobs:
             TAGS="$TAGS,$DBT_TAG"
           fi
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
-          echo "file=dockerfiles/${{ matrix.image }}" >> $GITHUB_OUTPUT
+          echo "file=dockerfiles/$DOCKERFILE" >> $GITHUB_OUTPUT
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
