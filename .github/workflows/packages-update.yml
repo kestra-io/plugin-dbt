@@ -33,6 +33,7 @@ jobs:
     env:
       DBT_VERSION: ${{ github.event.inputs.dbt_version }}
     strategy:
+      fail-fast: false
       matrix:
         image: ${{ fromJson(needs.list-dockerfiles.outputs.matrix) }}
     steps:
@@ -70,7 +71,6 @@ jobs:
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
-        continue-on-error: true  # avoid blocking other images
         with:
           context: .
           push: true
