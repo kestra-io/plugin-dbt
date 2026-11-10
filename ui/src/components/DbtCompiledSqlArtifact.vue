@@ -1,0 +1,35 @@
+<script lang="ts">
+type ArtifactContext = { fetchOutputs?: () => Promise<Record<string, unknown>> };
+
+/** Tells from the Artifacts list that compiled SQL is off, before the user opens it. */
+export async function getSubtitle({ fetchOutputs }: ArtifactContext): Promise<string | undefined> {
+    const outputs = await fetchOutputs?.();
+    return outputs && outputs.compiledSqlEnabled !== true ? "Off, set outputCompiledSql: true" : undefined;
+}
+</script>
+
+<script setup lang="ts">
+import { ref, watch } from "vue";
+import type { KnownSlotProps } from "@kestra-io/artifact-sdk";
+import DbtCompiledSql from "./DbtCompiledSql.vue";
+import { type GraphNode, initialNode, REV_KEY, useModelGraph } from "../composables/useModelGraph";
+
+const props = defineProps<KnownSlotProps["execution-artifact"]>();
+
+// The graph lists the models to pick from and their run status.
+const { graph, message } = useModelGraph(
+    () => props.task?.id,
+    () => props.execution,
+    () => props.fetchEndpoint,
+);
+
+const selected = ref<GraphNode | null>(null);
+watch(graph, (g) => (selected.value = g ? initialNode(g.nodes) : null), { immediate: true });
+</script>
+
+<template>
+    <div class="dbt-artifact" :data-dbt-rev="(execution as Record<string, unknown> | undefined)?.[REV_KEY]">
+        <p v-if="message || !graph" class="dbt-artifact__empty">{{ message }}</p>
+        <DbtCompiledSql v-else :node="selected" :nodes="graph.nodes" :fetchEndpoint="fetchEndpoint" embedded @select="selected = $event" />
+    </div>
+</template>

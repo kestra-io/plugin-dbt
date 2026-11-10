@@ -9,6 +9,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Assumptions;
@@ -24,11 +25,13 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTaskException;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
+import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.storages.kv.KVStore;
 import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
 import io.kestra.plugin.core.runner.Process;
+import io.kestra.plugin.dbt.models.RunResult;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 
 import jakarta.inject.Inject;
@@ -459,14 +462,50 @@ class DbtCLITest {
         var output = task.run(runContext);
 
         assertThat(output.getExitCode(), is(0));
-        assertThat(output.getOutputFiles(), allOf(
-            hasKey("dbt/target/manifest.json"),
-            hasKey("dbt/target/run_results.json"),
-            hasKey("manifest.json"),
-            hasKey("run_results.json")
-        ));
+        assertThat(
+            output.getOutputFiles(), allOf(
+                hasKey("dbt/target/manifest.json"),
+                hasKey("dbt/target/run_results.json"),
+                hasKey("manifest.json"),
+                hasKey("run_results.json")
+            )
+        );
         assertThat(runContext.dynamicWorkerResults(), hasSize(1));
         assertThat(runContext.dynamicWorkerResults().getFirst().getTaskRun().getTaskId(), is("model.analytics.stg_orders"));
+
+        assertThat(output.getGraphSummary().getNodes(), is(1));
+        assertThat(output.getGraphSummary().getByStatus(), is(Map.of("success", 1)));
+        // compiled SQL stays off unless outputCompiledSql is set
+        assertThat(output.getCompiledSqlEnabled(), is(false));
+        try (var graph = runContext.storage().getFile(output.getGraph())) {
+            var node = JacksonMapper.ofJson().readTree(graph).path("nodes").path(0);
+            assertThat(node.path("uniqueId").asText(), is("model.analytics.stg_orders"));
+            assertThat(node.path("status").asText(), is("success"));
+        }
+    }
+
+    @Test
+    void run_withFailureAndRunResultsParsingOff_shouldStillOutputTheGraphWithRunStatuses() throws Exception {
+        var task = DbtCLI.builder()
+            .id(IdUtils.create())
+            .type(DbtCLI.class.getName())
+            .taskRunner(Process.instance())
+            .projectDir(Property.ofValue("dbt"))
+            .parseRunResults(Property.ofValue(false))
+            .commands(Property.ofValue(List.of("exit 1")))
+            .build();
+
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        copyFolder(
+            Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource("captured-artifacts")).getPath()),
+            Files.createDirectories(runContext.workingDir().path(true).resolve("dbt/target"))
+        );
+
+        var exception = assertThrows(RunnableTaskException.class, () -> task.run(runContext));
+        var output = (DbtCLI.Output) exception.getOutput();
+
+        assertThat(output.getGraph(), notNullValue());
+        assertThat(output.getGraphSummary().getByStatus(), is(Map.of("success", 1)));
     }
 
     @Test
@@ -493,5 +532,25 @@ class DbtCLITest {
         var runOutput = task.run(runContext);
 
         assertThat(runOutput.getExitCode(), is(0));
+    }
+
+    @Test
+    void withLoggedStatuses_shouldFillNodesAnEarlierCommandRan() {
+        // `dbt seed`, `dbt run`, `dbt test`: run_results.json only holds the last command's tests
+        var lastCommand = RunResult.builder()
+            .results(List.of(RunResult.Result.builder().uniqueId("test.shop.unique_orders_id").status("pass").build()))
+            .build();
+        var logged = Map.of(
+            "seed.shop.raw_orders", "success",
+            "model.shop.orders", "error",
+            "test.shop.unique_orders_id", "fail"
+        );
+
+        var merged = DbtCLI.withLoggedStatuses(lastCommand, logged);
+
+        var statuses = merged.getResults().stream().collect(Collectors.toMap(RunResult.Result::getUniqueId, RunResult.Result::getStatus));
+        // run_results.json stays the source of truth for the nodes it has
+        assertThat(statuses, is(Map.of("seed.shop.raw_orders", "success", "model.shop.orders", "error", "test.shop.unique_orders_id", "pass")));
+        assertThat(DbtCLI.withLoggedStatuses(lastCommand, Map.of()), is(lastCommand));
     }
 }

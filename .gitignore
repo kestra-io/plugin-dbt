@@ -18,3 +18,6 @@ src/test/resources/project/state/
 src/test/resources/project/.profile
 .factorypath
 bin/
+
+# UI build artifact
+src/main/resources/plugin-ui/

@@ -44,11 +44,11 @@ public abstract class ResultParser {
     private static final String RESOURCE_TYPE_MODEL = "model";
     private static final String RESOURCE_TYPE_SEED = "seed";
     private static final String RESOURCE_TYPE_SNAPSHOT = "snapshot";
-    private static final String RESOURCE_TYPE_SOURCE = "source";
+    static final String RESOURCE_TYPE_SOURCE = "source";
     private static final String RESOURCE_TYPE_TEST = "test";
 
     // dbt node resource types that map to a physical table dbt builds.
-    private static final Set<String> PRODUCED_RESOURCE_TYPES = Set.of(RESOURCE_TYPE_MODEL, RESOURCE_TYPE_SEED, RESOURCE_TYPE_SNAPSHOT);
+    static final Set<String> PRODUCED_RESOURCE_TYPES = Set.of(RESOURCE_TYPE_MODEL, RESOURCE_TYPE_SEED, RESOURCE_TYPE_SNAPSHOT);
 
     // Values are strings, not booleans: EventTrigger (kestra-ee) filters asset metadata with only
     // EQUAL_TO/NOT_EQUAL_TO via String.valueOf, so a numeric or boolean status could not be matched.
@@ -474,7 +474,7 @@ public abstract class ResultParser {
     }
 
     /** Never throws: {@code runResultsFile} unreadable or malformed is reported as "not parsed" (null), never as an exception. */
-    private static RunResult readRunResultQuietly(File runResultsFile) {
+    public static RunResult readRunResultQuietly(File runResultsFile) {
         if (runResultsFile == null || !runResultsFile.exists()) {
             return null;
         }
@@ -656,7 +656,7 @@ public abstract class ResultParser {
         return metadata;
     }
 
-    private static String lower(String value) {
+    static String lower(String value) {
         return value == null ? null : value.toLowerCase(Locale.ROOT);
     }
 
@@ -685,7 +685,7 @@ public abstract class ResultParser {
         return fallback;
     }
 
-    private static String firstNonBlank(String... values) {
+    static String firstNonBlank(String... values) {
         if (values == null) {
             return null;
         }

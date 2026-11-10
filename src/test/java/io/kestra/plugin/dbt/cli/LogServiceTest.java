@@ -1,5 +1,6 @@
 package io.kestra.plugin.dbt.cli;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -41,6 +42,27 @@ class LogServiceTest {
         LogService.parse(runContext, line, hasWarning);
 
         assertThat(hasWarning.get(), is(false));
+    }
+
+    @Test
+    void parse_shouldRecordTheLastResultStatusPerNode() {
+        var runContext = mockRunContext();
+        var nodeStatuses = new HashMap<String, String>();
+        // Real dbt 1.10 lines: neither a running status nor the summary's "None" overwrites a result
+        var lines = List.of(
+            """
+                {"info":{"level":"info","msg":"1 of 1 START seed file main.raw","name":"LogStartLine","ts":"2026-10-28T06:23:29.298028Z","thread":"Thread-1 (worker)"},"data":{"node_info":{"unique_id":"seed.shop.raw","node_status":"started"}}}""",
+            """
+                {"info":{"level":"info","msg":"1 of 1 OK loaded seed file main.raw","name":"LogSeedResult","ts":"2026-10-28T06:23:29.374653Z","thread":"Thread-1 (worker)"},"data":{"node_info":{"unique_id":"seed.shop.raw","node_status":"success"}}}""",
+            """
+                {"info":{"level":"error","msg":"2 of 2 ERROR creating sql view model main.broken","name":"LogModelResult","ts":"2026-10-28T06:23:32.039792Z","thread":"Thread-1 (worker)"},"data":{"node_info":{"unique_id":"model.shop.broken","node_status":"error"}}}""",
+            """
+                {"info":{"level":"error","msg":"Failure in model broken (models/broken.sql)","name":"RunResultFailure","ts":"2026-10-28T06:23:32.120000Z","thread":"MainThread"},"data":{"node_info":{"unique_id":"model.shop.broken","node_status":"None"}}}"""
+        );
+
+        lines.forEach(line -> LogService.parse(runContext, line.trim(), new AtomicBoolean(false), null, nodeStatuses));
+
+        assertThat(nodeStatuses, is(Map.of("seed.shop.raw", "success", "model.shop.broken", "error")));
     }
 
     @Test
