@@ -225,8 +225,10 @@ class CheckStatusArtifactStepTest {
         verifyArtifacts("?step=5");
         for (var artifact : List.of("run_results.json", "manifest.json")) {
             verify(0, getRequestedFor(urlEqualTo(RUN_PATH + "artifacts/" + artifact)));
-            verify(0, getRequestedFor(urlEqualTo(RUN_PATH + "artifacts/" + artifact + "?step=4")));
         }
+        // the run step's results are read once more, only so the model graph gets the statuses of the models it built
+        verify(1, getRequestedFor(urlEqualTo("%sartifacts/run_results.json?step=4".formatted(RUN_PATH))));
+        verify(0, getRequestedFor(urlEqualTo("%sartifacts/manifest.json?step=4".formatted(RUN_PATH))));
     }
 
     @Test

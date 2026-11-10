@@ -12,6 +12,7 @@ import io.kestra.core.http.client.configurations.HttpConfiguration;
 import io.kestra.core.http.client.configurations.TimeoutConfiguration;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.models.tasks.RunnableTaskException;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
@@ -24,6 +25,7 @@ import static com.github.tomakehurst.wiremock.stubbing.Scenario.STARTED;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @KestraTest
 @WireMockTest(httpPort = 28181)
@@ -143,6 +145,51 @@ class MockTriggerRunTest {
         assertThat(output.getRunId(), is(789L));
         assertThat(output.getRunResults().toString(), containsString("kestra://"));
         assertThat(output.getManifest(), is(notNullValue()));
+    }
+
+    @Test
+    void testFailedRunKeepsTheGraphOnTheTriggerRunOutput() throws Exception {
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(okJson("{\"data\":{\"id\":790}}"))
+        );
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/790/"))
+                .willReturn(okJson("""
+                        { "data": { "id": 790, "status": 20, "status_humanized": "Error", "duration_humanized": "1m", "run_steps": [] } }
+                    """))
+        );
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/790/artifacts/manifest.json"))
+                .willReturn(okJson("""
+                        {"nodes": {"model.my_model": {"resource_type": "model", "name": "my_model", "unique_id": "model.my_model"}}}
+                    """))
+        );
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/790/artifacts/run_results.json"))
+                .willReturn(okJson("""
+                        {"metadata": {}, "results": [{"status": "error", "unique_id": "model.my_model", "adapter_response": {}, "timing": []}]}
+                    """))
+        );
+
+        var task = TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("demo"))
+            .parseRunResults(Property.ofValue(false))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .wait(Property.ofValue(true))
+            .build();
+
+        var ex = assertThrows(RunnableTaskException.class, () -> task.run(TestsUtils.mockRunContext(runContextFactory, task, Map.of())));
+
+        var output = (TriggerRun.Output) ex.getOutput();
+        assertThat(output.getRunId(), is(790L));
+        assertThat(output.getGraph(), is(notNullValue()));
+        // the CheckStatus failure stays as the cause
+        assertThat(ex.getCause(), instanceOf(RunnableTaskException.class));
     }
 
     @Test

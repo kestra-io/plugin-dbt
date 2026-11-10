@@ -15,6 +15,7 @@ import java.util.HexFormat;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.slf4j.Logger;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -22,13 +23,13 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.client.HttpClientException;
-import org.apache.commons.lang3.exception.ExceptionUtils;
 import io.kestra.core.http.client.HttpClientResponseException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
+import io.kestra.core.models.tasks.RunnableTaskException;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.storages.kv.KVMetadata;
@@ -36,6 +37,7 @@ import io.kestra.core.storages.kv.KVStore;
 import io.kestra.core.storages.kv.KVValue;
 import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.core.utils.Await;
+import io.kestra.plugin.dbt.ModelGraph;
 import io.kestra.plugin.dbt.ResultParser;
 import io.kestra.plugin.dbt.cloud.models.Job;
 import io.kestra.plugin.dbt.cloud.models.JobStatus;
@@ -237,6 +239,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
     @Override
     public CheckStatus.Output run(RunContext runContext) throws Exception {
         Logger logger = runContext.logger();
+        // Rendered before polling, so a bad template fails fast instead of replacing the dbt failure later.
+        var rOutputCompiledSql = runContext.render(this.outputCompiledSql).as(Boolean.class).orElse(false);
 
         // Fresh per invocation: run() is called more than once on one instance, and stale entries here
         // would suppress a later run's status logs.
@@ -317,6 +321,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         // dynamic taskruns/logs (issue #315) — those must land even though the task ends up throwing.
         URI runResultsUri = null;
         URI manifestUri = null;
+        ModelGraph.Stored graph = null;
         List<String> assets = List.of();
         boolean artifactsProcessed = false;
         boolean lineageLanded = false;
@@ -324,7 +329,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             // Artifacts are uploaded asynchronously by dbt Cloud and manifest.json is absent for some
             // run shapes (e.g. dbt source freshness). Tolerate 404 so a legitimate success is not
             // reported as a failure.
-            var artifactStep = artifactStep(finalRunResponse.getData());
+            var dbtSteps = dbtSteps(finalRunResponse.getData());
+            var artifactStep = dbtSteps.isEmpty() ? null : dbtSteps.getLast();
             DownloadedArtifact<RunResult> runResultsArtifact = downloadArtifacts(runContext, runIdRendered, "run_results.json", artifactStep, RunResult.class);
             DownloadedArtifact<ManifestArtifact> manifestArtifact = downloadArtifacts(runContext, runIdRendered, "manifest.json", artifactStep, ManifestArtifact.class);
 
@@ -344,6 +350,9 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                 assets = manifestResult.assetIds();
                 lineageLanded = manifestResult.fullyEmitted();
             }
+
+            // Built before run_results is parsed so a parse failure cannot drop it, and from raw statuses even with `parseRunResults` off.
+            graph = manifest == null ? null : ModelGraph.store(runContext, manifest, graphRunResult(runContext, runIdRendered, dbtSteps, runResultsArtifact));
 
             if (runResultsArtifact != null) {
                 if (rParseRunResults) {
@@ -368,6 +377,17 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             rememberProcessed(runContext, processedKey, runIdRendered);
         }
 
+        var output = Output.builder()
+            .runId(runIdRendered)
+            .lineageEmitted(!alreadyEmitted && lineageLanded)
+            .assets(assets)
+            .runResults(runResultsUri)
+            .manifest(manifestUri)
+            .graph(graph == null ? null : graph.uri())
+            .graphSummary(graph == null ? null : graph.summary())
+            .compiledSqlEnabled(rOutputCompiledSql)
+            .build();
+
         if (!successful) {
             String failure = "Failed run with status '" + finalRunResponse.getData().getStatusHumanized() +
                 "' after " + finalRunResponse.getData().getDurationHumanized() +
@@ -378,20 +398,15 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                 ": " + finalRunResponse;
 
             if (runContext.render(this.failOnUnsuccessful).as(Boolean.class).orElse(Boolean.TRUE)) {
-                throw new Exception(failure);
+                // Carries the outputs onto the failed task run: the graph matters most when the run failed.
+                throw new RunnableTaskException(failure, output);
             }
 
             // Artifacts and lineage already landed above, so the caller keeps the run's data.
             logger.warn("{}", failure);
         }
 
-        return Output.builder()
-            .runId(runIdRendered)
-            .lineageEmitted(!alreadyEmitted && lineageLanded)
-            .assets(assets)
-            .runResults(runResultsUri)
-            .manifest(manifestUri)
-            .build();
+        return output;
     }
 
     /**
@@ -680,9 +695,10 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
         return Optional.ofNullable(this.request(runContext, requestBuilder, RunResponse.class).getBody());
     }
 
-    private static Integer artifactStep(Run run) {
+    // dbt steps that ended Success or Error, minus docs generate and deps, in run order.
+    private static List<Integer> dbtSteps(Run run) {
         if (run.getRunSteps() == null) {
-            return null;
+            return List.of();
         }
 
         // The API takes the one-based step index, not its database id or position in run_steps.
@@ -692,8 +708,27 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             .filter(step -> step.getName() != null && DBT_STEP.matcher(step.getName()).find())
             .filter(step -> !EXCLUDED_ARTIFACT_STEP.matcher(step.getName()).find())
             .map(Step::getIndex)
-            .max(Integer::compareTo)
-            .orElse(null);
+            .sorted()
+            .toList();
+    }
+
+    // Each dbt step writes its own run_results.json, so the graph merges them by unique_id, later steps win.
+    private RunResult graphRunResult(RunContext runContext, Long runId, List<Integer> steps, DownloadedArtifact<RunResult> lastStep) throws Exception {
+        var inRunOrder = new ArrayList<RunResult>();
+        for (var step : steps.subList(0, Math.max(steps.size() - 1, 0))) {
+            try {
+                inRunOrder.add(fetchArtifact(runContext, runId, "run_results.json", step, RunResult.class));
+            } catch (Exception e) {
+                if (isInterruption(e)) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+                // The graph is a view of the run: a missing earlier step only leaves its nodes `not-run`.
+                runContext.logger().warn("Unable to read run_results.json of step {} for the dbt model graph", step, e);
+            }
+        }
+        inRunOrder.add(lastStep == null ? null : lastStep.body());
+        return ModelGraph.merge(inRunOrder.toArray(RunResult[]::new));
     }
 
     /**
@@ -707,6 +742,20 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
      */
     private <T> DownloadedArtifact<T> downloadArtifacts(RunContext runContext, Long runId, String path, Integer step, Class<T> responseType)
         throws IllegalVariableEvaluationException, IOException, HttpClientException {
+        var artifact = fetchArtifact(runContext, runId, path, step, responseType);
+        if (artifact == null) {
+            return null;
+        }
+
+        var artifactJson = JacksonMapper.ofJson().writeValueAsString(artifact);
+        var tempFile = runContext.workingDir().createTempFile(".json");
+        Files.writeString(tempFile, artifactJson, StandardOpenOption.TRUNCATE_EXISTING);
+        return new DownloadedArtifact<>(tempFile, artifact);
+    }
+
+    // Returns null when the artifact is not found (404).
+    private <T> T fetchArtifact(RunContext runContext, Long runId, String path, Integer step, Class<T> responseType)
+        throws IllegalVariableEvaluationException, IOException, HttpClientException {
         var requestBuilder = HttpRequest.builder()
             .uri(
                 URI.create(
@@ -718,9 +767,8 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             )
             .method("GET");
 
-        T artifact;
         try {
-            artifact = this.request(runContext, requestBuilder, responseType).getBody();
+            return this.request(runContext, requestBuilder, responseType).getBody();
         } catch (HttpClientResponseException ex) {
             if (ex.getResponse().getStatus().getCode() == 404) {
                 runContext.logger().debug("Artifact '{}' not found (404) — skipping", path);
@@ -728,11 +776,6 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             }
             throw ex;
         }
-
-        var artifactJson = JacksonMapper.ofJson().writeValueAsString(artifact);
-        var tempFile = runContext.workingDir().createTempFile(".json");
-        Files.writeString(tempFile, artifactJson, StandardOpenOption.TRUNCATE_EXISTING);
-        return new DownloadedArtifact<>(tempFile, artifact);
     }
 
     private record DownloadedArtifact<T>(Path path, T body) {
@@ -777,5 +820,18 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
             description = "Internal storage URI for the downloaded `manifest.json`, when present."
         )
         private URI manifest;
+
+        @Schema(
+            title = "Model dependency graph",
+            description = """
+                Internal storage URI of `graph.json`: models, seeds, snapshots and sources with their run status and execution time, and the edges between them. Absent when the manifest could not be read."""
+        )
+        private URI graph;
+
+        @Schema(title = "Counts of the model dependency graph")
+        private ModelGraph.Summary graphSummary;
+
+        @Schema(title = "Whether the compiled SQL of this run's models can be shown, from `outputCompiledSql`")
+        private Boolean compiledSqlEnabled;
     }
 }
