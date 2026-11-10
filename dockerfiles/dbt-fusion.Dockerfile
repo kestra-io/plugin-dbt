@@ -5,6 +5,7 @@ ARG DBT_VERSION=""
 ENV DBT_VERSION=${DBT_VERSION}
 ENV SHELL=/bin/bash
 RUN apt-get update && apt-get upgrade -y && apt-get install -y curl git && apt-get clean && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 RUN curl -fsSL https://public.cdn.getdbt.com/fs/install/install.sh | sh -s -- --update ${DBT_VERSION:+--version $DBT_VERSION}
 RUN /root/.local/bin/dbt --version
