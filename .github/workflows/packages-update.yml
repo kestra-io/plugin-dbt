@@ -1,11 +1,14 @@
 name: Update All Packages
 
 on:
+  schedule:
+    - cron: '0 2 * * 1'
   workflow_dispatch:
     inputs:
       image_tag:
         description: 'Image tag to use for all packages'
-        required: true
+        required: false
+        default: 'latest'
       dbt_version:
         description: 'Pin dbt version to install in built images (optional). Example: 1.9.1'
         required: false
@@ -30,6 +33,7 @@ jobs:
     env:
       DBT_VERSION: ${{ github.event.inputs.dbt_version }}
     strategy:
+      fail-fast: false
       matrix:
         image: ${{ fromJson(needs.list-dockerfiles.outputs.matrix) }}
     steps:
@@ -43,16 +47,19 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: GHCR Login
-        uses: docker/login-action@v4.6.0
+        uses: docker/login-action@v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - id: image-tag  # example output: "ghcr.io/kestra-io/dbt-snowflake:<image_tag>"
+        env:
+          DOCKERFILE: ${{ matrix.image }}
+          IMAGE_TAG: ${{ inputs.image_tag || 'latest' }}
         run: |
-          export IMAGE=$(basename ${{ matrix.image }} .Dockerfile)
-          IMAGE_URL="ghcr.io/kestra-io/$IMAGE:${{ inputs.image_tag }}"
+          export IMAGE=$(basename "$DOCKERFILE" .Dockerfile)
+          IMAGE_URL="ghcr.io/kestra-io/$IMAGE:$IMAGE_TAG"
           TAGS="$IMAGE_URL"
           # If DBT_VERSION is provided, add an additional dbt-tag
           if [ -n "$DBT_VERSION" ]; then
@@ -60,11 +67,10 @@ jobs:
             TAGS="$TAGS,$DBT_TAG"
           fi
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
-          echo "file=dockerfiles/${{ matrix.image }}" >> $GITHUB_OUTPUT
+          echo "file=dockerfiles/$DOCKERFILE" >> $GITHUB_OUTPUT
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
-        continue-on-error: true  # avoid blocking other images
         with:
           context: .
           push: true

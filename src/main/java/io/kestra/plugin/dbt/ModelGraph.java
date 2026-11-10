@@ -25,6 +25,7 @@ import lombok.extern.jackson.Jacksonized;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ModelGraph {
     static final String NOT_RUN = "not-run";
+    private static final String NO_OP = "no-op";
 
     List<Node> nodes;
     List<Edge> edges;
@@ -258,6 +259,10 @@ public class ModelGraph {
     }
 
     private static String status(RunResult.Result result) {
+        // "no-op" counts as a success for the task state, but the node did nothing, so the graph keeps it raw.
+        if (NO_OP.equals(result.getStatus())) {
+            return NO_OP;
+        }
         try {
             return switch (result.state()) {
                 case SUCCESS -> "success";
@@ -267,7 +272,7 @@ public class ModelGraph {
                 default -> result.getStatus();
             };
         } catch (IllegalStateException e) {
-            // Unknown status (e.g. "no-op", "partial success"): kept raw so the drawer shows it neutral, never as a pass.
+            // Unknown status (e.g. "partial success"): kept raw so the drawer shows it neutral, never as a pass.
             return result.getStatus();
         }
     }

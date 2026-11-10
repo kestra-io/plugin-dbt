@@ -180,7 +180,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
         // noinspection ResultOfMethodCallIgnored
         profileDir.mkdirs();
 
-        String profilesContent = profilesContent(runContext, runContext.render(this.profiles).as(Object.class).orElseThrow());
+        var profilesContent = profilesContent(runContext.render(this.profiles).as(Object.class).orElseThrow(() -> new IllegalArgumentException("`profiles` is required")));
         FileUtils.writeStringToFile(
             new File(profileDir, "profiles.yml"),
             profilesContent,
@@ -217,7 +217,7 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
             renderer.addAll(
                 Arrays.asList(
                     "./bin/pip install pip --upgrade > /dev/null",
-                    "./bin/pip install " + runContext.render(String.join(" ", requirements) + " > /dev/null")
+                    "./bin/pip install " + String.join(" ", requirements) + " > /dev/null"
                 )
             );
         }
@@ -225,12 +225,12 @@ public class Setup extends AbstractExecScript implements RunnableTask<ScriptOutp
         return renderer;
     }
 
-    private String profilesContent(RunContext runContext, Object profiles) throws IllegalVariableEvaluationException, JsonProcessingException {
+    private String profilesContent(Object profiles) throws JsonProcessingException {
         if (profiles instanceof String content) {
             return content;
         }
         if (profiles instanceof Map contentMap) {
-            return MAPPER.writeValueAsString(runContext.render(contentMap));
+            return MAPPER.writeValueAsString(contentMap);
         }
         throw new IllegalArgumentException("The `profiles` attribute must be a String or a Map");
     }

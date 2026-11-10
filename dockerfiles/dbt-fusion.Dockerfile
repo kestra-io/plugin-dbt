@@ -4,7 +4,7 @@ LABEL org.opencontainers.image.description="Image with dbt Fusion installed."
 ARG DBT_VERSION=""
 ENV DBT_VERSION=${DBT_VERSION}
 ENV SHELL=/bin/bash
-RUN apt-get update && apt-get install -y curl git && apt-get clean
+RUN apt-get update && apt-get upgrade -y && apt-get install -y curl git && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://public.cdn.getdbt.com/fs/install/install.sh | sh -s -- --update ${DBT_VERSION:+--version $DBT_VERSION}
 RUN /root/.local/bin/dbt --version
