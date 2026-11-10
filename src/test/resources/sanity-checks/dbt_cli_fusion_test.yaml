@@ -1,5 +1,5 @@
 id: dbt_cli_fusion_test
-namespace: company.team
+namespace: sanitychecks.plugin-dbt
 
 tasks:
   - id: wd

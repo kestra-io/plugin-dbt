@@ -1,5 +1,5 @@
 id: dbt_cli_complex_dag_test
-namespace: company.team
+namespace: sanitychecks.plugin-dbt
 
 tasks:
   - id: wd
