@@ -718,7 +718,7 @@ class ResultParserTest {
             {
               "args": {"which": "build"},
               "results": [
-                {"status": "error", "unique_id": "model.analytics.stg_orders", "adapter_response": {}, "timing": []},
+                {"status": "success", "unique_id": "model.analytics.stg_orders", "adapter_response": {}, "timing": []},
                 {"status": "skipped", "unique_id": "test.analytics.skipped_stg_orders_id", "failures": null, "adapter_response": {}, "timing": []}
               ]
             }
@@ -876,6 +876,101 @@ class ResultParserTest {
 
         var stgOrders = findEmitWithOutput(runContext.assets().emitted(), "analytics.staging.stg_orders").outputs().getFirst();
         assertThat(stgOrders.getMetadata(), not(hasKey("dbtTestStatus")));
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldEmitOnlyTheModelsTheBuildBuilt() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        Files.writeString(manifestFile, """
+            {
+              "nodes": {
+                "model.analytics.built": {
+                  "resource_type": "model", "database": "analytics", "schema": "marts",
+                  "name": "built", "unique_id": "model.analytics.built"
+                },
+                "model.analytics.failed": {
+                  "resource_type": "model", "database": "analytics", "schema": "marts",
+                  "name": "failed", "unique_id": "model.analytics.failed"
+                },
+                "model.analytics.skipped": {
+                  "resource_type": "model", "database": "analytics", "schema": "marts",
+                  "name": "skipped", "unique_id": "model.analytics.skipped"
+                },
+                "model.analytics.unselected": {
+                  "resource_type": "model", "database": "analytics", "schema": "marts",
+                  "name": "unselected", "unique_id": "model.analytics.unselected"
+                },
+                "model.analytics.downstream": {
+                  "resource_type": "model", "database": "analytics", "schema": "marts",
+                  "name": "downstream", "unique_id": "model.analytics.downstream"
+                }
+              },
+              "parent_map": {
+                "model.analytics.built": [],
+                "model.analytics.failed": [],
+                "model.analytics.skipped": ["model.analytics.failed"],
+                "model.analytics.unselected": [],
+                "model.analytics.downstream": ["model.analytics.failed"]
+              }
+            }
+            """);
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        Files.writeString(runResultsFile, """
+            {
+              "args": {"which": "build"},
+              "results": [
+                {"status": "success", "unique_id": "model.analytics.built", "adapter_response": {}, "timing": []},
+                {"status": "error", "unique_id": "model.analytics.failed", "adapter_response": {}, "timing": []},
+                {"status": "skipped", "unique_id": "model.analytics.skipped", "adapter_response": {}, "timing": []}
+              ]
+            }
+            """);
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
+
+        var emitted = runContext.assets().emitted();
+        assertThat(emitted.stream().flatMap(e -> e.outputs().stream()).map(a -> a.getId()).toList(), containsInAnyOrder("analytics.marts.built", "analytics.marts.unselected", "analytics.marts.downstream"));
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldKeepAnUnbuiltModelAsTheInputOfAModelThatWasBuilt() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        Files.writeString(manifestFile, """
+            {
+              "nodes": {
+                "model.analytics.failed": {
+                  "resource_type": "model", "database": "analytics", "schema": "marts",
+                  "name": "failed", "unique_id": "model.analytics.failed"
+                },
+                "model.analytics.child": {
+                  "resource_type": "model", "database": "analytics", "schema": "marts",
+                  "name": "child", "unique_id": "model.analytics.child"
+                }
+              },
+              "parent_map": {
+                "model.analytics.failed": [],
+                "model.analytics.child": ["model.analytics.failed"]
+              }
+            }
+            """);
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        Files.writeString(runResultsFile, """
+            {
+              "args": {"which": "run"},
+              "results": [
+                {"status": "error", "unique_id": "model.analytics.failed", "adapter_response": {}, "timing": []},
+                {"status": "success", "unique_id": "model.analytics.child", "adapter_response": {}, "timing": []}
+              ]
+            }
+            """);
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
+
+        var emitted = runContext.assets().emitted();
+        assertThat(emitted, hasSize(1));
+        assertThat(findEmitWithOutput(emitted, "analytics.marts.child").inputs().getFirst().id(), is("analytics.marts.failed"));
     }
 
     private static Path writeStgOrdersManifest(RunContext runContext) throws IOException {
