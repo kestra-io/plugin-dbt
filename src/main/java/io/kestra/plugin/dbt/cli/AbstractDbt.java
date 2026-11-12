@@ -249,7 +249,7 @@ public abstract class AbstractDbt extends Task implements RunnableTask<ScriptOut
             // each model's asset metadata, and the parsed result rides back for parseRunResult below
             // instead of being read from disk a second time.
             ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(
-                runContext, manifestFile, rParseRunResults ? runResults : null
+                runContext, manifestFile, runResults, rParseRunResults
             );
             manifest = manifestResult.manifest();
             preParsedRunResults = manifestResult.runResult();

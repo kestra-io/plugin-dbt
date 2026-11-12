@@ -692,7 +692,7 @@ class ResultParserTest {
     void parseManifestWithAssets_shouldAttachNoTestStatusWhenEveryTestWasSkipped() throws Exception {
         var runContext = mockRunContext();
         var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
-        // dbt skips tests downstream of a failed node during `dbt build`; a skip must not read as a pass.
+        // dbt skips a relationships test during `dbt build` when its other parent failed; a skip must not read as a pass.
         Files.writeString(manifestFile, """
             {
               "nodes": {
@@ -922,27 +922,27 @@ class ResultParserTest {
               "results": [
                 {"status": "success", "unique_id": "model.analytics.built", "adapter_response": {}, "timing": []},
                 {"status": "error", "unique_id": "model.analytics.failed", "adapter_response": {}, "timing": []},
-                {"status": "skipped", "unique_id": "model.analytics.skipped", "adapter_response": {}, "timing": []}
+                {"status": "skipped", "unique_id": "model.analytics.skipped", "adapter_response": {}, "timing": []},
+                {"status": "skipped", "unique_id": "model.analytics.downstream", "adapter_response": {}, "timing": []}
               ]
             }
             """);
 
         ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
 
-        var emitted = runContext.assets().emitted();
-        assertThat(emitted.stream().flatMap(e -> e.outputs().stream()).map(a -> a.getId()).toList(), containsInAnyOrder("analytics.marts.built", "analytics.marts.unselected", "analytics.marts.downstream"));
+        assertThat(emittedOutputIds(runContext), containsInAnyOrder("analytics.marts.built", "analytics.marts.unselected"));
     }
 
     @Test
-    void parseManifestWithAssets_shouldKeepAnUnbuiltModelAsTheInputOfAModelThatWasBuilt() throws Exception {
+    void parseManifestWithAssets_shouldKeepAParentTheBuildDidNotSelectAsTheInputOfABuiltModel() throws Exception {
         var runContext = mockRunContext();
         var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
         Files.writeString(manifestFile, """
             {
               "nodes": {
-                "model.analytics.failed": {
+                "model.analytics.parent": {
                   "resource_type": "model", "database": "analytics", "schema": "marts",
-                  "name": "failed", "unique_id": "model.analytics.failed"
+                  "name": "parent", "unique_id": "model.analytics.parent"
                 },
                 "model.analytics.child": {
                   "resource_type": "model", "database": "analytics", "schema": "marts",
@@ -950,51 +950,122 @@ class ResultParserTest {
                 }
               },
               "parent_map": {
-                "model.analytics.failed": [],
-                "model.analytics.child": ["model.analytics.failed"]
+                "model.analytics.parent": [],
+                "model.analytics.child": ["model.analytics.parent"]
+              }
+            }
+            """);
+        var runResultsFile = writeRunResults(runContext, "build", "model.analytics.child", "success");
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
+
+        assertThat(findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.child").inputs().getFirst().id(), is("analytics.marts.parent"));
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldNotEmitAnErroredModelWhenRunResultsParsingIsDisabled() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = writeStgOrdersManifest(runContext);
+        var runResultsFile = writeRunResults(runContext, "build", "model.analytics.stg_orders", "error");
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile(), false);
+
+        assertThat(emittedOutputIds(runContext), empty());
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldNotAttachTestMetadataWhenRunResultsParsingIsDisabled() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = writeStgOrdersManifest(runContext);
+        var runResultsFile = writeRunResults(runContext, "build", "model.analytics.stg_orders", "success");
+
+        var result = ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile(), false);
+
+        assertThat(result.runResult(), is(nullValue()));
+        var stgOrders = findEmitWithOutput(runContext.assets().emitted(), "analytics.staging.stg_orders").outputs().getFirst();
+        assertThat(stgOrders.getMetadata(), not(hasKey("dbtTestStatus")));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"success", "pass", "run", "warn", "partial success", "reused", "a-status-dbt-added-later"})
+    void parseManifestWithAssets_shouldEmitAModelWhoseStatusIsNotAFailure(String status) throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = writeStgOrdersManifest(runContext);
+        var runResultsFile = writeRunResults(runContext, "run", "model.analytics.stg_orders", status);
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
+
+        assertThat(emittedOutputIds(runContext), contains("analytics.staging.stg_orders"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"error", "fail", "runtime error", "runtime_error", "skipped", "no-op"})
+    void parseManifestWithAssets_shouldNotEmitAModelThatWasNotBuilt(String status) throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = writeStgOrdersManifest(runContext);
+        var runResultsFile = writeRunResults(runContext, "run", "model.analytics.stg_orders", status);
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
+
+        assertThat(emittedOutputIds(runContext), empty());
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldNotEmitAModelWithoutAStatus() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = writeStgOrdersManifest(runContext);
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        Files.writeString(runResultsFile, """
+            {"args": {"which": "run"}, "results": [{"unique_id": "model.analytics.stg_orders", "adapter_response": {}, "timing": []}]}
+            """);
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
+
+        assertThat(emittedOutputIds(runContext), empty());
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldNotEmitAnErroredSeedOrSnapshot() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        Files.writeString(manifestFile, """
+            {
+              "nodes": {
+                "seed.analytics.raw_countries": {
+                  "resource_type": "seed", "database": "analytics", "schema": "raw",
+                  "name": "raw_countries", "unique_id": "seed.analytics.raw_countries"
+                },
+                "snapshot.analytics.orders_snapshot": {
+                  "resource_type": "snapshot", "database": "analytics", "schema": "snapshots",
+                  "name": "orders_snapshot", "unique_id": "snapshot.analytics.orders_snapshot"
+                },
+                "seed.analytics.raw_orders": {
+                  "resource_type": "seed", "database": "analytics", "schema": "raw",
+                  "name": "raw_orders", "unique_id": "seed.analytics.raw_orders"
+                }
+              },
+              "parent_map": {
+                "seed.analytics.raw_countries": [],
+                "snapshot.analytics.orders_snapshot": [],
+                "seed.analytics.raw_orders": []
               }
             }
             """);
         var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
         Files.writeString(runResultsFile, """
             {
-              "args": {"which": "run"},
+              "args": {"which": "build"},
               "results": [
-                {"status": "error", "unique_id": "model.analytics.failed", "adapter_response": {}, "timing": []},
-                {"status": "success", "unique_id": "model.analytics.child", "adapter_response": {}, "timing": []}
+                {"status": "error", "unique_id": "seed.analytics.raw_countries", "adapter_response": {}, "timing": []},
+                {"status": "error", "unique_id": "snapshot.analytics.orders_snapshot", "adapter_response": {}, "timing": []},
+                {"status": "success", "unique_id": "seed.analytics.raw_orders", "adapter_response": {}, "timing": []}
               ]
             }
             """);
 
         ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
 
-        var emitted = runContext.assets().emitted();
-        assertThat(emitted, hasSize(1));
-        assertThat(findEmitWithOutput(emitted, "analytics.marts.child").inputs().getFirst().id(), is("analytics.marts.failed"));
-    }
-
-    private static Path writeStgOrdersManifest(RunContext runContext) throws IOException {
-        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
-        Files.writeString(manifestFile, """
-            {
-              "nodes": {
-                "model.analytics.stg_orders": {
-                  "resource_type": "model", "database": "analytics", "schema": "staging",
-                  "name": "stg_orders", "unique_id": "model.analytics.stg_orders"
-                }
-              },
-              "parent_map": {
-                "model.analytics.stg_orders": []
-              }
-            }
-            """);
-        return manifestFile;
-    }
-
-    private static void assertClearedTestMetadata(Map<String, Object> metadata) {
-        assertThat(metadata, hasEntry(is("dbtTestStatus"), nullValue()));
-        assertThat(metadata, hasEntry(is("dbtTestsTotal"), nullValue()));
-        assertThat(metadata, hasEntry(is("dbtTestsFailed"), nullValue()));
+        assertThat(emittedOutputIds(runContext), contains("analytics.raw.raw_orders"));
     }
 
     @Test
@@ -1194,6 +1265,47 @@ class ResultParserTest {
             && modelTaskRunIds.contains(log.getTaskRunId())
             && log.getMessage() != null
             && log.getMessage().contains(messagePart);
+    }
+
+    private static Path writeRunResults(RunContext runContext, String which, String uniqueId, String status) throws IOException {
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        Files.writeString(runResultsFile, """
+            {
+              "args": {"which": "%s"},
+              "results": [
+                {"status": "%s", "unique_id": "%s", "adapter_response": {}, "timing": []}
+              ]
+            }
+            """.formatted(which, status, uniqueId));
+        return runResultsFile;
+    }
+
+    private static List<String> emittedOutputIds(RunContext runContext) throws Exception {
+        return runContext.assets().emitted().stream().flatMap(e -> e.outputs().stream()).map(a -> a.getId()).toList();
+    }
+
+    private static Path writeStgOrdersManifest(RunContext runContext) throws IOException {
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        Files.writeString(manifestFile, """
+            {
+              "nodes": {
+                "model.analytics.stg_orders": {
+                  "resource_type": "model", "database": "analytics", "schema": "staging",
+                  "name": "stg_orders", "unique_id": "model.analytics.stg_orders"
+                }
+              },
+              "parent_map": {
+                "model.analytics.stg_orders": []
+              }
+            }
+            """);
+        return manifestFile;
+    }
+
+    private static void assertClearedTestMetadata(Map<String, Object> metadata) {
+        assertThat(metadata, hasEntry(is("dbtTestStatus"), nullValue()));
+        assertThat(metadata, hasEntry(is("dbtTestsTotal"), nullValue()));
+        assertThat(metadata, hasEntry(is("dbtTestsFailed"), nullValue()));
     }
 
     private static AssetEmit findEmitWithOutput(List<AssetEmit> emitted, String outputId) {
