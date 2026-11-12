@@ -337,7 +337,7 @@ public class CheckStatus extends AbstractDbtCloud implements RunnableTask<CheckS
                 // emit as the rest of the run's lineage instead of being read from the temp file again.
                 ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(
                     runContext, manifestArtifact.path().toFile(), !alreadyEmitted, producerMetadata(finalRunResponse.getData()),
-                    preParsedRunResults
+                    preParsedRunResults, runResultsArtifact != null ? runResultsArtifact.body() : null
                 );
                 manifest = manifestResult.manifest();
                 manifestUri = manifestResult.uri();
