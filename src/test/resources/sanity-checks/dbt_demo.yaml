@@ -37,10 +37,10 @@ tasks:
           - "*.csv"
         taskRunner:
           type: io.kestra.plugin.scripts.runner.docker.Docker
-        containerImage: ghcr.io/kestra-io/duckdb:latest
+        # Same image as dbt_build so the DuckDB version that wrote dbt.duckdb can read it
+        containerImage: ghcr.io/kestra-io/dbt-duckdb:latest
         script: |
           import duckdb
-          import pandas as pd
 
           conn = duckdb.connect(database='dbt.duckdb', read_only=False)
 
@@ -48,15 +48,12 @@ tasks:
 
           tables = conn.execute(tables_query).fetchall()
 
-          # Export each table to CSV, excluding tables that start with 'raw' or
-          'stg'
+          # Export each table to CSV, excluding tables that start with 'raw' or 'stg'
 
           for table_name in tables:
               table_name = table_name[0]
               # Skip tables with names starting with 'raw' or 'stg'
               if not table_name.startswith('raw') and not table_name.startswith('stg'):
-                  query = f"SELECT * FROM {table_name}"
-                  df = conn.execute(query).fetchdf()
-                  df.to_csv(f"{table_name}.csv", index=False)
+                  conn.execute(f"COPY {table_name} TO '{table_name}.csv' (HEADER, DELIMITER ',')")
 
           conn.close()
