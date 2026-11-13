@@ -32,6 +32,11 @@ Single-module plugin. Source packages under `io.kestra.plugin`:
 - `io.kestra.plugin.dbt.cli.Setup`
 - `io.kestra.plugin.dbt.cli.Snapshot`
 - `io.kestra.plugin.dbt.cli.Test`
+- `io.kestra.plugin.dbt.assets.DbtModel`
+- `io.kestra.plugin.dbt.assets.DbtSeed`
+- `io.kestra.plugin.dbt.assets.DbtSnapshot`
+- `io.kestra.plugin.dbt.assets.DbtTest`
+- `io.kestra.plugin.dbt.assets.DbtExposure`
 - `io.kestra.plugin.dbt.cloud.CheckStatus`
 - `io.kestra.plugin.dbt.cloud.TriggerRun`
 

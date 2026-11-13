@@ -28,6 +28,11 @@ import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.runners.WorkerTaskResult;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
+import io.kestra.plugin.dbt.assets.DbtExposure;
+import io.kestra.plugin.dbt.assets.DbtModel;
+import io.kestra.plugin.dbt.assets.DbtSeed;
+import io.kestra.plugin.dbt.assets.DbtSnapshot;
+import io.kestra.plugin.dbt.assets.DbtTest;
 import io.kestra.plugin.dbt.cli.DbtCLI;
 
 import jakarta.inject.Inject;
@@ -308,6 +313,46 @@ class ResultParserTest {
         assertThat(stgOrdersEmit.inputs(), hasSize(1));
         // source assetId is database.schema.identifier
         assertThat(stgOrdersEmit.inputs().getFirst().id(), is("analytics.raw.orders"));
+        // a source input is untyped, so it never retypes a table another project or tool owns
+        assertThat(stgOrdersEmit.inputs().getFirst().type(), is(nullValue()));
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldEmitExposuresFedByTheirModels() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        Files.writeString(manifestFile, """
+            {
+              "metadata": {"adapter_type": "snowflake"},
+              "nodes": {
+                "model.p.fct_orders": {
+                  "resource_type": "model", "database": "analytics", "schema": "marts",
+                  "name": "fct_orders", "unique_id": "model.p.fct_orders"
+                }
+              },
+              "exposures": {
+                "exposure.p.weekly_revenue": {
+                  "name": "weekly_revenue", "label": "Weekly revenue", "type": "dashboard",
+                  "url": "https://bi.example.com/weekly", "unique_id": "exposure.p.weekly_revenue",
+                  "depends_on": {"nodes": ["model.p.fct_orders"]}
+                }
+              }
+            }
+            """);
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile());
+
+        // keyed under its first parent's database and schema, so a dev run and a prod run get separate exposures
+        var exposureEmit = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.exposure.p.weekly_revenue");
+        var exposure = exposureEmit.outputs().getFirst();
+        assertThat(exposure.getType(), is(DbtExposure.ASSET_TYPE));
+        assertThat(exposure.getMetadata().get("system"), is("snowflake"));
+        assertThat(exposure.getMetadata().get("name"), is("weekly_revenue"));
+        assertThat(exposure.getMetadata().get("label"), is("Weekly revenue"));
+        assertThat(exposure.getMetadata().get("exposureType"), is("dashboard"));
+        assertThat(exposure.getMetadata().get("url"), is("https://bi.example.com/weekly"));
+        assertThat(exposureEmit.inputs().getFirst().id(), is("analytics.marts.fct_orders"));
+        assertThat(exposureEmit.inputs().getFirst().type(), is(DbtModel.ASSET_TYPE));
     }
 
     @Test
@@ -524,7 +569,17 @@ class ResultParserTest {
         assertThat(manifestResult.runResult(), is(notNullValue()));
         assertThat(manifestResult.runResult().getResults(), hasSize(3));
 
-        assertThat(runContext.assets().emitted(), hasSize(3));
+        // 3 models and their 3 tests
+        assertThat(runContext.assets().emitted(), hasSize(6));
+
+        // each test asset carries its own result, with the same keys as the model roll-up
+        var failedTest = findEmitWithOutput(runContext.assets().emitted(), "test.analytics.not_null_stg_orders_id").outputs().getFirst();
+        assertThat(failedTest.getMetadata().get("dbtTestStatus"), is("fail"));
+        assertThat(failedTest.getMetadata().get("dbtTestsTotal"), is(1));
+        assertThat(failedTest.getMetadata().get("dbtTestsFailed"), is(1));
+        var passedTest = findEmitWithOutput(runContext.assets().emitted(), "test.analytics.unique_fct_orders_id").outputs().getFirst();
+        assertThat(passedTest.getMetadata().get("dbtTestStatus"), is("pass"));
+        assertThat(passedTest.getMetadata().get("dbtTestsFailed"), is(0));
 
         var stgOrders = findEmitWithOutput(runContext.assets().emitted(), "analytics.staging.stg_orders").outputs().getFirst();
         assertThat(stgOrders.getMetadata().get("dbtTestStatus"), is("fail"));
@@ -769,10 +824,14 @@ class ResultParserTest {
 
         // Lineage still lands in full: one bad parent_map entry must not drop the manifest or the emit.
         assertThat(manifestResult.manifest(), is(notNullValue()));
-        assertThat(runContext.assets().emitted(), hasSize(1));
+        assertThat(runContext.assets().emitted(), hasSize(2));
 
         var stgOrders = findEmitWithOutput(runContext.assets().emitted(), "analytics.staging.stg_orders").outputs().getFirst();
         assertThat(stgOrders.getMetadata().get("dbtTestStatus"), is("fail"));
+
+        // the test asset falls back to depends_on as well, so it keeps its model as input
+        var testEmit = findEmitWithOutput(runContext.assets().emitted(), "test.analytics.broken_test");
+        assertThat(testEmit.inputs().getFirst().id(), is("analytics.staging.stg_orders"));
     }
 
     @Test
@@ -847,7 +906,7 @@ class ResultParserTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"run", "compile", "docs"})
+    @ValueSource(strings = { "run", "compile", "docs" })
     void parseManifestWithAssets_shouldKeepTestMetadataWhenTheCommandRanNoTests(String which) throws Exception {
         var runContext = mockRunContext();
         var manifestFile = writeStgOrdersManifest(runContext);
@@ -1087,6 +1146,9 @@ class ResultParserTest {
         assertThat(modelBundle.getOutputs().getFirst().getId(), is("analytics.staging.stg_orders"));
         assertThat(modelBundle.getInputs(), hasSize(1));
         assertThat(modelBundle.getInputs().getFirst().id(), is("analytics.raw.orders"));
+        // the per-model task run carries the dbt type too, and its source input stays untyped
+        assertThat(modelBundle.getOutputs().getFirst().getType(), is(DbtModel.ASSET_TYPE));
+        assertThat(modelBundle.getInputs().getFirst().type(), is(nullValue()));
 
         // the source-freshness taskrun must NOT claim it produced the source table
         TaskRun sourceTaskRun = byTaskId.get("source.analytics.raw.orders");
@@ -1250,14 +1312,9 @@ class ResultParserTest {
         assertThat(fallback.getState().getDuration().orElseThrow(), is(Duration.ofSeconds(2)));
     }
 
-    /**
-     * Issue #319 reports that only models become assets. Seeds and snapshots are in
-     * PRODUCED_RESOURCE_TYPES since #311, so this pins that: a seed feeding a model produces its own
-     * asset and is the model's parent, and a snapshot produces one too. dbt tests are deliberately
-     * absent, they describe no table.
-     */
+    // Each dbt node is an asset of its own dbt type (kestra-ee#11726), and a test is fed by the model it tests.
     @Test
-    void parseManifestWithAssets_shouldEmitSeedAndSnapshotAssetsNotTests() throws Exception {
+    void parseManifestWithAssets_shouldEmitEachDbtNodeWithItsOwnType() throws Exception {
         var runContext = mockRunContext();
         var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
         Files.writeString(manifestFile, """
@@ -1293,7 +1350,16 @@ class ResultParserTest {
                   "database": "analytics",
                   "schema": "dbt_test__audit",
                   "name": "not_null_stg_customers_id",
+                  "column_name": "id",
                   "unique_id": "test.p.not_null_stg_customers_id.abc123",
+                  "depends_on": {"nodes": ["model.p.stg_customers"]}
+                },
+                "test.p.unique_stg_customers_id.def456": {
+                  "resource_type": "test",
+                  "database": "analytics",
+                  "schema": "dbt_test__audit",
+                  "name": "unique_stg_customers_id",
+                  "unique_id": "test.p.unique_stg_customers_id.def456",
                   "depends_on": {"nodes": ["model.p.stg_customers"]}
                 }
               },
@@ -1301,12 +1367,18 @@ class ResultParserTest {
                 "seed.p.raw_customers": [],
                 "model.p.stg_customers": ["seed.p.raw_customers"],
                 "snapshot.p.customers_snap": ["model.p.stg_customers"],
-                "test.p.not_null_stg_customers_id.abc123": ["model.p.stg_customers"]
+                "test.p.not_null_stg_customers_id.abc123": ["model.p.stg_customers"],
+                "test.p.unique_stg_customers_id.def456": ["model.p.stg_customers"]
               }
             }
             """);
+        // only the not_null test ran
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        Files.writeString(runResultsFile, """
+            {"results": [{"status": "pass", "unique_id": "test.p.not_null_stg_customers_id.abc123", "adapter_response": {}, "timing": []}]}
+            """);
 
-        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile());
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
 
         var emitted = runContext.assets().emitted();
 
@@ -1325,9 +1397,22 @@ class ResultParserTest {
         assertThat("snapshot emission should exist", snapshotEmit, is(notNullValue()));
         assertThat(snapshotEmit.inputs().getFirst().id(), is("analytics.staging.stg_customers"));
 
-        // the dbt test is not an asset: it describes no table
-        assertThat(findEmitWithOutput(emitted, "analytics.dbt_test__audit.not_null_stg_customers_id"), is(nullValue()));
-        assertThat(emitted, hasSize(3));
+        // each node has its own type, and the model's input names the seed's type so the seed is never retyped
+        assertThat(seedEmit.outputs().getFirst().getType(), is(DbtSeed.ASSET_TYPE));
+        assertThat(modelEmit.outputs().getFirst().getType(), is(DbtModel.ASSET_TYPE));
+        assertThat(modelEmit.inputs().getFirst().type(), is(DbtSeed.ASSET_TYPE));
+        assertThat(snapshotEmit.outputs().getFirst().getType(), is(DbtSnapshot.ASSET_TYPE));
+
+        // the test that ran is keyed by its audit location, so each target keeps its own result
+        var testEmit = findEmitWithOutput(emitted, "analytics.dbt_test__audit.not_null_stg_customers_id");
+        assertThat(testEmit.outputs().getFirst().getType(), is(DbtTest.ASSET_TYPE));
+        assertThat(testEmit.outputs().getFirst().getMetadata().get("column"), is("id"));
+        assertThat(testEmit.outputs().getFirst().getMetadata().get("dbtTestStatus"), is("pass"));
+        assertThat(testEmit.inputs().getFirst().id(), is("analytics.staging.stg_customers"));
+
+        // a test that did not run is not emitted, so it keeps its last result
+        assertThat(findEmitWithOutput(emitted, "analytics.dbt_test__audit.unique_stg_customers_id"), is(nullValue()));
+        assertThat(emitted, hasSize(4));
     }
 
     @Test
