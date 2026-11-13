@@ -54,11 +54,11 @@ public class RunResult {
             if (this.status == null)
                 return State.Type.FAILED;
             return switch (this.status) {
-                case "error", "fail", "runtime_error" -> State.Type.FAILED;
-                case "warn" -> State.Type.WARNING;
-                case "skipped" -> State.Type.SKIPPED;
+                case "error", "fail", "runtime_error", "runtime error" -> State.Type.FAILED;
+                case "warn", "partial success" -> State.Type.WARNING;
+                case "skipped", "no-op" -> State.Type.SKIPPED;
                 // Fusion v2.0 emits "run" for a successfully executed model
-                case "success", "pass", "run" -> State.Type.SUCCESS;
+                case "success", "pass", "run", "reused" -> State.Type.SUCCESS;
                 default -> throw new IllegalStateException("No suitable status for '" + this.status + "'");
             };
         }
