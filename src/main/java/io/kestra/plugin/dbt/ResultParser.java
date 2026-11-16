@@ -16,7 +16,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.assets.Asset;
 import io.kestra.core.models.assets.AssetIdentifier;
-import io.kestra.core.models.assets.AssetsInOut;
 import io.kestra.core.models.assets.Custom;
 import io.kestra.core.models.executions.TaskRun;
 import io.kestra.core.models.executions.TaskRunAttempt;
@@ -310,8 +309,8 @@ public abstract class ResultParser {
                     .filter(Objects::nonNull)
                     .forEach(runContext::metric);
 
-                AssetsInOut assets = assetsFor(r.getUniqueId(), modelAssets);
-                TaskRun.TaskRunBuilder taskRunBuilder = TaskRun.builder()
+                AssetEmit assets = assetsFor(r.getUniqueId(), modelAssets);
+                TaskRun modelTaskRun = TaskRun.builder()
                     .id(IdUtils.create())
                     .namespace(runContext.render("{{ flow.namespace }}"))
                     .flowId(runContext.render("{{ flow.id }}"))
@@ -325,16 +324,17 @@ public abstract class ResultParser {
                                 .state(state)
                                 .build()
                         )
-                    );
+                    )
+                    .build();
                 if (assets != null) {
-                    taskRunBuilder.assetEmits(List.of(assets));
+                    emitFor(runContext, modelTaskRun, assets);
                 }
 
                 // Register the dynamic taskrun together with its log lines in one call: the run
                 // context builds the LogEntry, forcing execution/tenant/namespace/flow from itself,
                 // fixing the attempt to 0 and masking secrets (the plugin never builds a LogEntry).
                 runContext.dynamicWorkerResult(
-                    WorkerTaskResult.builder().taskRun(taskRunBuilder.build()).build(),
+                    WorkerTaskResult.builder().taskRun(modelTaskRun).build(),
                     modelLogs(r)
                 );
             }));
@@ -373,7 +373,7 @@ public abstract class ResultParser {
         return logs;
     }
 
-    private static AssetsInOut assetsFor(String uniqueId, Map<String, ModelAsset> modelAssets) {
+    private static AssetEmit assetsFor(String uniqueId, Map<String, ModelAsset> modelAssets) {
         if (uniqueId == null) {
             return null;
         }
@@ -387,7 +387,15 @@ public abstract class ResultParser {
         List<AssetIdentifier> inputs = inputIdentifiers(modelAsset, modelAssets);
         List<Asset> outputs = List.of(selfAsset(modelAsset));
 
-        return new AssetsInOut(inputs, outputs);
+        return new AssetEmit(inputs, outputs);
+    }
+
+    private static void emitFor(RunContext runContext, TaskRun modelTaskRun, AssetEmit assets) throws IllegalVariableEvaluationException {
+        try {
+            runContext.assets().emitFor(modelTaskRun, assets);
+        } catch (QueueException e) {
+            runContext.logger().warn("Unable to emit the assets of dbt node '{}'", modelTaskRun.getTaskId(), e);
+        }
     }
 
     /** @return false if any asset failed to emit, so the caller never records a partial emit as complete. */

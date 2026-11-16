@@ -23,6 +23,7 @@ import io.kestra.core.models.executions.TaskRun;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.queues.DispatchQueueInterface;
 import io.kestra.core.runners.AssetEmit;
+import io.kestra.core.runners.DefaultRunContext;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.runners.WorkerTaskResult;
@@ -40,6 +41,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class ResultParserTest {
     @Inject
     private RunContextFactory runContextFactory;
+
+    @Inject
+    private TestAssetManagerFactory assetManagerFactory;
 
     @Inject
     private DispatchQueueInterface<LogEntry> logQueue;
@@ -1247,17 +1251,18 @@ class ResultParserTest {
         // the model's dynamic taskrun carries {source} -> {the model itself}
         TaskRun modelTaskRun = byTaskId.get("model.analytics.stg_orders");
         assertThat(modelTaskRun, is(notNullValue()));
-        assertThat(modelTaskRun.getAssetEmits(), hasSize(1));
-        var modelBundle = modelTaskRun.getAssetEmits().getFirst();
-        assertThat(modelBundle.getOutputs(), hasSize(1));
-        assertThat(modelBundle.getOutputs().getFirst().getId(), is("analytics.staging.stg_orders"));
-        assertThat(modelBundle.getInputs(), hasSize(1));
-        assertThat(modelBundle.getInputs().getFirst().id(), is("analytics.raw.orders"));
+        List<AssetEmit> modelEmits = emittedFor(runContext, modelTaskRun);
+        assertThat(modelEmits, hasSize(1));
+        var modelBundle = modelEmits.getFirst();
+        assertThat(modelBundle.outputs(), hasSize(1));
+        assertThat(modelBundle.outputs().getFirst().getId(), is("analytics.staging.stg_orders"));
+        assertThat(modelBundle.inputs(), hasSize(1));
+        assertThat(modelBundle.inputs().getFirst().id(), is("analytics.raw.orders"));
 
         // the source-freshness taskrun must NOT claim it produced the source table
         TaskRun sourceTaskRun = byTaskId.get("source.analytics.raw.orders");
         assertThat(sourceTaskRun, is(notNullValue()));
-        assertThat(sourceTaskRun.getAssetEmits(), is(nullValue()));
+        assertThat(emittedFor(runContext, sourceTaskRun), is(empty()));
     }
 
     private static boolean isModelLog(LogEntry log, Set<String> modelTaskRunIds, String messagePart) {
@@ -1617,8 +1622,13 @@ class ResultParserTest {
 
         ResultParser.parseRunResult(runContext, runResultsFile.toFile(), manifest);
 
-        var output = runContext.dynamicWorkerResults().getFirst().getTaskRun().getAssetEmits().getFirst().getOutputs().getFirst();
+        var output = emittedFor(runContext, runContext.dynamicWorkerResults().getFirst().getTaskRun()).getFirst().outputs().getFirst();
         assertThat(output.getMetadata().get("dbtResourceType"), is("model"));
+    }
+
+    private List<AssetEmit> emittedFor(RunContext runContext, TaskRun taskRun) {
+        ((DefaultRunContext) runContext).emitAssetsOfDynamicTaskRuns();
+        return assetManagerFactory.emittedFor(taskRun.getId());
     }
 
     private RunContext mockRunContext() {
