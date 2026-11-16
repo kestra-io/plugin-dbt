@@ -1265,6 +1265,56 @@ class ResultParserTest {
         assertThat(emittedFor(runContext, sourceTaskRun), is(empty()));
     }
 
+    @Test
+    void parseRunResult_shouldEmitOnlyForTheTaskRunsOfTheModelsTheBuildBuilt() throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = runContext.workingDir().path(true).resolve("manifest.json");
+        Files.writeString(manifestFile, """
+            {
+              "nodes": {
+                "model.analytics.built": {
+                  "resource_type": "model", "database": "analytics", "schema": "marts",
+                  "name": "built", "unique_id": "model.analytics.built"
+                },
+                "model.analytics.failed": {
+                  "resource_type": "model", "database": "analytics", "schema": "marts",
+                  "name": "failed", "unique_id": "model.analytics.failed"
+                },
+                "model.analytics.skipped": {
+                  "resource_type": "model", "database": "analytics", "schema": "marts",
+                  "name": "skipped", "unique_id": "model.analytics.skipped"
+                }
+              },
+              "parent_map": {
+                "model.analytics.built": [],
+                "model.analytics.failed": [],
+                "model.analytics.skipped": ["model.analytics.failed"]
+              }
+            }
+            """);
+        var manifest = ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile()).manifest();
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        Files.writeString(runResultsFile, """
+            {
+              "args": {"which": "build"},
+              "results": [
+                {"status": "success", "unique_id": "model.analytics.built", "adapter_response": {}, "timing": []},
+                {"status": "error", "unique_id": "model.analytics.failed", "adapter_response": {}, "timing": []},
+                {"status": "skipped", "unique_id": "model.analytics.skipped", "adapter_response": {}, "timing": []}
+              ]
+            }
+            """);
+
+        ResultParser.parseRunResult(runContext, runResultsFile.toFile(), manifest);
+
+        Map<String, TaskRun> byTaskId = runContext.dynamicWorkerResults().stream()
+            .map(WorkerTaskResult::getTaskRun)
+            .collect(Collectors.toMap(TaskRun::getTaskId, tr -> tr));
+        assertThat(emittedFor(runContext, byTaskId.get("model.analytics.built")), hasSize(1));
+        assertThat(emittedFor(runContext, byTaskId.get("model.analytics.failed")), is(empty()));
+        assertThat(emittedFor(runContext, byTaskId.get("model.analytics.skipped")), is(empty()));
+    }
+
     private static boolean isModelLog(LogEntry log, Set<String> modelTaskRunIds, String messagePart) {
         return log.getTaskRunId() != null
             && modelTaskRunIds.contains(log.getTaskRunId())

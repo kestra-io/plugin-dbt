@@ -326,7 +326,7 @@ public abstract class ResultParser {
                         )
                     )
                     .build();
-                if (assets != null) {
+                if (assets != null && isBuilt(runContext, r)) {
                     emitFor(runContext, modelTaskRun, assets);
                 }
 
