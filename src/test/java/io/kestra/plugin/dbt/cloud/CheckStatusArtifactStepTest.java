@@ -14,13 +14,14 @@ import org.junit.jupiter.params.provider.MethodSource;
 import com.github.tomakehurst.wiremock.junit5.WireMockTest;
 
 import io.kestra.core.junit.annotations.KestraTest;
-import io.kestra.core.models.assets.Custom;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
+import io.kestra.plugin.dbt.assets.DbtModel;
+import io.kestra.plugin.dbt.assets.DbtTest;
 
 import jakarta.inject.Inject;
 
@@ -216,12 +217,17 @@ class CheckStatusArtifactStepTest {
         var taskRun = results.getFirst().getTaskRun();
         assertThat(taskRun.getTaskId(), is("test.project.not_null_orders_id"));
         assertThat(taskRun.getState().getCurrent(), is(runStatus == 20 ? State.Type.FAILED : State.Type.SUCCESS));
+        // the model and the test that ran, each carrying the test result
         var emitted = context.assets().emitted();
-        assertThat(emitted, hasSize(1));
-        var metadata = ((Custom) emitted.getFirst().outputs().getFirst()).getMetadata();
-        assertThat(metadata.get("dbtTestStatus"), is(testStatus));
-        assertThat(metadata.get("dbtTestsTotal"), is(1));
-        assertThat(metadata.get("dbtTestsFailed"), is(runStatus == 20 ? 1 : 0));
+        assertThat(emitted, hasSize(2));
+        for (var type : List.of(DbtModel.ASSET_TYPE, DbtTest.ASSET_TYPE)) {
+            var metadata = emitted.stream().map(emit -> emit.outputs().getFirst()).filter(asset -> type.equals(asset.getType())).findFirst()
+                .orElseThrow(() -> new AssertionError("No emitted asset of type %s".formatted(type)))
+                .getMetadata();
+            assertThat(metadata.get("dbtTestStatus"), is(testStatus));
+            assertThat(metadata.get("dbtTestsTotal"), is(1));
+            assertThat(metadata.get("dbtTestsFailed"), is(runStatus == 20 ? 1 : 0));
+        }
         verifyArtifacts("?step=5");
         for (var artifact : List.of("run_results.json", "manifest.json")) {
             verify(0, getRequestedFor(urlEqualTo(RUN_PATH + "artifacts/" + artifact)));
