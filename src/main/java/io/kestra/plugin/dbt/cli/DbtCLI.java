@@ -637,7 +637,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
             // each model's asset metadata, and the parsed result rides back for parseRunResult below
             // instead of being read from disk a second time.
             ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(
-                runContext, manifestFile, rParseRunResults ? runResultsFile : null
+                runContext, manifestFile, runResultsFile, rParseRunResults
             );
             runContext.logger().info(
                 "Manifest parse done. uri={}, metadata={}, nodes={}",
