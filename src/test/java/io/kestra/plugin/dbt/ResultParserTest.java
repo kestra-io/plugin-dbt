@@ -528,7 +528,7 @@ class ResultParserTest {
         assertThat(manifestResult.runResult(), is(notNullValue()));
         assertThat(manifestResult.runResult().getResults(), hasSize(3));
 
-        assertThat(runContext.assets().emitted(), hasSize(3));
+        assertThat(runContext.assets().emitted(), hasSize(2));
 
         var stgOrders = findEmitWithOutput(runContext.assets().emitted(), "analytics.staging.stg_orders").outputs().getFirst();
         assertThat(stgOrders.getMetadata().get("dbtTestStatus"), is("fail"));
@@ -540,11 +540,8 @@ class ResultParserTest {
         assertThat(fctOrders.getMetadata().get("dbtTestsTotal"), is(2));
         assertThat(fctOrders.getMetadata().get("dbtTestsFailed"), is(0));
 
-        // No test targets dim_customers: absent must not read as a green "pass".
-        var dimCustomers = findEmitWithOutput(runContext.assets().emitted(), "analytics.marts.dim_customers").outputs().getFirst();
-        assertThat(dimCustomers.getMetadata(), not(hasKey("dbtTestStatus")));
-        assertThat(dimCustomers.getMetadata(), not(hasKey("dbtTestsTotal")));
-        assertThat(dimCustomers.getMetadata(), not(hasKey("dbtTestsFailed")));
+        // The run neither built nor tested dim_customers, so it is not written, rather than written as a green "pass".
+        assertThat(emittedOutputIds(runContext), not(hasItem("analytics.marts.dim_customers")));
     }
 
     @Test
@@ -846,13 +843,32 @@ class ResultParserTest {
 
         ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
 
-        var stgOrders = findEmitWithOutput(runContext.assets().emitted(), "analytics.staging.stg_orders").outputs().getFirst();
-        assertThat(stgOrders.getMetadata(), not(hasKey("dbtTestStatus")));
+        assertThat(emittedOutputIds(runContext), not(hasItem("analytics.staging.stg_orders")));
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"run", "compile", "docs"})
-    void parseManifestWithAssets_shouldKeepTestMetadataWhenTheCommandRanNoTests(String which) throws Exception {
+    @ValueSource(strings = {"compile", "generate"})
+    void parseManifestWithAssets_shouldWriteNothingWhenTheCommandBuildsNothing(String which) throws Exception {
+        var runContext = mockRunContext();
+        var manifestFile = writeStgOrdersManifest(runContext);
+        var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
+        Files.writeString(runResultsFile, """
+            {
+              "args": {"which": "%s"},
+              "results": [
+                {"status": "success", "unique_id": "model.analytics.stg_orders", "adapter_response": {}, "timing": []}
+              ]
+            }
+            """.formatted(which));
+
+        ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
+
+        assertThat(emittedOutputIds(runContext), empty());
+    }
+
+    @Test
+    void parseManifestWithAssets_shouldKeepTestMetadataWhenTheCommandRanNoTests() throws Exception {
+        String which = "run";
         var runContext = mockRunContext();
         var manifestFile = writeStgOrdersManifest(runContext);
         var runResultsFile = runContext.workingDir().path(true).resolve("run_results.json");
@@ -934,7 +950,7 @@ class ResultParserTest {
 
         ResultParser.parseManifestWithAssets(runContext, manifestFile.toFile(), runResultsFile.toFile());
 
-        assertThat(emittedOutputIds(runContext), containsInAnyOrder("analytics.marts.built", "analytics.marts.unselected"));
+        assertThat(emittedOutputIds(runContext), containsInAnyOrder("analytics.marts.built"));
     }
 
     @Test

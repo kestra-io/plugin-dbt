@@ -52,6 +52,16 @@ public class Manifest {
 
         @JsonProperty("unique_id")
         String uniqueId;
+
+        Config config;
+    }
+
+    @Value
+    @Jacksonized
+    @SuperBuilder
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class Config {
+        String materialized;
     }
 
     @Value

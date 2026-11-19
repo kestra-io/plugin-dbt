@@ -38,6 +38,11 @@ public class TestAssetManagerFactory extends AssetManagerFactory {
         return List.copyOf(allEmittedFor.getOrDefault(dynamicTaskRunId, List.of()));
     }
 
+    /** Every emit sent on behalf of a dynamic task run. */
+    public List<AssetEmit> allEmittedFor() {
+        return allEmittedFor.values().stream().flatMap(List::stream).toList();
+    }
+
     public void clear() {
         allEmitted.clear();
         allEmittedFor.clear();

@@ -1,0 +1,21 @@
+{
+  "description": "Shared test vectors of the Database asset id. The same file is copied byte for byte into plugin-ee-deploy, plugin-dbt and kestra-ee ui-ee, each with a test that reads it. fullId is the id before Asset.normalizeId shortens ids longer than 150 characters, id the id after it.",
+  "databases": [
+    {"system": "postgres", "host": "DB.Internal.", "port": "5432", "database": "analytics", "fullId": "postgres:db.internal:analytics"},
+    {"system": "aurora-postgresql", "host": "shop.cluster-c9akciq32xyz.eu-west-1.rds.amazonaws.com", "port": "5432", "database": "shop", "fullId": "postgres:shop.cluster-c9akciq32xyz.eu-west-1.rds.amazonaws.com:shop"},
+    {"system": "mysql", "host": "orders.internal", "port": "3307", "database": "orders", "fullId": "mysql:orders.internal:3307:orders"},
+    {"system": "mariadb", "host": "orders.internal", "port": "3306", "database": "orders", "fullId": "mysql:orders.internal:orders"},
+    {"system": "aurora-mysql", "host": "orders.cluster-c9akciq32xyz.eu-west-1.rds.amazonaws.com", "port": "3306", "database": "orders", "fullId": "mysql:orders.cluster-c9akciq32xyz.eu-west-1.rds.amazonaws.com:orders"},
+    {"system": "sqlserver-ee", "host": "erp.database.windows.net", "port": "1433", "database": "erp", "fullId": "sqlserver:erp.database.windows.net:erp"},
+    {"system": "redshift", "host": "warehouse.abc.eu-west-1.redshift.amazonaws.com", "port": "5439", "database": "dev", "fullId": "redshift:warehouse.abc.eu-west-1.redshift.amazonaws.com:dev"},
+    {"system": "snowflake", "host": "MyOrg-MyAccount", "port": null, "database": "ANALYTICS", "fullId": "snowflake:myorg-myaccount:ANALYTICS"},
+    {"system": "bigquery", "host": "my-gcp-project", "port": null, "database": null, "fullId": "bigquery:my-gcp-project"},
+    {"system": "clickhouse", "host": "CH.internal", "port": "9000", "database": "events", "fullId": "clickhouse:ch.internal:9000:events"},
+    {"system": "postgres", "host": "db.internal", "port": "", "database": "my reporting db", "fullId": "postgres:db.internal:my_reporting_db"},
+    {"system": "postgres", "host": "db.internal", "port": "5432", "database": "", "fullId": null},
+    {"system": "postgres", "host": "analytics-prod-primary-instance-with-a-very-long-name-for-tests.c9akciq32xyz.eu-west-1.rds.amazonaws.com.replica-replica-replica-replica-replica-replica-", "port": "5432", "database": "analytics", "fullId": "postgres:analytics-prod-primary-instance-with-a-very-long-name-for-tests.c9akciq32xyz.eu-west-1.rds.amazonaws.com.replica-replica-replica-replica-replica-replica-:analytics", "id": "postgres:analytics-prod-primary-instance-with-a-very-long-name-for-tests.c9akciq32xyz.eu-west-1.rds.amazonaws.com.replica-repli:4zcqyUTQHWOkZoN4uuB9zo"}
+  ],
+  "tables": [
+    {"database": "postgres:db.internal:analytics", "schema": "marts", "table": "orders", "fullId": "postgres:db.internal:analytics.marts.orders"}
+  ]
+}

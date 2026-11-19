@@ -1,0 +1,59 @@
+{
+  "metadata": {
+    "dbt_version": "1.11.17"
+  },
+  "args": {
+    "which": "build"
+  },
+  "results": [
+    {
+      "status": "success",
+      "unique_id": "model.carts.orders",
+      "adapter_response": {
+        "_message": "SELECT 0",
+        "code": "SELECT",
+        "rows_affected": 0
+      },
+      "timing": [
+        {
+          "name": "compile",
+          "started_at": "2026-11-19T15:13:04.608479Z",
+          "completed_at": "2026-11-19T15:13:04.613324Z"
+        },
+        {
+          "name": "execute",
+          "started_at": "2026-11-19T15:13:04.613589Z",
+          "completed_at": "2026-11-19T15:13:04.715366Z"
+        }
+      ],
+      "execution_time": 0.10798168182373047,
+      "message": "SELECT 0",
+      "failures": null
+    },
+    {
+      "status": "success",
+      "unique_id": "model.carts.payments",
+      "adapter_response": {
+        "_message": "CREATE VIEW",
+        "code": "CREATE VIEW",
+        "rows_affected": -1
+      },
+      "timing": [
+        {
+          "name": "compile",
+          "started_at": "2026-11-19T15:13:04.721483Z",
+          "completed_at": "2026-11-19T15:13:04.724381Z"
+        },
+        {
+          "name": "execute",
+          "started_at": "2026-11-19T15:13:04.724621Z",
+          "completed_at": "2026-11-19T15:13:04.774040Z"
+        }
+      ],
+      "execution_time": 0.05353665351867676,
+      "message": "CREATE VIEW",
+      "failures": null
+    }
+  ],
+  "elapsed_time": 0.3381938934326172
+}

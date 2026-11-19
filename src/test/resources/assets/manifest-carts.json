@@ -1,0 +1,78 @@
+{
+  "metadata": {
+    "dbt_version": "1.11.17",
+    "project_name": "carts",
+    "adapter_type": "postgres"
+  },
+  "nodes": {
+    "model.carts.payments": {
+      "database": "analytics",
+      "schema": "marts",
+      "name": "payments",
+      "alias": "payments",
+      "resource_type": "model",
+      "unique_id": "model.carts.payments",
+      "config": {
+        "materialized": "view"
+      },
+      "depends_on": {
+        "nodes": [
+          "model.carts.orders"
+        ]
+      }
+    },
+    "model.carts.orders": {
+      "database": "analytics",
+      "schema": "marts",
+      "name": "orders",
+      "alias": "orders",
+      "resource_type": "model",
+      "unique_id": "model.carts.orders",
+      "config": {
+        "materialized": "table"
+      },
+      "depends_on": {
+        "nodes": [
+          "model.carts.stg_orders"
+        ]
+      }
+    },
+    "model.carts.stg_orders": {
+      "database": "analytics",
+      "schema": "marts",
+      "name": "stg_orders",
+      "alias": "stg_orders",
+      "resource_type": "model",
+      "unique_id": "model.carts.stg_orders",
+      "config": {
+        "materialized": "ephemeral"
+      },
+      "depends_on": {
+        "nodes": [
+          "source.carts.raw.carts"
+        ]
+      }
+    }
+  },
+  "sources": {
+    "source.carts.raw.carts": {
+      "database": "analytics",
+      "schema": "raw",
+      "name": "carts",
+      "identifier": "carts",
+      "unique_id": "source.carts.raw.carts"
+    }
+  },
+  "parent_map": {
+    "model.carts.payments": [
+      "model.carts.orders"
+    ],
+    "model.carts.orders": [
+      "model.carts.stg_orders"
+    ],
+    "model.carts.stg_orders": [
+      "source.carts.raw.carts"
+    ],
+    "source.carts.raw.carts": []
+  }
+}

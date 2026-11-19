@@ -31,6 +31,8 @@ import io.kestra.core.storages.kv.KVStore;
 import io.kestra.core.storages.kv.KVValue;
 import io.kestra.core.storages.kv.KVValueAndMetadata;
 import io.kestra.plugin.dbt.ResultParser;
+import io.kestra.plugin.dbt.assets.ProfileLocator;
+import io.kestra.plugin.dbt.assets.TableScope;
 import io.kestra.plugin.dbt.models.Manifest;
 import io.kestra.plugin.dbt.models.RunResult;
 import io.kestra.plugin.scripts.exec.AbstractExecScript;
@@ -390,6 +392,15 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     private Property<String> profiles;
 
     @Schema(
+        title = "Database asset the built tables belong to",
+        description = """
+            The id of the `io.kestra.plugin.ee.assets.Database` asset, for when dbt connects through a proxy or an alias and the host of `profiles` is not the one the database is recorded under.
+            Without it, the id is built from the target of `profiles`, `<system>:<host>[:<port>]:<database>`, the same id the Terraform and OpenTofu Deploy tasks give the database they create. Each table is then `<database id>.<schema>.<table>`, part of that Database."""
+    )
+    @PluginProperty(group = "advanced")
+    private Property<String> databaseAsset;
+
+    @Schema(
         title = "dbt project directory",
         description = "Relative path to the project when it differs from the working directory. Added automatically to dbt commands as `--project-dir`."
     )
@@ -521,6 +532,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
             }
 
             var rCommands = runContext.render(this.commands).asList(String.class);
+            TableScope tableScope = tableScope(runContext, profilesString, projectWorkingDirectory, rCommands);
 
             if (rEngine == Engine.FUSION && rCommands.stream().anyMatch(command -> command.contains("--partial-parse") || command.contains("--no-partial-parse"))) {
                 logger.warn("The '--partial-parse' and '--no-partial-parse' flags are not supported by the FUSION engine and will be silently ignored by dbt.");
@@ -578,7 +590,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                     ? so
                     : ScriptOutput.builder().exitCode(1).outputFiles(new HashMap<>()).build();
 
-                parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore);
+                parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, tableScope);
                 Output dbtOutput = Output.builder()
                     .warningDetected(hasWarning.get())
                     .outputFiles(runResults.getOutputFiles())
@@ -589,7 +601,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                 throw new RunnableTaskException(e.getMessage(), dbtOutput);
             }
 
-            parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore);
+            parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, tableScope);
 
             return Output.builder()
                 .warningDetected(hasWarning.get())
@@ -616,7 +628,30 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         return new WebhookAlerter(runContext, rUrl, rLevel);
     }
 
-    private void parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore) throws IllegalVariableEvaluationException, IOException {
+    private TableScope tableScope(RunContext runContext, String profilesString, Path projectWorkingDirectory, List<String> commands) throws IllegalVariableEvaluationException {
+        String rDatabaseAsset = runContext.render(this.databaseAsset).as(String.class).orElse(null);
+        if (rDatabaseAsset != null && !rDatabaseAsset.isBlank()) {
+            return new TableScope(rDatabaseAsset, null);
+        }
+        Map<String, String> rEnv = runContext.render(this.getEnv()).asMap(String.class, String.class);
+        String profilesContent = profilesString;
+        if (profilesContent == null || profilesContent.isBlank()) {
+            Path existing = projectWorkingDirectory.resolve("profiles.yml");
+            try {
+                profilesContent = Files.exists(existing) ? Files.readString(existing) : null;
+            } catch (IOException e) {
+                profilesContent = null;
+            }
+        }
+        Optional<ProfileLocator.Target> target = ProfileLocator.locate(profilesContent, projectWorkingDirectory, commands, rEnv);
+        if (target.isEmpty()) {
+            runContext.logger().warn("Cannot tell from profiles.yml which database dbt connects to, so the table ids are not scoped by a Database asset. Set `databaseAsset` to name it.");
+        }
+        return new TableScope(null, target.orElse(null));
+    }
+
+    private void parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore, TableScope tableScope)
+        throws IllegalVariableEvaluationException, IOException {
         File manifestFile = projectWorkingDirectory.resolve("target/manifest.json").toFile();
         File runResultsFile = projectWorkingDirectory.resolve("target/run_results.json").toFile();
         DbtArtifacts.restoreIfCaptured(runContext, manifestFile, run.getOutputFiles());
@@ -637,7 +672,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
             // each model's asset metadata, and the parsed result rides back for parseRunResult below
             // instead of being read from disk a second time.
             ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(
-                runContext, manifestFile, runResultsFile, rParseRunResults
+                runContext, manifestFile, runResultsFile, rParseRunResults, tableScope
             );
             runContext.logger().info(
                 "Manifest parse done. uri={}, metadata={}, nodes={}",
@@ -651,7 +686,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         }
 
         if (rParseRunResults && runResultsFile.exists()) {
-            URI results = ResultParser.parseRunResult(runContext, runResultsFile, manifest, true, preParsedRunResults);
+            URI results = ResultParser.parseRunResult(runContext, runResultsFile, manifest, true, preParsedRunResults, tableScope);
             run.getOutputFiles().put("run_results.json", results);
         }
     }

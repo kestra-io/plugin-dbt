@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.assets.Asset;
 import io.kestra.core.models.assets.AssetIdentifier;
+import io.kestra.core.models.assets.AssetRelationRef;
 import io.kestra.core.models.assets.Custom;
 import io.kestra.core.models.executions.TaskRun;
 import io.kestra.core.models.executions.TaskRunAttempt;
@@ -29,6 +30,9 @@ import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.WorkerTaskResult;
 import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.utils.IdUtils;
+import io.kestra.core.utils.ListUtils;
+import io.kestra.plugin.dbt.assets.DatabaseLocator;
+import io.kestra.plugin.dbt.assets.TableScope;
 import io.kestra.plugin.dbt.models.Manifest;
 import io.kestra.plugin.dbt.models.RunResult;
 
@@ -40,6 +44,11 @@ public abstract class ResultParser {
         .setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
     private static final String TABLE_ASSET_TYPE = "io.kestra.plugin.ee.assets.Table";
+    private static final String DBT_PROJECT_ASSET_TYPE = "io.kestra.plugin.ee.assets.DbtProject";
+    private static final String MANAGED_BY_ROLE = "managedBy";
+    private static final String METADATA_UNIQUE_ID = "dbt.uniqueId";
+    private static final String METADATA_MATERIALIZED = "dbt.materialized";
+    private static final String MATERIALIZED_EPHEMERAL = "ephemeral";
     private static final String RESOURCE_TYPE_MODEL = "model";
     private static final String RESOURCE_TYPE_SEED = "seed";
     private static final String RESOURCE_TYPE_SNAPSHOT = "snapshot";
@@ -76,6 +85,9 @@ public abstract class ResultParser {
 
     // dbt commands whose run_results report the tests of the nodes they selected.
     private static final Set<String> TESTING_COMMANDS = Set.of("build", "test", "retry");
+
+    // dbt commands that write the tables of the nodes they report: compile or docs generate report every selected model a success without building anything.
+    private static final Set<String> BUILDING_COMMANDS = Set.of("build", "run", "seed", "snapshot", "retry", "clone");
 
     /**
      * @param fullyEmitted false when an emit failed part way, so a caller recording "this run is done" can
@@ -127,9 +139,15 @@ public abstract class ResultParser {
      */
     public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, File runResultsFile, boolean parseRunResults)
         throws IOException, IllegalVariableEvaluationException {
+        return parseManifestWithAssets(runContext, file, runResultsFile, parseRunResults, TableScope.NONE);
+    }
+
+    /** {@code scope} is the Database the tables belong to, which their ids start with. */
+    public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, File runResultsFile, boolean parseRunResults, TableScope scope)
+        throws IOException, IllegalVariableEvaluationException {
         var parsed = readRunResultQuietly(runResultsFile);
         var runResultsUnreadable = parseRunResults && parsed == null && runResultsFile != null && runResultsFile.exists();
-        return parseManifestWithAssets(runContext, file, true, Map.of(), parseRunResults ? parsed : null, parsed, runResultsUnreadable);
+        return parseManifestWithAssets(runContext, file, true, Map.of(), parseRunResults ? parsed : null, parsed, runResultsUnreadable, scope);
     }
 
     /**
@@ -150,11 +168,11 @@ public abstract class ResultParser {
      */
     public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, boolean emitLineage, Map<String, Object> assetMetadata, RunResult runResult,
         RunResult buildResult) throws IOException, IllegalVariableEvaluationException {
-        return parseManifestWithAssets(runContext, file, emitLineage, assetMetadata, runResult, buildResult, false);
+        return parseManifestWithAssets(runContext, file, emitLineage, assetMetadata, runResult, buildResult, false, TableScope.NONE);
     }
 
     private static ManifestResult parseManifestWithAssets(RunContext runContext, File file, boolean emitLineage, Map<String, Object> assetMetadata, RunResult runResult,
-        RunResult buildResult, boolean runResultsUnreadable) throws IOException, IllegalVariableEvaluationException {
+        RunResult buildResult, boolean runResultsUnreadable, TableScope scope) throws IOException, IllegalVariableEvaluationException {
         Manifest manifest = null;
         boolean fullyEmitted = true;
         List<String> assetIds = List.of();
@@ -165,7 +183,7 @@ public abstract class ResultParser {
         try {
             manifest = MAPPER.readValue(file, Manifest.class);
 
-            Map<String, ModelAsset> assetNodes = extractAssetNodes(manifest);
+            Map<String, ModelAsset> assetNodes = extractAssetNodes(manifest, scope);
             assetIds = assetNodes.values().stream()
                 .filter(ModelAsset::produced)
                 .map(ModelAsset::assetId)
@@ -175,7 +193,13 @@ public abstract class ResultParser {
             if (emitLineage) {
                 Map<String, Map<String, Object>> testMetadata = testStatusMetadata(manifest, runResult);
                 Set<String> clearableNodes = runResultsUnreadable ? assetNodes.keySet() : testedNodes(manifest, runResult);
-                fullyEmitted = emitAssets(runContext, assetNodes, assetMetadata, testMetadata, clearableNodes, notBuiltNodes(runContext, buildResult));
+                Optional<Set<String>> writtenNodes = builtNodes(runContext, buildResult).map(built ->
+                {
+                    Set<String> written = new HashSet<>(built);
+                    written.addAll(testMetadata.keySet());
+                    return written;
+                });
+                fullyEmitted = emitAssets(runContext, assetNodes, projectAsset(runContext, manifest), assetMetadata, testMetadata, clearableNodes, writtenNodes);
             } else {
                 runContext.logger().debug("Lineage already emitted for this run, skipping {} assets", assetIds.size());
             }
@@ -210,9 +234,17 @@ public abstract class ResultParser {
      */
     public static URI parseRunResult(RunContext runContext, File file, Manifest manifest, boolean attachAssets, RunResult preParsed)
         throws IOException, IllegalVariableEvaluationException {
+        return parseRunResult(runContext, file, manifest, attachAssets, preParsed, TableScope.NONE);
+    }
+
+    /** {@code scope} must be the one the manifest was parsed with, so both writes of a table agree. */
+    public static URI parseRunResult(RunContext runContext, File file, Manifest manifest, boolean attachAssets, RunResult preParsed, TableScope scope)
+        throws IOException, IllegalVariableEvaluationException {
         RunResult result = preParsed != null ? preParsed : MAPPER.readValue(file, RunResult.class);
 
-        Map<String, ModelAsset> modelAssets = (manifest == null || !attachAssets) ? Map.of() : extractAssetNodes(manifest);
+        Map<String, ModelAsset> modelAssets = (manifest == null || !attachAssets) ? Map.of() : extractAssetNodes(manifest, scope);
+        String projectId = manifest == null ? null : Optional.ofNullable(projectAsset(runContext, manifest)).map(Asset::getId).orElse(null);
+        boolean building = isBuildingCommand(result);
 
         // Emit one dynamic taskrun per dbt model (the UI timeline "bars"), attaching that model's
         // own status/message/failures as logs riding with its taskrun so they render inline under
@@ -309,7 +341,7 @@ public abstract class ResultParser {
                     .filter(Objects::nonNull)
                     .forEach(runContext::metric);
 
-                AssetEmit assets = assetsFor(r.getUniqueId(), modelAssets);
+                AssetEmit assets = building ? assetsFor(r.getUniqueId(), modelAssets, projectId) : null;
                 TaskRun modelTaskRun = TaskRun.builder()
                     .id(IdUtils.create())
                     .namespace(runContext.render("{{ flow.namespace }}"))
@@ -373,7 +405,7 @@ public abstract class ResultParser {
         return logs;
     }
 
-    private static AssetEmit assetsFor(String uniqueId, Map<String, ModelAsset> modelAssets) {
+    private static AssetEmit assetsFor(String uniqueId, Map<String, ModelAsset> modelAssets, String projectId) {
         if (uniqueId == null) {
             return null;
         }
@@ -385,7 +417,7 @@ public abstract class ResultParser {
         }
 
         List<AssetIdentifier> inputs = inputIdentifiers(modelAsset, modelAssets);
-        List<Asset> outputs = List.of(selfAsset(modelAsset));
+        List<Asset> outputs = List.of(selfAsset(modelAsset, projectId, Map.of(), null));
 
         return new AssetEmit(inputs, outputs);
     }
@@ -399,14 +431,27 @@ public abstract class ResultParser {
     }
 
     /** @return false if any asset failed to emit, so the caller never records a partial emit as complete. */
-    private static boolean emitAssets(RunContext runContext, Map<String, ModelAsset> assetNodes, Map<String, Object> assetMetadata, Map<String, Map<String, Object>> testMetadata,
-        Set<String> clearableNodes, Set<String> notBuiltNodes) throws IllegalVariableEvaluationException {
+    private static boolean emitAssets(RunContext runContext, Map<String, ModelAsset> assetNodes, Asset project, Map<String, Object> assetMetadata,
+        Map<String, Map<String, Object>> testMetadata, Set<String> clearableNodes, Optional<Set<String>> builtNodes) throws IllegalVariableEvaluationException {
         runContext.logger().info("dbt assets extracted from manifest: {}", assetNodes.size());
         boolean fullyEmitted = true;
+        String projectId = project == null ? null : project.getId();
+
+        if (project != null && builtNodes.map(built -> !built.isEmpty()).orElse(true)) {
+            try {
+                runContext.assets().emit(new AssetEmit(List.of(), List.of(project)));
+            } catch (UnsupportedOperationException e) {
+                runContext.logger().debug("Asset emission is not supported in this edition, skipping.");
+                return false;
+            } catch (QueueException e) {
+                fullyEmitted = false;
+                runContext.logger().warn("Unable to emit dbt project '{}'", projectId, e);
+            }
+        }
 
         for (Map.Entry<String, ModelAsset> entry : assetNodes.entrySet()) {
             ModelAsset asset = entry.getValue();
-            if (!asset.produced() || notBuiltNodes.contains(entry.getKey())) {
+            if (!asset.produced() || builtNodes.map(built -> !built.contains(entry.getKey())).orElse(false)) {
                 continue;
             }
 
@@ -416,7 +461,7 @@ public abstract class ResultParser {
             if (nodeMetadata == null && clearableNodes.contains(entry.getKey())) {
                 nodeMetadata = NO_TEST_METADATA;
             }
-            List<Asset> outputs = List.of(selfAsset(asset, assetMetadata, nodeMetadata));
+            List<Asset> outputs = List.of(selfAsset(asset, projectId, assetMetadata, nodeMetadata));
             try {
                 runContext.assets().emit(new AssetEmit(inputs, outputs));
             } catch (UnsupportedOperationException e) {
@@ -435,22 +480,49 @@ public abstract class ResultParser {
         return fullyEmitted;
     }
 
-    private static Asset selfAsset(ModelAsset asset) {
-        return selfAsset(asset, Map.of(), null);
-    }
-
-    private static Asset selfAsset(ModelAsset asset, Map<String, Object> assetMetadata, Map<String, Object> nodeMetadata) {
+    /**
+     * The one builder of a table for both writes of a run, the run's and the model's, so neither drops the parent or
+     * the project link the other set: a write without {@code partOf} would remove it.
+     */
+    private static Asset selfAsset(ModelAsset asset, String projectId, Map<String, Object> assetMetadata, Map<String, Object> nodeMetadata) {
         Map<String, Object> metadata = new HashMap<>(asset.metadata());
         metadata.put(METADATA_RESOURCE_TYPE, asset.resourceType());
+        metadata.put(METADATA_UNIQUE_ID, asset.uniqueId());
+        if (asset.materialized() != null) {
+            metadata.put(METADATA_MATERIALIZED, asset.materialized());
+        }
         metadata.putAll(assetMetadata);
         if (nodeMetadata != null) {
             metadata.putAll(nodeMetadata);
         }
 
-        return Custom.builder()
+        Asset table = Custom.builder()
             .id(asset.assetId())
             .type(TABLE_ASSET_TYPE)
             .metadata(metadata)
+            .build();
+        if (asset.databaseId() != null) {
+            table.withPartOf(new AssetRelationRef(asset.databaseId(), null, null));
+        }
+        if (projectId != null) {
+            table.withRelated(List.of(new AssetRelationRef(projectId, null, MANAGED_BY_ROLE)));
+        }
+        return table;
+    }
+
+    /** The project the run builds, {@code dbt:<namespace>:<project>}; {@code null} when the manifest does not name it. */
+    private static Asset projectAsset(RunContext runContext, Manifest manifest) {
+        Object name = manifest.getMetadata() == null ? null : manifest.getMetadata().get("project_name");
+        if (name == null || name.toString().isBlank()) {
+            return null;
+        }
+        String namespace = runContext.flowInfo().namespace();
+        return Custom.builder()
+            .namespace(namespace)
+            .id("dbt:" + namespace + ":" + name)
+            .type(DBT_PROJECT_ASSET_TYPE)
+            .displayName(name.toString())
+            .metadata(new HashMap<>(Map.of("project", name.toString())))
             .build();
     }
 
@@ -473,17 +545,30 @@ public abstract class ResultParser {
         }
     }
 
-    // Nodes run_results reports as errored or skipped. Writing one as an output
-    // would create or update an asset that was never built. A node absent from run_results, in a status this plugin does not know, or with no run_results at all, says nothing about it.
-    private static Set<String> notBuiltNodes(RunContext runContext, RunResult runResult) {
+    // The nodes this run built, from run_results: none for a command that builds nothing, else the ones it reports in a
+    // built state, a status this plugin does not know counting as built. Empty when there are no run_results, which
+    // then say nothing and every node of the manifest is written as before. The caller adds the models the run tested,
+    // which are written for their test results.
+    private static Optional<Set<String>> builtNodes(RunContext runContext, RunResult runResult) {
         if (runResult == null || runResult.getResults() == null) {
-            return Set.of();
+            return Optional.empty();
+        }
+        if (!isBuildingCommand(runResult)) {
+            return Optional.of(Set.of());
         }
 
-        return runResult.getResults().stream()
-            .filter(result -> result.getUniqueId() != null && !isBuilt(runContext, result))
-            .map(RunResult.Result::getUniqueId)
-            .collect(Collectors.toSet());
+        return Optional.of(
+            runResult.getResults().stream()
+                .filter(result -> result.getUniqueId() != null && isBuilt(runContext, result))
+                .map(RunResult.Result::getUniqueId)
+                .collect(Collectors.toSet())
+        );
+    }
+
+    // run_results older than dbt 1.0 carry no args: their statuses then decide alone.
+    private static boolean isBuildingCommand(RunResult runResult) {
+        Object which = runResult == null || runResult.getArgs() == null ? null : runResult.getArgs().get("which");
+        return which == null || BUILDING_COMMANDS.contains(String.valueOf(which));
     }
 
     private static boolean isBuilt(RunContext runContext, RunResult.Result result) {
@@ -603,20 +688,28 @@ public abstract class ResultParser {
         return List.of();
     }
 
+    // An ephemeral model builds no table, so the tables it reads are the inputs of the model that uses it.
     private static List<AssetIdentifier> inputIdentifiers(ModelAsset modelAsset, Map<String, ModelAsset> modelAssets) {
-        if (modelAsset.dependsOn() == null || modelAsset.dependsOn().isEmpty()) {
-            return List.of();
+        Map<String, AssetIdentifier> inputs = new LinkedHashMap<>();
+        Set<String> visited = new HashSet<>();
+        Deque<String> pending = new ArrayDeque<>(ListUtils.emptyOnNull(modelAsset.dependsOn()));
+        while (!pending.isEmpty()) {
+            String uniqueId = pending.poll();
+            ModelAsset dependency = modelAssets.get(uniqueId);
+            if (dependency == null || !visited.add(uniqueId)) {
+                continue;
+            }
+            if (dependency.ephemeral()) {
+                pending.addAll(ListUtils.emptyOnNull(dependency.dependsOn()));
+            } else {
+                inputs.putIfAbsent(dependency.assetId(), new AssetIdentifier(null, null, dependency.assetId(), TABLE_ASSET_TYPE));
+            }
         }
-
-        return modelAsset.dependsOn().stream()
-            .map(modelAssets::get)
-            .filter(Objects::nonNull)
-            .map(dep -> new AssetIdentifier(null, null, dep.assetId(), TABLE_ASSET_TYPE))
-            .toList();
+        return List.copyOf(inputs.values());
     }
 
     // Every model/seed/snapshot/source as an asset node keyed by unique_id, deps filtered to nodes in this set.
-    private static Map<String, ModelAsset> extractAssetNodes(Manifest manifest) {
+    private static Map<String, ModelAsset> extractAssetNodes(Manifest manifest, TableScope scope) {
         if (manifest == null) {
             return Map.of();
         }
@@ -638,7 +731,9 @@ public abstract class ResultParser {
                 }
 
                 String name = firstNonBlank(node.getAlias(), node.getName(), uniqueId);
-                String assetId = assetIdFor(node.getDatabase(), node.getSchema(), name, uniqueId);
+                String databaseId = scope.databaseId(node.getDatabase()).orElse(null);
+                String assetId = assetIdFor(databaseId, node.getDatabase(), node.getSchema(), name, uniqueId);
+                String materialized = node.getConfig() == null ? null : node.getConfig().getMaterialized();
 
                 // Use parent_map from manifest (the canonical DAG) when available,
                 // falling back to node-level depends_on for older manifests.
@@ -651,7 +746,10 @@ public abstract class ResultParser {
                     dependsOn = List.of();
                 }
 
-                assetNodes.put(uniqueId, new ModelAsset(assetId, metadataFor(system, node.getDatabase(), node.getSchema(), name), dependsOn, lower(node.getResourceType())));
+                assetNodes.put(
+                    uniqueId,
+                    new ModelAsset(assetId, uniqueId, databaseId, materialized, metadataFor(system, node.getDatabase(), node.getSchema(), name), dependsOn, lower(node.getResourceType()))
+                );
             }
         }
 
@@ -670,9 +768,11 @@ public abstract class ResultParser {
 
                 // The physical table name is `identifier`; fall back to the dbt source name.
                 String name = firstNonBlank(source.getIdentifier(), source.getName(), uniqueId);
-                String assetId = assetIdFor(source.getDatabase(), source.getSchema(), name, uniqueId);
+                String databaseId = scope.databaseId(source.getDatabase()).orElse(null);
+                String assetId = assetIdFor(databaseId, source.getDatabase(), source.getSchema(), name, uniqueId);
 
-                assetNodes.put(uniqueId, new ModelAsset(assetId, metadataFor(system, source.getDatabase(), source.getSchema(), name), List.of(), RESOURCE_TYPE_SOURCE));
+                assetNodes
+                    .put(uniqueId, new ModelAsset(assetId, uniqueId, databaseId, null, metadataFor(system, source.getDatabase(), source.getSchema(), name), List.of(), RESOURCE_TYPE_SOURCE));
             }
         }
 
@@ -684,7 +784,7 @@ public abstract class ResultParser {
                 : a.dependsOn().stream()
                     .filter(assetNodes::containsKey)
                     .toList();
-            resolved.put(e.getKey(), new ModelAsset(a.assetId(), a.metadata(), deps, a.resourceType()));
+            resolved.put(e.getKey(), new ModelAsset(a.assetId(), a.uniqueId(), a.databaseId(), a.materialized(), a.metadata(), deps, a.resourceType()));
         }
 
         return resolved;
@@ -719,7 +819,10 @@ public abstract class ResultParser {
         return adapterType == null ? null : adapterType.toString();
     }
 
-    private static String assetIdFor(String database, String schema, String name, String fallback) {
+    private static String assetIdFor(String databaseId, String database, String schema, String name, String fallback) {
+        if (databaseId != null && hasValue(schema) && hasValue(name)) {
+            return DatabaseLocator.tableId(databaseId, schema, name);
+        }
         List<String> parts = new ArrayList<>();
         if (hasValue(database)) {
             parts.add(database);
@@ -752,10 +855,17 @@ public abstract class ResultParser {
         return value != null && !value.trim().isEmpty();
     }
 
-    private record ModelAsset(String assetId, Map<String, Object> metadata, List<String> dependsOn, String resourceType) {
-        // True for nodes dbt builds (models, seeds, snapshots), not read-only sources.
+    /**
+     * @param databaseId the Database the table belongs to, {@code null} when unknown
+     */
+    private record ModelAsset(String assetId, String uniqueId, String databaseId, String materialized, Map<String, Object> metadata, List<String> dependsOn, String resourceType) {
+        // True for nodes dbt builds a table for (models, seeds, snapshots), not read-only sources nor ephemeral models.
         boolean produced() {
-            return PRODUCED_RESOURCE_TYPES.contains(resourceType);
+            return PRODUCED_RESOURCE_TYPES.contains(resourceType) && !ephemeral();
+        }
+
+        boolean ephemeral() {
+            return MATERIALIZED_EPHEMERAL.equals(materialized);
         }
     }
 }
