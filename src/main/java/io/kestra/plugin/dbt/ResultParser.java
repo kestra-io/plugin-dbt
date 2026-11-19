@@ -341,7 +341,7 @@ public abstract class ResultParser {
                     .filter(Objects::nonNull)
                     .forEach(runContext::metric);
 
-                AssetEmit assets = building ? assetsFor(r.getUniqueId(), modelAssets, projectId) : null;
+                AssetEmit assets = building ? assetsFor(r.getUniqueId(), modelAssets, projectId, runContext.flowInfo().namespace()) : null;
                 TaskRun modelTaskRun = TaskRun.builder()
                     .id(IdUtils.create())
                     .namespace(runContext.render("{{ flow.namespace }}"))
@@ -405,7 +405,7 @@ public abstract class ResultParser {
         return logs;
     }
 
-    private static AssetEmit assetsFor(String uniqueId, Map<String, ModelAsset> modelAssets, String projectId) {
+    private static AssetEmit assetsFor(String uniqueId, Map<String, ModelAsset> modelAssets, String projectId, String namespace) {
         if (uniqueId == null) {
             return null;
         }
@@ -417,7 +417,7 @@ public abstract class ResultParser {
         }
 
         List<AssetIdentifier> inputs = inputIdentifiers(modelAsset, modelAssets);
-        List<Asset> outputs = List.of(selfAsset(modelAsset, projectId, Map.of(), null));
+        List<Asset> outputs = List.of(selfAsset(modelAsset, namespace, projectId, Map.of(), null));
 
         return new AssetEmit(inputs, outputs);
     }
@@ -461,7 +461,7 @@ public abstract class ResultParser {
             if (nodeMetadata == null && clearableNodes.contains(entry.getKey())) {
                 nodeMetadata = NO_TEST_METADATA;
             }
-            List<Asset> outputs = List.of(selfAsset(asset, projectId, assetMetadata, nodeMetadata));
+            List<Asset> outputs = List.of(selfAsset(asset, runContext.flowInfo().namespace(), projectId, assetMetadata, nodeMetadata));
             try {
                 runContext.assets().emit(new AssetEmit(inputs, outputs));
             } catch (UnsupportedOperationException e) {
@@ -484,7 +484,7 @@ public abstract class ResultParser {
      * The one builder of a table for both writes of a run, the run's and the model's, so neither drops the parent or
      * the project link the other set: a write without {@code partOf} would remove it.
      */
-    private static Asset selfAsset(ModelAsset asset, String projectId, Map<String, Object> assetMetadata, Map<String, Object> nodeMetadata) {
+    private static Asset selfAsset(ModelAsset asset, String namespace, String projectId, Map<String, Object> assetMetadata, Map<String, Object> nodeMetadata) {
         Map<String, Object> metadata = new HashMap<>(asset.metadata());
         metadata.put(METADATA_RESOURCE_TYPE, asset.resourceType());
         metadata.put(METADATA_UNIQUE_ID, asset.uniqueId());
@@ -497,6 +497,7 @@ public abstract class ResultParser {
         }
 
         Asset table = Custom.builder()
+            .namespace(namespace)
             .id(asset.assetId())
             .type(TABLE_ASSET_TYPE)
             .metadata(metadata)

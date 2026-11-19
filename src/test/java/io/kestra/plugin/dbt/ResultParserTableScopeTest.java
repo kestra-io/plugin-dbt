@@ -65,6 +65,7 @@ class ResultParserTableScopeTest {
             tuple(DATABASE + ".marts.orders", "io.kestra.plugin.ee.assets.Table"),
             tuple(DATABASE + ".marts.payments", "io.kestra.plugin.ee.assets.Table")
         );
+        assertThat(outputs).allSatisfy(asset -> assertThat(asset.getNamespace()).isEqualTo(runContext.flowInfo().namespace()));
         assertThat(outputs).filteredOn(asset -> asset.getId().endsWith(".marts.orders")).singleElement().satisfies(orders ->
         {
             assertThat(orders.getPartOf()).isEqualTo(new AssetRelationRef(DATABASE, null, null));
