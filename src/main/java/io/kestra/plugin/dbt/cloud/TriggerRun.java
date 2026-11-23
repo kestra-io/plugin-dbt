@@ -7,14 +7,22 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.HttpResponse;
+import io.kestra.core.http.client.HttpClientResponseException;
 import io.kestra.core.models.annotations.Example;
+import io.kestra.core.models.annotations.Metric;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
+import io.kestra.core.models.executions.metrics.Counter;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.retrys.Constant;
@@ -27,6 +35,7 @@ import io.kestra.plugin.dbt.cloud.models.RunResponse;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
+import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -41,7 +50,9 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @Schema(
     title = "Start a dbt Cloud job run",
-    description = "Triggers a dbt Cloud job via API. Optionally waits for completion to stream logs, surface dynamic steps, and collect run results; wait defaults to true with 5s polling and a 60m cap."
+    description = """
+        Triggers a dbt Cloud job via API. Optionally waits for completion to stream logs, surface dynamic steps, and collect run results; wait defaults to true with 5s polling and a 60m cap.
+        A retry or resubmission of the task run resumes the run it already triggered unless that run failed or was cancelled, and killing the task cancels the run."""
 )
 @Plugin(
     examples = {
@@ -79,6 +90,11 @@ import lombok.experimental.SuperBuilder;
                         maxAttempts: 5
                 """
         )
+    },
+    metrics = {
+        @Metric(
+            name = "resumed", type = Counter.TYPE, description = "Whether the task resumed the run this task run triggered before it was interrupted (1) instead of starting a new one (0)."
+        )
     }
 )
 public class TriggerRun extends AbstractDbtCloud implements RunnableTask<TriggerRun.Output> {
@@ -86,6 +102,22 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
     // A just-created run can take a moment to show up in the run list, so the confirm lookup is retried.
     private static final int CONFIRM_LOOKUP_MAX_ATTEMPTS = 3;
     private static final Duration CONFIRM_LOOKUP_BACKOFF = Duration.ofSeconds(2);
+
+    static final String CHECKPOINT_KEY = "dbt.cloud.runId";
+
+    @JsonIgnore
+    @Getter(AccessLevel.NONE)
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
+    @Builder.Default
+    private final AtomicReference<Runnable> killable = new AtomicReference<>();
+
+    @JsonIgnore
+    @Getter(AccessLevel.NONE)
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
+    @Builder.Default
+    private final AtomicBoolean isKilled = new AtomicBoolean(false);
 
     @Schema(
         title = "Job ID",
@@ -177,7 +209,8 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
             reached dbt Cloud, so in a rare case it could double-trigger. And the restart or retry check \
             scans only the most recent runs of the job, so on a very busy or heavily shared job that has \
             accumulated a large backlog of runs since this one started, it may not find the earlier run and \
-            could trigger a duplicate. Default false, which always triggers a new run."""
+            could trigger a duplicate. Default false. A retry or resubmission still resumes the run through the run id \
+            checkpoint, so `reattach` only matters when the trigger response was lost before that checkpoint was saved."""
     )
     @Builder.Default
     @PluginProperty(group = "reliability")
@@ -210,6 +243,16 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         Logger logger = runContext.logger();
 
         boolean reattachEnabled = Boolean.TRUE.equals(runContext.render(this.reattach).as(Boolean.class).orElse(Boolean.FALSE));
+
+        var resumed = this.findCheckpointedRun(runContext);
+        runContext.metric(Counter.of("resumed", resumed.isPresent() ? 1 : 0));
+        if (resumed.isPresent()) {
+            logger.info(
+                "Resuming run {} (status {}) this taskrun triggered before it was interrupted instead of triggering a new one",
+                resumed.get().getId(), resumed.get().getStatus()
+            );
+            return this.waitOrReturn(runContext, resumed.get().getId());
+        }
 
         // Baseline id of the newest tagged run seen before the POST below, used by the ambiguous-failure
         // confirm path to reject a stale run left over from a prior attempt (same taskrun id, reused tag).
@@ -262,6 +305,10 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
                     .content(body)
                     .build()
             );
+
+        if (isKilled.get()) {
+            throw new IllegalStateException("The task was killed before the dbt Cloud run was triggered.");
+        }
 
         //502/504 gateway errors surface here when reattach is on
         HttpResponse<RunResponse> triggerResponse;
@@ -447,7 +494,103 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         return "[taskrun:" + runContext.taskRunInfo().taskRunId() + "]";
     }
 
+    // A checkpoint store or dbt Cloud error other than a 404 is thrown: failing beats risking a duplicate run.
+    private Optional<Run> findCheckpointedRun(RunContext runContext) throws Exception {
+        // A RunContext not initialized by a worker (runContextFactory.of) has no checkpoint store.
+        var checkpoints = runContext.checkpoints();
+        var saved = checkpoints == null ? Optional.<String> empty() : checkpoints.get(CHECKPOINT_KEY);
+        if (saved.isEmpty()) {
+            return Optional.empty();
+        }
+
+        long runId;
+        try {
+            runId = Long.parseLong(saved.get());
+        } catch (NumberFormatException e) {
+            runContext.logger().warn("Ignoring the run checkpoint '{}', it is not a run id", saved.get());
+            return Optional.empty();
+        }
+
+        Run run;
+        try {
+            run = Optional.ofNullable(this.fetchRun(runContext, runId).getBody()).map(RunResponse::getData).orElse(null);
+        } catch (HttpClientResponseException e) {
+            if (e.getResponse() != null && e.getResponse().getStatus().getCode() == 404) {
+                runContext.logger().warn("The checkpointed run {} no longer exists in dbt Cloud, a new run is triggered", runId);
+                return Optional.empty();
+            }
+            throw e;
+        }
+
+        var rJobId = runContext.render(this.jobId).as(String.class).orElseThrow(() -> new IllegalArgumentException("jobId is required."));
+        if (run == null || run.getJobDefinitionId() == null || !rJobId.equals(run.getJobDefinitionId().toString())) {
+            return Optional.empty();
+        }
+        if (run.getStatus() == JobStatus.NUMBER_20 || run.getStatus() == JobStatus.NUMBER_30) {
+            return Optional.empty();
+        }
+        return Optional.of(run);
+    }
+
+    // Never fails the task: without the checkpoint a retry only falls back to triggering a new run.
+    private static void writeCheckpoint(RunContext runContext, Long runId) {
+        try {
+            var checkpoints = runContext.checkpoints();
+            if (checkpoints != null) {
+                checkpoints.set(CHECKPOINT_KEY, runId.toString());
+            }
+        } catch (Exception e) {
+            runContext.logger().warn("Could not save the run checkpoint, an interrupted task will trigger a new run: {}", e.getMessage());
+        }
+    }
+
+    private HttpResponse<RunResponse> fetchRun(RunContext runContext, long runId) throws Exception {
+        return this.request(
+            runContext,
+            HttpRequest.builder()
+                .uri(URI.create("%s/runs/%d/".formatted(this.accountUrl(runContext), runId)))
+                .method("GET"),
+            RunResponse.class
+        );
+    }
+
+    private void cancelRun(RunContext runContext, Long runId) {
+        try {
+            this.request(
+                runContext,
+                HttpRequest.builder()
+                    .uri(URI.create("%s/runs/%d/cancel/".formatted(this.accountUrl(runContext), runId)))
+                    .method("POST"),
+                RunResponse.class
+            );
+            runContext.logger().info("Cancelled dbt Cloud run {}", runId);
+        } catch (Exception e) {
+            runContext.logger().warn("Could not cancel dbt Cloud run {}: {}", runId, e.getMessage());
+        }
+    }
+
+    private String accountUrl(RunContext runContext) throws Exception {
+        return "%s/api/v2/accounts/%s".formatted(
+            runContext.render(this.baseUrl).as(String.class).orElseThrow(() -> new IllegalArgumentException("baseUrl is required.")),
+            runContext.render(this.accountId).as(String.class).orElseThrow(() -> new IllegalArgumentException("accountId is required."))
+        );
+    }
+
+    @Override
+    public void kill() {
+        if (isKilled.compareAndSet(false, true)) {
+            Optional.ofNullable(killable.getAndSet(null)).ifPresent(Runnable::run);
+        }
+    }
+
     private Output waitOrReturn(RunContext runContext, Long runId) throws Exception {
+        writeCheckpoint(runContext, runId);
+        killable.set(() -> this.cancelRun(runContext, runId));
+        // A kill that landed before the run id was known: cancel now, getAndSet keeps it to one cancel.
+        if (isKilled.get()) {
+            Optional.ofNullable(killable.getAndSet(null)).ifPresent(Runnable::run);
+        }
+
         if (Boolean.FALSE.equals(runContext.render(this.wait).as(Boolean.class).orElse(Boolean.TRUE))) {
             return Output.builder()
                 .runId(runId)

@@ -2,6 +2,7 @@ package io.kestra.plugin.dbt.cloud;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 
@@ -1080,5 +1081,156 @@ class MockTriggerRunTest {
 
         assertThat(output.getRunId(), is(789L));
         verify(1, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
+    }
+
+    @Test
+    void testResumesCheckpointedRunInsteadOfTriggering() throws Exception {
+        var task = checkpointTask(false);
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        runContext.checkpoints().set(TriggerRun.CHECKPOINT_KEY, "789");
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/789/"))
+                .willReturn(okJson("{\"data\":{\"id\":789,\"job_definition_id\":456,\"status\":3}}"))
+        );
+
+        var output = task.run(runContext);
+
+        assertThat(output.getRunId(), is(789L));
+        verify(0, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
+    }
+
+    @Test
+    void testTriggersAndOverwritesCheckpointWhenCheckpointedRunFailed() throws Exception {
+        var task = checkpointTask(false);
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        runContext.checkpoints().set(TriggerRun.CHECKPOINT_KEY, "789");
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/789/"))
+                .willReturn(okJson("{\"data\":{\"id\":789,\"job_definition_id\":456,\"status\":20}}"))
+        );
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(okJson("{\"data\":{\"id\":790}}"))
+        );
+
+        var output = task.run(runContext);
+
+        assertThat(output.getRunId(), is(790L));
+        assertThat(runContext.checkpoints().get(TriggerRun.CHECKPOINT_KEY), is(Optional.of("790")));
+    }
+
+    @Test
+    void testIgnoresCheckpointedRunOfAnotherJob() throws Exception {
+        var task = checkpointTask(false);
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        runContext.checkpoints().set(TriggerRun.CHECKPOINT_KEY, "789");
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/789/"))
+                .willReturn(okJson("{\"data\":{\"id\":789,\"job_definition_id\":999,\"status\":3}}"))
+        );
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(okJson("{\"data\":{\"id\":790}}"))
+        );
+
+        assertThat(task.run(runContext).getRunId(), is(790L));
+    }
+
+    @Test
+    void testTriggersWhenCheckpointedRunNoLongerExists() throws Exception {
+        var task = checkpointTask(false);
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        runContext.checkpoints().set(TriggerRun.CHECKPOINT_KEY, "789");
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/789/"))
+                .willReturn(aResponse().withStatus(404))
+        );
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(okJson("{\"data\":{\"id\":790}}"))
+        );
+
+        assertThat(task.run(runContext).getRunId(), is(790L));
+    }
+
+    @Test
+    void testKillCancelsTheRunOnce() throws Exception {
+        var task = checkpointTask(false);
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(okJson("{\"data\":{\"id\":789}}"))
+        );
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/runs/789/cancel/"))
+                .willReturn(okJson("{\"data\":{\"id\":789,\"status\":30}}"))
+        );
+
+        task.run(runContext);
+        task.kill();
+        task.kill();
+
+        verify(1, postRequestedFor(urlEqualTo("/api/v2/accounts/123/runs/789/cancel/")));
+    }
+
+    @Test
+    void testKillBeforeTriggerStartsNoRun() throws Exception {
+        var task = checkpointTask(false);
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(okJson("{\"data\":{\"id\":789}}"))
+        );
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/runs/789/cancel/"))
+                .willReturn(okJson("{\"data\":{\"id\":789,\"status\":30}}"))
+        );
+
+        task.kill();
+
+        assertThatThrownBy(() -> task.run(runContext)).isInstanceOf(IllegalStateException.class);
+        verify(0, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
+    }
+
+    @Test
+    void testFailsWithoutTriggeringWhenCheckpointedRunCannotBeRead() throws Exception {
+        var task = checkpointTask(false);
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        runContext.checkpoints().set(TriggerRun.CHECKPOINT_KEY, "789");
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/789/"))
+                .willReturn(aResponse().withStatus(403))
+        );
+
+        assertThatThrownBy(() -> task.run(runContext)).isInstanceOf(HttpClientResponseException.class);
+        verify(0, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
+    }
+
+    @Test
+    void testCheckpointResumesBeforeTheReattachLookup() throws Exception {
+        var task = checkpointTask(true);
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        runContext.checkpoints().set(TriggerRun.CHECKPOINT_KEY, "789");
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/789/"))
+                .willReturn(okJson("{\"data\":{\"id\":789,\"job_definition_id\":456,\"status\":3}}"))
+        );
+
+        assertThat(task.run(runContext).getRunId(), is(789L));
+        verify(0, getRequestedFor(urlPathEqualTo("/api/v2/accounts/123/runs/")));
+        verify(0, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
+    }
+
+    private static TriggerRun checkpointTask(boolean isReattachEnabled) {
+        return TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("my-token"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .wait(Property.ofValue(false))
+            .reattach(Property.ofValue(isReattachEnabled))
+            .build();
     }
 }
