@@ -16,7 +16,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.assets.Asset;
 import io.kestra.core.models.assets.AssetIdentifier;
-import io.kestra.core.models.assets.AssetsInOut;
 import io.kestra.core.models.assets.Custom;
 import io.kestra.core.models.executions.TaskRun;
 import io.kestra.core.models.executions.TaskRunAttempt;
@@ -73,6 +72,8 @@ public abstract class ResultParser {
         NO_TEST_METADATA = Collections.unmodifiableMap(noTestMetadata);
     }
 
+    private static final Set<State.Type> BUILT_STATES = Set.of(State.Type.SUCCESS, State.Type.WARNING);
+
     // dbt commands whose run_results report the tests of the nodes they selected.
     private static final Set<String> TESTING_COMMANDS = Set.of("build", "test", "retry");
 
@@ -116,9 +117,19 @@ public abstract class ResultParser {
      */
     public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, File runResultsFile)
         throws IOException, IllegalVariableEvaluationException {
-        var runResult = readRunResultQuietly(runResultsFile);
-        var runResultsUnreadable = runResult == null && runResultsFile != null && runResultsFile.exists();
-        return parseManifestWithAssets(runContext, file, true, Map.of(), runResult, runResultsUnreadable);
+        return parseManifestWithAssets(runContext, file, runResultsFile, true);
+    }
+
+    /**
+     * {@code parseRunResults} false keeps run_results out of the test metadata and out of the returned
+     * {@link ManifestResult#runResult()}, but the file is still read to tell which models were not built,
+     * since emitting those as outputs would create assets that never existed.
+     */
+    public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, File runResultsFile, boolean parseRunResults)
+        throws IOException, IllegalVariableEvaluationException {
+        var parsed = readRunResultQuietly(runResultsFile);
+        var runResultsUnreadable = parseRunResults && parsed == null && runResultsFile != null && runResultsFile.exists();
+        return parseManifestWithAssets(runContext, file, true, Map.of(), parseRunResults ? parsed : null, parsed, runResultsUnreadable);
     }
 
     /**
@@ -130,11 +141,20 @@ public abstract class ResultParser {
      */
     public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, boolean emitLineage, Map<String, Object> assetMetadata, RunResult runResult)
         throws IOException, IllegalVariableEvaluationException {
-        return parseManifestWithAssets(runContext, file, emitLineage, assetMetadata, runResult, false);
+        return parseManifestWithAssets(runContext, file, emitLineage, assetMetadata, runResult, runResult);
+    }
+
+    /**
+     * {@code buildResult} only decides which models were not built and so are not emitted as outputs; it is
+     * independent of {@code runResult}, which stays null when run_results parsing is disabled.
+     */
+    public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, boolean emitLineage, Map<String, Object> assetMetadata, RunResult runResult,
+        RunResult buildResult) throws IOException, IllegalVariableEvaluationException {
+        return parseManifestWithAssets(runContext, file, emitLineage, assetMetadata, runResult, buildResult, false);
     }
 
     private static ManifestResult parseManifestWithAssets(RunContext runContext, File file, boolean emitLineage, Map<String, Object> assetMetadata, RunResult runResult,
-        boolean runResultsUnreadable) throws IOException, IllegalVariableEvaluationException {
+        RunResult buildResult, boolean runResultsUnreadable) throws IOException, IllegalVariableEvaluationException {
         Manifest manifest = null;
         boolean fullyEmitted = true;
         List<String> assetIds = List.of();
@@ -155,7 +175,7 @@ public abstract class ResultParser {
             if (emitLineage) {
                 Map<String, Map<String, Object>> testMetadata = testStatusMetadata(manifest, runResult);
                 Set<String> clearableNodes = runResultsUnreadable ? assetNodes.keySet() : testedNodes(manifest, runResult);
-                fullyEmitted = emitAssets(runContext, assetNodes, assetMetadata, testMetadata, clearableNodes);
+                fullyEmitted = emitAssets(runContext, assetNodes, assetMetadata, testMetadata, clearableNodes, notBuiltNodes(runContext, buildResult));
             } else {
                 runContext.logger().debug("Lineage already emitted for this run, skipping {} assets", assetIds.size());
             }
@@ -289,8 +309,8 @@ public abstract class ResultParser {
                     .filter(Objects::nonNull)
                     .forEach(runContext::metric);
 
-                AssetsInOut assets = assetsFor(r.getUniqueId(), modelAssets);
-                TaskRun.TaskRunBuilder taskRunBuilder = TaskRun.builder()
+                AssetEmit assets = assetsFor(r.getUniqueId(), modelAssets);
+                TaskRun modelTaskRun = TaskRun.builder()
                     .id(IdUtils.create())
                     .namespace(runContext.render("{{ flow.namespace }}"))
                     .flowId(runContext.render("{{ flow.id }}"))
@@ -304,16 +324,17 @@ public abstract class ResultParser {
                                 .state(state)
                                 .build()
                         )
-                    );
-                if (assets != null) {
-                    taskRunBuilder.assetEmits(List.of(assets));
+                    )
+                    .build();
+                if (assets != null && isBuilt(runContext, r)) {
+                    emitFor(runContext, modelTaskRun, assets);
                 }
 
                 // Register the dynamic taskrun together with its log lines in one call: the run
                 // context builds the LogEntry, forcing execution/tenant/namespace/flow from itself,
                 // fixing the attempt to 0 and masking secrets (the plugin never builds a LogEntry).
                 runContext.dynamicWorkerResult(
-                    WorkerTaskResult.builder().taskRun(taskRunBuilder.build()).build(),
+                    WorkerTaskResult.builder().taskRun(modelTaskRun).build(),
                     modelLogs(r)
                 );
             }));
@@ -352,7 +373,7 @@ public abstract class ResultParser {
         return logs;
     }
 
-    private static AssetsInOut assetsFor(String uniqueId, Map<String, ModelAsset> modelAssets) {
+    private static AssetEmit assetsFor(String uniqueId, Map<String, ModelAsset> modelAssets) {
         if (uniqueId == null) {
             return null;
         }
@@ -366,18 +387,26 @@ public abstract class ResultParser {
         List<AssetIdentifier> inputs = inputIdentifiers(modelAsset, modelAssets);
         List<Asset> outputs = List.of(selfAsset(modelAsset));
 
-        return new AssetsInOut(inputs, outputs);
+        return new AssetEmit(inputs, outputs);
+    }
+
+    private static void emitFor(RunContext runContext, TaskRun modelTaskRun, AssetEmit assets) throws IllegalVariableEvaluationException {
+        try {
+            runContext.assets().emitFor(modelTaskRun, assets);
+        } catch (QueueException e) {
+            runContext.logger().warn("Unable to emit the assets of dbt node '{}'", modelTaskRun.getTaskId(), e);
+        }
     }
 
     /** @return false if any asset failed to emit, so the caller never records a partial emit as complete. */
     private static boolean emitAssets(RunContext runContext, Map<String, ModelAsset> assetNodes, Map<String, Object> assetMetadata, Map<String, Map<String, Object>> testMetadata,
-        Set<String> clearableNodes) throws IllegalVariableEvaluationException {
+        Set<String> clearableNodes, Set<String> notBuiltNodes) throws IllegalVariableEvaluationException {
         runContext.logger().info("dbt assets extracted from manifest: {}", assetNodes.size());
         boolean fullyEmitted = true;
 
         for (Map.Entry<String, ModelAsset> entry : assetNodes.entrySet()) {
             ModelAsset asset = entry.getValue();
-            if (!asset.produced()) {
+            if (!asset.produced() || notBuiltNodes.contains(entry.getKey())) {
                 continue;
             }
 
@@ -441,6 +470,28 @@ public abstract class ResultParser {
             return rollUpTestStatus(manifest, runResult);
         } catch (Exception e) {
             return Map.of();
+        }
+    }
+
+    // Nodes run_results reports as errored or skipped. Writing one as an output
+    // would create or update an asset that was never built. A node absent from run_results, in a status this plugin does not know, or with no run_results at all, says nothing about it.
+    private static Set<String> notBuiltNodes(RunContext runContext, RunResult runResult) {
+        if (runResult == null || runResult.getResults() == null) {
+            return Set.of();
+        }
+
+        return runResult.getResults().stream()
+            .filter(result -> result.getUniqueId() != null && !isBuilt(runContext, result))
+            .map(RunResult.Result::getUniqueId)
+            .collect(Collectors.toSet());
+    }
+
+    private static boolean isBuilt(RunContext runContext, RunResult.Result result) {
+        try {
+            return BUILT_STATES.contains(result.state());
+        } catch (IllegalStateException e) {
+            runContext.logger().debug("Unknown dbt status '{}' for '{}', treating the node as built.", result.getStatus(), result.getUniqueId());
+            return true;
         }
     }
 
