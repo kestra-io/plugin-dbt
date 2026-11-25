@@ -295,7 +295,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         HttpRequest.HttpRequestBuilder requestBuilder = HttpRequest.builder()
             .uri(
                 URI.create(
-                    runContext.render(this.baseUrl).as(String.class).orElseThrow() + "/api/v2/accounts/" + runContext.render(this.accountId).as(String.class).orElseThrow() +
+                    this.accountUrl(runContext) +
                         "/jobs/" + runContext.render(this.jobId).as(String.class).orElseThrow() + "/run/"
                 )
             )
@@ -442,7 +442,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         HttpRequest.HttpRequestBuilder requestBuilder = HttpRequest.builder()
             .uri(
                 URI.create(
-                    runContext.render(this.baseUrl).as(String.class).orElseThrow() + "/api/v2/accounts/" + runContext.render(this.accountId).as(String.class).orElseThrow() +
+                    this.accountUrl(runContext) +
                         "/runs/?job_definition_id=" + runContext.render(this.jobId).as(String.class).orElseThrow() +
                         "&order_by=-id" +
                         "&limit=" + FIND_RUN_LOOKUP_LIMIT +
@@ -556,7 +556,7 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
 
     private void cancelRun(RunContext runContext, Long runId) {
         try {
-            this.request(
+            this.requestOnce(
                 runContext,
                 HttpRequest.builder()
                     .uri(URI.create("%s/runs/%d/cancel/".formatted(this.accountUrl(runContext), runId)))
@@ -592,6 +592,8 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
         }
 
         if (Boolean.FALSE.equals(runContext.render(this.wait).as(Boolean.class).orElse(Boolean.TRUE))) {
+            // The run now belongs to the flow, a later kill must not cancel it.
+            killable.set(null);
             return Output.builder()
                 .runId(runId)
                 .build();
@@ -607,7 +609,12 @@ public class TriggerRun extends AbstractDbtCloud implements RunnableTask<Trigger
             .parseRunResults(getParseRunResults())
             .build();
 
-        CheckStatus.Output runOutput = checkStatusJob.run(runContext);
+        CheckStatus.Output runOutput;
+        try {
+            runOutput = checkStatusJob.run(runContext);
+        } finally {
+            killable.set(null);
+        }
 
         return Output.builder()
             .runId(runId)

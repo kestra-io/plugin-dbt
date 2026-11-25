@@ -3,6 +3,10 @@ package io.kestra.plugin.dbt.cloud;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 
@@ -15,6 +19,7 @@ import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
+import io.kestra.core.utils.Await;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
 
@@ -1090,7 +1095,7 @@ class MockTriggerRunTest {
         runContext.checkpoints().set(TriggerRun.CHECKPOINT_KEY, "789");
         stubFor(
             get(urlEqualTo("/api/v2/accounts/123/runs/789/"))
-                .willReturn(okJson("{\"data\":{\"id\":789,\"job_definition_id\":456,\"status\":3}}"))
+                .willReturn(okJson("{\"data\":{\"id\":789,\"job_definition_id\":456,\"status\":3,\"run_steps\":[]}}"))
         );
 
         var output = task.run(runContext);
@@ -1154,7 +1159,7 @@ class MockTriggerRunTest {
     }
 
     @Test
-    void testKillCancelsTheRunOnce() throws Exception {
+    void testKillAfterTheRunWasHandedBackDoesNotCancelIt() throws Exception {
         var task = checkpointTask(false);
         var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
         stubFor(
@@ -1168,9 +1173,78 @@ class MockTriggerRunTest {
 
         task.run(runContext);
         task.kill();
+
+        verify(0, postRequestedFor(urlEqualTo("/api/v2/accounts/123/runs/789/cancel/")));
+    }
+
+    @Test
+    void testKillDuringTheWaitSendsOneCancelWithoutRetry() throws Exception {
+        var task = waitingTask();
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/jobs/456/run/"))
+                .willReturn(okJson("{\"data\":{\"id\":789}}"))
+        );
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/789/"))
+                .inScenario("kill")
+                .whenScenarioStateIs(STARTED)
+                .willReturn(okJson("{\"data\":{\"id\":789,\"job_definition_id\":456,\"status\":3,\"run_steps\":[]}}"))
+        );
+        // The default policy retries a POST 502, so a second cancel request would mean kill() retried.
+        stubFor(
+            post(urlEqualTo("/api/v2/accounts/123/runs/789/cancel/"))
+                .inScenario("kill")
+                .willReturn(aResponse().withStatus(502))
+                .willSetStateTo("cancelled")
+        );
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/789/"))
+                .inScenario("kill")
+                .whenScenarioStateIs("cancelled")
+                .willReturn(okJson("{\"data\":{\"id\":789,\"job_definition_id\":456,\"status\":30,\"run_steps\":[]}}"))
+        );
+
+        var run = CompletableFuture.supplyAsync(() ->
+        {
+            try {
+                return task.run(runContext);
+            } catch (Exception e) {
+                throw new CompletionException(e);
+            }
+        });
+        Await.until(() -> !findAll(getRequestedFor(urlPathEqualTo("/api/v2/accounts/123/runs/789/"))).isEmpty(), Duration.ofMillis(50), Duration.ofSeconds(10));
         task.kill();
 
+        assertThatThrownBy(() -> run.get(30, TimeUnit.SECONDS)).isInstanceOf(ExecutionException.class);
+        task.kill();
         verify(1, postRequestedFor(urlEqualTo("/api/v2/accounts/123/runs/789/cancel/")));
+    }
+
+    @Test
+    void testResumesASucceededRunAndBuildsItsOutputs() throws Exception {
+        var task = waitingTask();
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        runContext.checkpoints().set(TriggerRun.CHECKPOINT_KEY, "789");
+        stubFor(
+            get(urlPathEqualTo("/api/v2/accounts/123/runs/789/"))
+                .willReturn(okJson("{\"data\":{\"id\":789,\"job_definition_id\":456,\"status\":10,\"run_steps\":[]}}"))
+        );
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/789/artifacts/run_results.json"))
+                .willReturn(okJson("{\"metadata\": {}, \"results\": []}"))
+        );
+        stubFor(
+            get(urlEqualTo("/api/v2/accounts/123/runs/789/artifacts/manifest.json"))
+                .willReturn(okJson("{\"nodes\": {}}"))
+        );
+
+        var output = task.run(runContext);
+
+        assertThat(output.getRunId(), is(789L));
+        assertThat(output.getRunResults().toString(), containsString("kestra://"));
+        assertThat(output.getManifest(), is(notNullValue()));
+        verify(0, postRequestedFor(urlEqualTo("/api/v2/accounts/123/jobs/456/run/")));
     }
 
     @Test
@@ -1231,6 +1305,20 @@ class MockTriggerRunTest {
             .baseUrl(Property.ofValue("http://localhost:28181"))
             .wait(Property.ofValue(false))
             .reattach(Property.ofValue(isReattachEnabled))
+            .build();
+    }
+
+    private static TriggerRun waitingTask() {
+        return TriggerRun.builder()
+            .id(IdUtils.create())
+            .type(TriggerRun.class.getName())
+            .accountId(Property.ofValue("123"))
+            .jobId(Property.ofValue("456"))
+            .token(Property.ofValue("my-token"))
+            .baseUrl(Property.ofValue("http://localhost:28181"))
+            .wait(Property.ofValue(true))
+            .parseRunResults(Property.ofValue(true))
+            .pollFrequency(Property.ofValue(Duration.ofMillis(100)))
             .build();
     }
 }
