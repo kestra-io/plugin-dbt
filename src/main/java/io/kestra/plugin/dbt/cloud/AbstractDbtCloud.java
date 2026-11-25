@@ -163,21 +163,38 @@ public abstract class AbstractDbtCloud extends Task {
         HttpRequest.HttpRequestBuilder requestBuilder,
         Class<RES> responseType,
         boolean reattachEnabled) throws HttpClientException, IllegalVariableEvaluationException, IOException {
+        var rMaxRetries = runContext.render(this.maxRetries).as(Integer.class).orElse(3);
+        var rInitialDelay = runContext.render(this.initialDelayMs).as(Long.class).orElse(1000L);
+        return this.send(runContext, requestBuilder, responseType, retryConfiguration(rMaxRetries, rInitialDelay, reattachEnabled));
+    }
+
+    // One attempt, no plugin retry: for calls that must not block, such as the cancel sent from kill().
+    protected <RES> HttpResponse<RES> requestOnce(
+        RunContext runContext,
+        HttpRequest.HttpRequestBuilder requestBuilder,
+        Class<RES> responseType) throws HttpClientException, IllegalVariableEvaluationException, IOException {
+        var singleAttempt = retryConfiguration(1, 0, false).toBuilder()
+            .retry(Exponential.builder().interval(Duration.ofSeconds(1)).maxInterval(Duration.ofSeconds(2)).maxAttempts(1).build())
+            .build();
+        return this.send(runContext, requestBuilder, responseType, singleAttempt);
+    }
+
+    private <RES> HttpResponse<RES> send(
+        RunContext runContext,
+        HttpRequest.HttpRequestBuilder requestBuilder,
+        Class<RES> responseType,
+        HttpConfiguration effectiveOptions) throws HttpClientException, IllegalVariableEvaluationException, IOException {
 
         var request = requestBuilder
             .addHeader("Authorization", "Bearer " + runContext.render(this.token).as(String.class).orElseThrow())
             .addHeader("Content-Type", "application/json")
             .build();
 
-        var rMaxRetries = runContext.render(this.maxRetries).as(Integer.class).orElse(3);
-        var rInitialDelay = runContext.render(this.initialDelayMs).as(Long.class).orElse(1000L);
         // The legacy default is still valid for non-regional accounts, so it is not flagged up front.
         // Only a genuine 401 against it is worth a hint, emitted in the catch below.
         var usesLegacyBaseUrl = LEGACY_BASE_URL.equals(
             runContext.render(this.baseUrl).as(String.class).orElse(LEGACY_BASE_URL)
         );
-
-        var effectiveOptions = retryConfiguration(rMaxRetries, rInitialDelay, reattachEnabled);
 
         try (var client = new HttpClient(runContext, effectiveOptions)) {
             try {
@@ -245,35 +262,46 @@ public abstract class AbstractDbtCloud extends Task {
         var defaults = HttpConfiguration.builder().build();
 
         if (this.options == null || isUnsetRetry(this.options.getRetry(), defaults.getRetry())) {
-            builder.retry(Exponential.builder()
-                .delayFactor(2.0)
-                .interval(Duration.ofMillis(initialDelayMs))
-                .maxInterval(Duration.ofSeconds(30))
-                .maxAttempts(maxAttempts)
-                .build());
+            builder.retry(
+                Exponential.builder()
+                    .delayFactor(2.0)
+                    .interval(Duration.ofMillis(initialDelayMs))
+                    .maxInterval(Duration.ofSeconds(30))
+                    .maxAttempts(maxAttempts)
+                    .build()
+            );
         }
 
         if (this.options == null || this.options.getRetryOnStatusCodes() == null || this.options.getRetryOnStatusCodes().equals(defaults.getRetryOnStatusCodes())) {
-            builder.retryOnStatusCodes(Property.ofValue(
-                reattachEnabled ? WRITE_RETRIABLE_CODES_EXCLUDING_AMBIGUOUS : WRITE_RETRIABLE_CODES
-            ));
+            builder.retryOnStatusCodes(
+                Property.ofValue(
+                    reattachEnabled ? WRITE_RETRIABLE_CODES_EXCLUDING_AMBIGUOUS : WRITE_RETRIABLE_CODES
+                )
+            );
         }
 
         if (this.options == null || this.options.getRetryOnStatusCodesByMethod() == null || this.options.getRetryOnStatusCodesByMethod().equals(defaults.getRetryOnStatusCodesByMethod())) {
             // Core never retries a non-idempotent method on a status code unless it is listed here,
             // so each write method needs its own entry or a POST 503 is never retried.
             var writeCodes = reattachEnabled ? WRITE_RETRIABLE_CODES_EXCLUDING_AMBIGUOUS : WRITE_RETRIABLE_CODES;
-            builder.retryOnStatusCodesByMethod(Property.ofValue(Map.of(
-                "GET", READ_ONLY_RETRIABLE_CODES,
-                "HEAD", READ_ONLY_RETRIABLE_CODES,
-                "POST", writeCodes,
-                "PUT", writeCodes,
-                "PATCH", writeCodes,
-                "DELETE", writeCodes
-            )));
+            builder.retryOnStatusCodesByMethod(
+                Property.ofValue(
+                    Map.of(
+                        "GET", READ_ONLY_RETRIABLE_CODES,
+                        "HEAD", READ_ONLY_RETRIABLE_CODES,
+                        "POST", writeCodes,
+                        "PUT", writeCodes,
+                        "PATCH", writeCodes,
+                        "DELETE", writeCodes
+                    )
+                )
+            );
         }
 
-        if (this.options == null || this.options.getRetryableTransportFailureMethods() == null || this.options.getRetryableTransportFailureMethods().equals(defaults.getRetryableTransportFailureMethods())) {
+        if (
+            this.options == null || this.options.getRetryableTransportFailureMethods() == null
+                || this.options.getRetryableTransportFailureMethods().equals(defaults.getRetryableTransportFailureMethods())
+        ) {
             builder.retryableTransportFailureMethods(Property.ofValue(TRANSPORT_RETRIABLE_METHODS));
         }
 
