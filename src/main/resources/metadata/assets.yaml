@@ -1,0 +1,8 @@
+group: io.kestra.plugin.dbt.assets
+name: "assets"
+title: "dbt assets"
+description: "Asset types the dbt tasks emit for models, seeds, snapshots, tests and exposures."
+body: "When `assets.enableAuto` is on, the dbt tasks register each model, seed and snapshot as an asset of its own dbt type, one asset per test that ran with its result, and one per exposure, with lineage between them. Sources the project reads never change the type of a table Fivetran, Airbyte or another dbt project owns."
+videos: []
+createdBy: "Kestra Core Team"
+managedBy: "Kestra Core Team"
