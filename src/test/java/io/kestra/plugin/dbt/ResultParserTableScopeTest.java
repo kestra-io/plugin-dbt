@@ -75,6 +75,18 @@ class ResultParserTableScopeTest {
     }
 
     @Test
+    void shouldListThePlatformAndDbtOnTheTablesItBuildsOnly() throws Exception {
+        ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, PROFILE);
+
+        List<Asset> outputs = outputs(runContext.assets().emitted());
+        assertThat(outputs).filteredOn(asset -> "io.kestra.plugin.ee.assets.Table".equals(asset.getType()))
+            .isNotEmpty()
+            .allSatisfy(table -> assertThat(table.getMetadata()).containsEntry("system.tools", List.of("PostgreSQL", "dbt")));
+        assertThat(outputs).filteredOn(asset -> "io.kestra.plugin.ee.assets.DbtProject".equals(asset.getType()))
+            .allSatisfy(project -> assertThat(project.getMetadata()).doesNotContainKey("system.tools"));
+    }
+
+    @Test
     void shouldPassTheParentsOfAnEphemeralModelToTheModelThatUsesItAndRecordNoTableForIt() throws Exception {
         ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, PROFILE);
 

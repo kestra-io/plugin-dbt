@@ -46,6 +46,21 @@ public abstract class ResultParser {
     private static final String TABLE_ASSET_TYPE = "io.kestra.plugin.ee.assets.Table";
     private static final String DBT_PROJECT_ASSET_TYPE = "io.kestra.plugin.ee.assets.DbtProject";
     private static final String MANAGED_BY_ROLE = "managedBy";
+    private static final String TOOLS_METADATA_KEY = Asset.SYSTEM_METADATA_PREFIX + "tools";
+    private static final String TOOL_NAME = "dbt";
+    // How system.tools spells the platform of a table, as other plugins list it on the same assets.
+    private static final Map<String, String> PLATFORMS = Map.ofEntries(
+        Map.entry("bigquery", "BigQuery"),
+        Map.entry("clickhouse", "ClickHouse"),
+        Map.entry("databricks", "Databricks"),
+        Map.entry("duckdb", "DuckDB"),
+        Map.entry("mysql", "MySQL"),
+        Map.entry("postgres", "PostgreSQL"),
+        Map.entry("redshift", "Redshift"),
+        Map.entry("snowflake", "Snowflake"),
+        Map.entry("sqlserver", "SQL Server"),
+        Map.entry("trino", "Trino")
+    );
     private static final String METADATA_UNIQUE_ID = "dbt.uniqueId";
     private static final String METADATA_MATERIALIZED = "dbt.materialized";
     private static final String MATERIALIZED_EPHEMERAL = "ephemeral";
@@ -495,6 +510,7 @@ public abstract class ResultParser {
         if (nodeMetadata != null) {
             metadata.putAll(nodeMetadata);
         }
+        metadata.put(TOOLS_METADATA_KEY, tools(asset.metadata().get("system")));
 
         Asset table = Custom.builder()
             .namespace(namespace)
@@ -509,6 +525,14 @@ public abstract class ResultParser {
             table.withRelated(List.of(new AssetRelationRef(projectId, null, MANAGED_BY_ROLE)));
         }
         return table;
+    }
+
+    private static List<String> tools(Object adapterType) {
+        if (adapterType == null) {
+            return List.of(TOOL_NAME);
+        }
+        String type = adapterType.toString();
+        return List.of(PLATFORMS.getOrDefault(type.toLowerCase(Locale.ROOT), type), TOOL_NAME);
     }
 
     /** The project the run builds, {@code dbt:<namespace>:<project>}; {@code null} when the manifest does not name it. */
