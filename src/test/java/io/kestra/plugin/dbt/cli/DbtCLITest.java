@@ -19,6 +19,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import com.github.tomakehurst.wiremock.junit5.WireMockTest;
 
 import io.kestra.core.junit.annotations.KestraTest;
+import io.kestra.core.models.assets.Asset;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTaskException;
@@ -51,6 +52,17 @@ class DbtCLITest {
     private static final String MANIFEST_KEY = "manifest.json";
 
     private static final String ALERT_WEBHOOK_URL = "http://localhost:28284/hooks/alert";
+
+    private static final String CARTS_PROFILES = """
+        carts:
+          target: prod
+          outputs:
+            prod:
+              type: postgres
+              host: pg.internal
+              port: 5432
+              dbname: analytics
+        """;
 
     private static final String PROFILES = """
         unit-kestra:
@@ -493,5 +505,59 @@ class DbtCLITest {
         var runOutput = task.run(runContext);
 
         assertThat(runOutput.getExitCode(), is(0));
+    }
+
+    @Test
+    void shouldScopeTheTablesByTheProfileDeliveredThroughInputFiles() throws Exception {
+        var task = fakeDbt(List.of("dbt build"))
+            .inputFiles(Map.of("profiles.yml", CARTS_PROFILES))
+            .build();
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        copyCartsArtifacts(runContext, "target", "run_results-carts-build.json");
+
+        task.run(runContext);
+
+        assertThat(tableIds(runContext), containsInAnyOrder("postgres:pg.internal:analytics.marts.orders", "postgres:pg.internal:analytics.marts.payments"));
+    }
+
+    @Test
+    void shouldScopeTheTablesByTheProfileAtTheRootWhenTheProjectIsInASubdirectory() throws Exception {
+        var task = fakeDbt(List.of("dbt build"))
+            .projectDir(Property.ofValue("dbt"))
+            .inputFiles(Map.of("profiles.yml", CARTS_PROFILES))
+            .build();
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        copyCartsArtifacts(runContext, "dbt/target", "run_results-carts-build.json");
+
+        task.run(runContext);
+
+        assertThat(tableIds(runContext), containsInAnyOrder("postgres:pg.internal:analytics.marts.orders", "postgres:pg.internal:analytics.marts.payments"));
+    }
+
+    private static DbtCLI.DbtCLIBuilder<?, ?> fakeDbt(List<String> commands) {
+        return DbtCLI.builder()
+            .id(IdUtils.create())
+            .type(DbtCLI.class.getName())
+            .taskRunner(Process.instance())
+            .beforeCommands(Property.ofValue(List.of("dbt() { :; }")))
+            .commands(Property.ofValue(commands));
+    }
+
+    private void copyCartsArtifacts(RunContext runContext, String targetDirectory, String runResults) throws IOException {
+        Path target = Files.createDirectories(runContext.workingDir().path(true).resolve(targetDirectory));
+        Files.copy(resource("assets/manifest-carts.json"), target.resolve("manifest.json"), REPLACE_EXISTING);
+        Files.copy(resource("assets/" + runResults), target.resolve("run_results.json"), REPLACE_EXISTING);
+    }
+
+    private Path resource(String name) {
+        return Path.of(Objects.requireNonNull(this.getClass().getClassLoader().getResource(name)).getPath());
+    }
+
+    private static List<String> tableIds(RunContext runContext) throws Exception {
+        return runContext.assets().emitted().stream()
+            .flatMap(emit -> emit.outputs().stream())
+            .filter(asset -> "io.kestra.plugin.ee.assets.Table".equals(asset.getType()))
+            .map(Asset::getId)
+            .toList();
     }
 }

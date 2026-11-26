@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Stream;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -532,7 +533,6 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
             }
 
             var rCommands = runContext.render(this.commands).asList(String.class);
-            TableScope tableScope = tableScope(runContext, profilesString, projectWorkingDirectory, rCommands);
 
             if (rEngine == Engine.FUSION && rCommands.stream().anyMatch(command -> command.contains("--partial-parse") || command.contains("--no-partial-parse"))) {
                 logger.warn("The '--partial-parse' and '--no-partial-parse' flags are not supported by the FUSION engine and will be silently ignored by dbt.");
@@ -590,7 +590,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                     ? so
                     : ScriptOutput.builder().exitCode(1).outputFiles(new HashMap<>()).build();
 
-                parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, tableScope);
+                parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, tableScope(runContext, profilesString, commandsWrapper.getWorkingDirectory(), projectWorkingDirectory, rCommands));
                 Output dbtOutput = Output.builder()
                     .warningDetected(hasWarning.get())
                     .outputFiles(runResults.getOutputFiles())
@@ -601,7 +601,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                 throw new RunnableTaskException(e.getMessage(), dbtOutput);
             }
 
-            parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, tableScope);
+            parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, tableScope(runContext, profilesString, commandsWrapper.getWorkingDirectory(), projectWorkingDirectory, rCommands));
 
             return Output.builder()
                 .warningDetected(hasWarning.get())
@@ -628,7 +628,8 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         return new WebhookAlerter(runContext, rUrl, rLevel);
     }
 
-    private TableScope tableScope(RunContext runContext, String profilesString, Path projectWorkingDirectory, List<String> commands) throws IllegalVariableEvaluationException {
+    private TableScope tableScope(RunContext runContext, String profilesString, Path workingDirectory, Path projectWorkingDirectory, List<String> commands)
+        throws IllegalVariableEvaluationException {
         String rDatabaseAsset = runContext.render(this.databaseAsset).as(String.class).orElse(null);
         if (rDatabaseAsset != null && !rDatabaseAsset.isBlank()) {
             return new TableScope(rDatabaseAsset, null);
@@ -636,18 +637,26 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         Map<String, String> rEnv = runContext.render(this.getEnv()).asMap(String.class, String.class);
         String profilesContent = profilesString;
         if (profilesContent == null || profilesContent.isBlank()) {
-            Path existing = projectWorkingDirectory.resolve("profiles.yml");
-            try {
-                profilesContent = Files.exists(existing) ? Files.readString(existing) : null;
-            } catch (IOException e) {
-                profilesContent = null;
-            }
+            profilesContent = Stream.of(workingDirectory, projectWorkingDirectory)
+                .map(directory -> directory.resolve("profiles.yml"))
+                .filter(Files::exists)
+                .findFirst()
+                .map(DbtCLI::readQuietly)
+                .orElse(null);
         }
         Optional<ProfileLocator.Target> target = ProfileLocator.locate(profilesContent, projectWorkingDirectory, commands, rEnv);
         if (target.isEmpty()) {
             runContext.logger().warn("Cannot tell from profiles.yml which database dbt connects to, so the table ids are not scoped by a Database asset. Set `databaseAsset` to name it.");
         }
         return new TableScope(null, target.orElse(null));
+    }
+
+    private static String readQuietly(Path file) {
+        try {
+            return Files.readString(file);
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     private void parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore, TableScope tableScope)
