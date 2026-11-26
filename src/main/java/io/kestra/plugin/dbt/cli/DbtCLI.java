@@ -377,8 +377,6 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
     private static final String CORE_IMAGE = "ghcr.io/kestra-io/dbt";
     private static final String FUSION_IMAGE = "ghcr.io/kestra-io/dbt-fusion";
     // dbt commands that leave target/run_results.json as the previous command wrote it.
-    private static final Set<String> COMMANDS_WITHOUT_RUN_RESULTS = Set.of("clean", "debug", "deps", "init", "list", "ls", "parse");
-
     @Schema(
         title = "dbt commands to execute",
         description = "Ordered CLI commands. Lines starting with `dbt` inherit `--project-dir` when `projectDir` is set and append `--log-format` unless `logFormat` is `NONE`."
@@ -667,18 +665,11 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         }
     }
 
-    // Each dbt command overwrites run_results.json, so with several of them it lists only what the last one did.
-    private static boolean runResultsCoverRun(List<String> commands) {
-        return commands.stream().filter(DbtCLI::writesRunResults).count() <= 1;
-    }
-
-    private static boolean writesRunResults(String command) {
-        String[] tokens = command.trim().split("\\s+");
-        return "dbt".equals(tokens[0]) && Arrays.stream(tokens).skip(1)
-            .filter(token -> !token.startsWith("-"))
-            .findFirst()
-            .map(subcommand -> !COMMANDS_WITHOUT_RUN_RESULTS.contains(subcommand))
-            .orElse(false);
+    // Each dbt command but a few overwrites run_results.json, so it lists what was built only when the one building command is the last to write it.
+    static boolean runResultsCoverRun(List<String> commands) {
+        List<DbtInvocations.Invocation> writers = DbtInvocations.parse(commands).stream().filter(DbtInvocations.Invocation::writesRunResults).toList();
+        long building = writers.stream().filter(DbtInvocations.Invocation::builds).count();
+        return building == 0 || building == 1 && writers.getLast().builds();
     }
 
     private void parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore, TableScope tableScope,
