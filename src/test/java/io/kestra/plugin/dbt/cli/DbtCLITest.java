@@ -546,6 +546,17 @@ class DbtCLITest {
     }
 
     @Test
+    void shouldNotRecordAModelThatFailedWhenSeveralCommandsRan() throws Exception {
+        var task = fakeDbt(List.of("dbt seed", "dbt run")).build();
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        copyCartsArtifacts(runContext, "target", "run_results-carts-run-error.json");
+
+        task.run(runContext);
+
+        assertThat(tableIds(runContext), contains("analytics.marts.payments"));
+    }
+
+    @Test
     void shouldRecordNoTableWhenTheOnlyCommandWritingRunResultsBuiltNothing() throws Exception {
         var task = fakeDbt(List.of("dbt deps", "dbt test")).build();
         var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());

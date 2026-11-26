@@ -160,13 +160,13 @@ public abstract class ResultParser {
     /**
      * @param scope the Database the tables belong to, which their ids start with
      * @param runResultsCoverRun false when the run ran several dbt commands, so run_results lists only the last one's
-     *        nodes and every node of the manifest is written
+     *        nodes and every node of the manifest is written but those it reports errored or skipped
      */
     public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, File runResultsFile, boolean parseRunResults, TableScope scope,
         boolean runResultsCoverRun) throws IOException, IllegalVariableEvaluationException {
         var parsed = readRunResultQuietly(runResultsFile);
         var runResultsUnreadable = parseRunResults && parsed == null && runResultsFile != null && runResultsFile.exists();
-        return parseManifestWithAssets(runContext, file, true, Map.of(), parseRunResults ? parsed : null, runResultsCoverRun ? parsed : null, runResultsUnreadable, scope);
+        return parseManifestWithAssets(runContext, file, true, Map.of(), parseRunResults ? parsed : null, parsed, runResultsUnreadable, scope, runResultsCoverRun);
     }
 
     /**
@@ -187,11 +187,11 @@ public abstract class ResultParser {
      */
     public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, boolean emitLineage, Map<String, Object> assetMetadata, RunResult runResult,
         RunResult buildResult) throws IOException, IllegalVariableEvaluationException {
-        return parseManifestWithAssets(runContext, file, emitLineage, assetMetadata, runResult, buildResult, false, TableScope.NONE);
+        return parseManifestWithAssets(runContext, file, emitLineage, assetMetadata, runResult, buildResult, false, TableScope.NONE, true);
     }
 
     private static ManifestResult parseManifestWithAssets(RunContext runContext, File file, boolean emitLineage, Map<String, Object> assetMetadata, RunResult runResult,
-        RunResult buildResult, boolean runResultsUnreadable, TableScope scope) throws IOException, IllegalVariableEvaluationException {
+        RunResult buildResult, boolean runResultsUnreadable, TableScope scope, boolean runResultsCoverRun) throws IOException, IllegalVariableEvaluationException {
         Manifest manifest = null;
         boolean fullyEmitted = true;
         List<String> assetIds = List.of();
@@ -212,12 +212,14 @@ public abstract class ResultParser {
             if (emitLineage) {
                 Map<String, Map<String, Object>> testMetadata = testStatusMetadata(manifest, runResult);
                 Set<String> clearableNodes = runResultsUnreadable ? assetNodes.keySet() : testedNodes(manifest, runResult);
-                Optional<Set<String>> writtenNodes = builtNodes(runContext, buildResult).map(built ->
-                {
-                    Set<String> written = new HashSet<>(built);
-                    written.addAll(testMetadata.keySet());
-                    return written;
-                });
+                Optional<Set<String>> writtenNodes = runResultsCoverRun
+                    ? builtNodes(runContext, buildResult).map(built ->
+                    {
+                        Set<String> written = new HashSet<>(built);
+                        written.addAll(testMetadata.keySet());
+                        return written;
+                    })
+                    : Optional.of(withoutFailedNodes(runContext, assetNodes.keySet(), buildResult));
                 fullyEmitted = emitAssets(runContext, assetNodes, projectAsset(runContext, manifest), assetMetadata, testMetadata, clearableNodes, writtenNodes);
             } else {
                 runContext.logger().debug("Lineage already emitted for this run, skipping {} assets", assetIds.size());
@@ -595,6 +597,17 @@ public abstract class ResultParser {
                 .map(RunResult.Result::getUniqueId)
                 .collect(Collectors.toSet())
         );
+    }
+
+    // The nodes of the manifest but those run_results reports errored or skipped, for run_results that list only the last of several commands.
+    private static Set<String> withoutFailedNodes(RunContext runContext, Set<String> nodes, RunResult runResult) {
+        Set<String> written = new HashSet<>(nodes);
+        if (runResult != null && runResult.getResults() != null) {
+            runResult.getResults().stream()
+                .filter(result -> result.getUniqueId() != null && !isBuilt(runContext, result))
+                .forEach(result -> written.remove(result.getUniqueId()));
+        }
+        return written;
     }
 
     // run_results older than dbt 1.0 carry no args: their statuses then decide alone.
