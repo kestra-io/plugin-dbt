@@ -14,12 +14,14 @@ import java.util.regex.Pattern;
 
 import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.utils.PebbleUtil;
+import io.kestra.plugin.dbt.cli.DbtInvocations;
 
 /**
  * Reads, from {@code profiles.yml}, where dbt connects: the profile picked by {@code --profile}, {@code DBT_PROFILE},
  * {@code dbt_project.yml} or the only one, and its target picked by {@code --target}, {@code DBT_TARGET} or its default.
  * A value that is an {@code env_var(...)} is read from the task's environment; any other Jinja cannot be resolved here,
- * and the target is then unknown, as it is when the commands pick different profiles or targets.
+ * and the target is then unknown, as it is when the commands that build or test pick different profiles or targets, a command picking none
+ * counting as picking the default.
  */
 public final class ProfileLocator {
     private static final Pattern ENV_VAR = Pattern.compile("^\\{\\{\\s*env_var\\(\\s*['\"]([^'\"]+)['\"]\\s*(?:,\\s*['\"]([^'\"]*)['\"]\\s*)?\\)\\s*}}$");
@@ -48,20 +50,25 @@ public final class ProfileLocator {
             return Optional.empty();
         }
         try {
-            Set<String> profileFlags = flagValues(PROFILE_FLAG, commands);
-            Set<String> targetFlags = flagValues(TARGET_FLAG, commands);
-            if (profileFlags.size() > 1 || targetFlags.size() > 1) {
+            List<String> connecting = DbtInvocations.parse(commands).stream()
+                .filter(invocation -> invocation.builds() || "test".equals(invocation.subcommand()))
+                .map(DbtInvocations.Invocation::text)
+                .toList();
+            Set<String> profileNames = flagValues(PROFILE_FLAG, connecting, envValue(env, "DBT_PROFILE"));
+            if (profileNames.size() > 1) {
                 return Optional.empty();
             }
             Map<String, Object> all = JacksonMapper.ofYaml().readValue(profiles, Map.class);
-            String profileName = profileFlags.stream().findFirst().orElseGet(() -> envValue(env, "DBT_PROFILE"));
-            Map<String, Object> profile = profile(all, projectDirectory, profileName);
+            Map<String, Object> profile = profile(all, projectDirectory, profileNames.isEmpty() ? envValue(env, "DBT_PROFILE") : profileNames.iterator().next());
             if (profile == null || !(profile.get("outputs") instanceof Map<?, ?> outputs)) {
                 return Optional.empty();
             }
-            String targetName = targetFlags.stream().findFirst()
-                .or(() -> Optional.ofNullable(envValue(env, "DBT_TARGET")))
-                .orElseGet(() -> resolve(profile.get("target"), env));
+            String defaultTarget = Optional.ofNullable(envValue(env, "DBT_TARGET")).orElseGet(() -> resolve(profile.get("target"), env));
+            Set<String> targetNames = flagValues(TARGET_FLAG, connecting, defaultTarget);
+            if (targetNames.size() > 1) {
+                return Optional.empty();
+            }
+            String targetName = targetNames.isEmpty() ? defaultTarget : targetNames.iterator().next();
             if (targetName == null || !(outputs.get(targetName) instanceof Map<?, ?> output)) {
                 return Optional.empty();
             }
@@ -87,13 +94,11 @@ public final class ProfileLocator {
         return profiles.size() == 1 && profiles.getFirst() instanceof Map<?, ?> only ? (Map<String, Object>) only : null;
     }
 
-    private static Set<String> flagValues(Pattern flag, List<String> commands) {
+    private static Set<String> flagValues(Pattern flag, List<String> invocations, String fallback) {
         Set<String> values = new HashSet<>();
-        for (String command : commands == null ? List.<String> of() : commands) {
-            Matcher matcher = flag.matcher(command);
-            while (matcher.find()) {
-                values.add(matcher.group(1));
-            }
+        for (String invocation : invocations) {
+            Matcher matcher = flag.matcher(invocation);
+            values.add(matcher.find() ? matcher.group(1) : fallback);
         }
         return values;
     }

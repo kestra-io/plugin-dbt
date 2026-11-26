@@ -74,6 +74,16 @@ class ProfileLocatorTest {
     }
 
     @Test
+    void shouldGiveNothingWhenOnlySomeCommandsPickTheTarget() throws Exception {
+        Map<String, String> env = Map.of("PG_HOST", "db.internal");
+
+        assertThat(ProfileLocator.locate(PROFILES, project("carts"), List.of("dbt seed", "dbt run --target prod"), env)).isEmpty();
+        assertThat(ProfileLocator.locate(PROFILES, project("carts"), List.of("dbt seed && dbt run --profile other"), env)).isEmpty();
+        assertThat(ProfileLocator.locate(PROFILES, project("carts"), List.of("dbt seed", "dbt run --target dev"), env))
+            .contains(new ProfileLocator.Target("postgres", "db.internal", "5432", "analytics"));
+    }
+
+    @Test
     void shouldGiveNothingWhenTheHostCannotBeResolved() throws Exception {
         assertThat(ProfileLocator.locate(PROFILES, project("carts"), List.of("dbt build"), Map.of())).isEmpty();
         assertThat(ProfileLocator.locate(PROFILES, null, List.of("dbt build"), Map.of("PG_HOST", "db.internal"))).isEmpty();
