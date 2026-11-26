@@ -50,6 +50,30 @@ class ProfileLocatorTest {
     }
 
     @Test
+    void shouldReadTheTargetOfDbtTargetUnlessTheCommandsPickOne() throws Exception {
+        assertThat(ProfileLocator.locate(PROFILES, project("carts"), List.of("dbt build"), Map.of("DBT_TARGET", "prod")))
+            .contains(new ProfileLocator.Target("postgres", "analytics-prod.internal", null, "analytics"));
+        assertThat(ProfileLocator.locate(PROFILES, project("carts"), List.of("dbt build --target dev"), Map.of("DBT_TARGET", "prod", "PG_HOST", "db.internal")))
+            .contains(new ProfileLocator.Target("postgres", "db.internal", "5432", "analytics"));
+    }
+
+    @Test
+    void shouldReadTheProfileTheCommandsOrDbtProfileNameOverTheProject() throws Exception {
+        ProfileLocator.Target other = new ProfileLocator.Target("postgres", "other.internal", null, "other");
+
+        assertThat(ProfileLocator.locate(PROFILES, project("carts"), List.of("dbt build --profiles-dir . --profile other"), Map.of())).contains(other);
+        assertThat(ProfileLocator.locate(PROFILES, project("carts"), List.of("dbt build"), Map.of("DBT_PROFILE", "other"))).contains(other);
+    }
+
+    @Test
+    void shouldGiveNothingWhenTheCommandsPickDifferentTargetsOrProfiles() throws Exception {
+        Map<String, String> env = Map.of("PG_HOST", "db.internal");
+
+        assertThat(ProfileLocator.locate(PROFILES, project("carts"), List.of("dbt run --target dev", "dbt test --target prod"), env)).isEmpty();
+        assertThat(ProfileLocator.locate(PROFILES, project("carts"), List.of("dbt run --profile carts", "dbt test --profile other"), env)).isEmpty();
+    }
+
+    @Test
     void shouldGiveNothingWhenTheHostCannotBeResolved() throws Exception {
         assertThat(ProfileLocator.locate(PROFILES, project("carts"), List.of("dbt build"), Map.of())).isEmpty();
         assertThat(ProfileLocator.locate(PROFILES, null, List.of("dbt build"), Map.of("PG_HOST", "db.internal"))).isEmpty();
