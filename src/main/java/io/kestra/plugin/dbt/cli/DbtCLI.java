@@ -376,6 +376,8 @@ import lombok.extern.jackson.Jacksonized;
 public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Output> {
     private static final String CORE_IMAGE = "ghcr.io/kestra-io/dbt";
     private static final String FUSION_IMAGE = "ghcr.io/kestra-io/dbt-fusion";
+    // dbt commands that leave target/run_results.json as the previous command wrote it.
+    private static final Set<String> COMMANDS_WITHOUT_RUN_RESULTS = Set.of("clean", "debug", "deps", "init", "list", "ls", "parse");
 
     @Schema(
         title = "dbt commands to execute",
@@ -590,7 +592,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                     ? so
                     : ScriptOutput.builder().exitCode(1).outputFiles(new HashMap<>()).build();
 
-                parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, tableScope(runContext, profilesString, commandsWrapper.getWorkingDirectory(), projectWorkingDirectory, rCommands));
+                parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, tableScope(runContext, profilesString, commandsWrapper.getWorkingDirectory(), projectWorkingDirectory, rCommands), runResultsCoverRun(rCommands));
                 Output dbtOutput = Output.builder()
                     .warningDetected(hasWarning.get())
                     .outputFiles(runResults.getOutputFiles())
@@ -601,7 +603,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                 throw new RunnableTaskException(e.getMessage(), dbtOutput);
             }
 
-            parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, tableScope(runContext, profilesString, commandsWrapper.getWorkingDirectory(), projectWorkingDirectory, rCommands));
+            parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, tableScope(runContext, profilesString, commandsWrapper.getWorkingDirectory(), projectWorkingDirectory, rCommands), runResultsCoverRun(rCommands));
 
             return Output.builder()
                 .warningDetected(hasWarning.get())
@@ -659,7 +661,22 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         }
     }
 
-    private void parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore, TableScope tableScope)
+    // Each dbt command overwrites run_results.json, so with several of them it lists only what the last one did.
+    private static boolean runResultsCoverRun(List<String> commands) {
+        return commands.stream().filter(DbtCLI::writesRunResults).count() <= 1;
+    }
+
+    private static boolean writesRunResults(String command) {
+        String[] tokens = command.trim().split("\\s+");
+        return "dbt".equals(tokens[0]) && Arrays.stream(tokens).skip(1)
+            .filter(token -> !token.startsWith("-"))
+            .findFirst()
+            .map(subcommand -> !COMMANDS_WITHOUT_RUN_RESULTS.contains(subcommand))
+            .orElse(false);
+    }
+
+    private void parseRunResults(RunContext runContext, Path projectWorkingDirectory, ScriptOutput run, KVStore storeManifestKvStore, TableScope tableScope,
+        boolean runResultsCoverRun)
         throws IllegalVariableEvaluationException, IOException {
         File manifestFile = projectWorkingDirectory.resolve("target/manifest.json").toFile();
         File runResultsFile = projectWorkingDirectory.resolve("target/run_results.json").toFile();
@@ -681,7 +698,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
             // each model's asset metadata, and the parsed result rides back for parseRunResult below
             // instead of being read from disk a second time.
             ResultParser.ManifestResult manifestResult = ResultParser.parseManifestWithAssets(
-                runContext, manifestFile, runResultsFile, rParseRunResults, tableScope
+                runContext, manifestFile, runResultsFile, rParseRunResults, tableScope, runResultsCoverRun
             );
             runContext.logger().info(
                 "Manifest parse done. uri={}, metadata={}, nodes={}",
@@ -695,7 +712,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
         }
 
         if (rParseRunResults && runResultsFile.exists()) {
-            URI results = ResultParser.parseRunResult(runContext, runResultsFile, manifest, true, preParsedRunResults, tableScope);
+            URI results = ResultParser.parseRunResult(runContext, runResultsFile, manifest, true, preParsedRunResults, tableScope, runResultsCoverRun);
             run.getOutputFiles().put("run_results.json", results);
         }
     }

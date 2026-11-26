@@ -56,7 +56,7 @@ class ResultParserTableScopeTest {
 
     @Test
     void shouldRecordEachBuiltTableUnderTheDatabaseOfTheProfileAndLinkItToItsProject() throws Exception {
-        ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, PROFILE);
+        ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, PROFILE, true);
 
         String project = "dbt:" + runContext.flowInfo().namespace() + ":carts";
         List<Asset> outputs = outputs(runContext.assets().emitted());
@@ -76,7 +76,7 @@ class ResultParserTableScopeTest {
 
     @Test
     void shouldListThePlatformAndDbtOnTheTablesItBuildsOnly() throws Exception {
-        ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, PROFILE);
+        ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, PROFILE, true);
 
         List<Asset> outputs = outputs(runContext.assets().emitted());
         assertThat(outputs).filteredOn(asset -> "io.kestra.plugin.ee.assets.Table".equals(asset.getType()))
@@ -88,7 +88,7 @@ class ResultParserTableScopeTest {
 
     @Test
     void shouldPassTheParentsOfAnEphemeralModelToTheModelThatUsesItAndRecordNoTableForIt() throws Exception {
-        ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, PROFILE);
+        ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, PROFILE, true);
 
         AssetEmit orders = emitOf(runContext.assets().emitted(), DATABASE + ".marts.orders");
         assertThat(orders.inputs()).extracting(AssetIdentifier::id).containsExactly(DATABASE + ".raw.carts");
@@ -97,10 +97,10 @@ class ResultParserTableScopeTest {
 
     @Test
     void shouldWriteTheSameTableFromTheModelTaskRunAsFromTheRun() throws Exception {
-        ResultParser.ManifestResult manifest = ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, PROFILE);
+        ResultParser.ManifestResult manifest = ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, PROFILE, true);
         Asset fromRun = emitOf(runContext.assets().emitted(), DATABASE + ".marts.orders").outputs().getFirst();
 
-        ResultParser.parseRunResult(runContext, fixture("run_results-carts-build.json"), manifest.manifest(), true, manifest.runResult(), PROFILE);
+        ResultParser.parseRunResult(runContext, fixture("run_results-carts-build.json"), manifest.manifest(), true, manifest.runResult(), PROFILE, true);
 
         ((DefaultRunContext) runContext).emitAssetsOfDynamicTaskRuns();
         Asset fromModel = assetManagerFactory.allEmittedFor().stream()
@@ -117,7 +117,7 @@ class ResultParserTableScopeTest {
     void shouldUseTheDatabaseTheTaskNamesOverTheProfile() throws Exception {
         TableScope named = new TableScope("postgres:analytics-prod.c9akciq32xyz.eu-west-1.rds.amazonaws.com:analytics", PROFILE.target());
 
-        ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, named);
+        ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, named, true);
 
         assertThat(emitOf(runContext.assets().emitted(), "postgres:analytics-prod.c9akciq32xyz.eu-west-1.rds.amazonaws.com:analytics.marts.orders").outputs().getFirst().getPartOf().id())
             .isEqualTo("postgres:analytics-prod.c9akciq32xyz.eu-west-1.rds.amazonaws.com:analytics");
@@ -127,8 +127,8 @@ class ResultParserTableScopeTest {
     void shouldKeepTheTablesOfTwoServersHoldingADatabaseOfTheSameNameApart() throws Exception {
         TableScope other = new TableScope(null, new ProfileLocator.Target("postgres", "replica.internal", "5432", "analytics"));
 
-        ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, PROFILE);
-        ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, other);
+        ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, PROFILE, true);
+        ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, other, true);
 
         assertThat(outputs(runContext.assets().emitted())).extracting(Asset::getId)
             .contains(DATABASE + ".marts.orders", "postgres:replica.internal:analytics.marts.orders");
@@ -139,8 +139,8 @@ class ResultParserTableScopeTest {
         Path renamed = Files.createTempFile("manifest", ".json");
         Files.writeString(renamed, Files.readString(fixture("manifest-carts.json").toPath()).replace("\"project_name\": \"carts\"", "\"project_name\": \"carts_migrated\""));
 
-        ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, PROFILE);
-        ResultParser.parseManifestWithAssets(runContext, renamed.toFile(), fixture("run_results-carts-build.json"), true, PROFILE);
+        ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, PROFILE, true);
+        ResultParser.parseManifestWithAssets(runContext, renamed.toFile(), fixture("run_results-carts-build.json"), true, PROFILE, true);
 
         assertThat(runContext.assets().emitted()).flatExtracting(AssetEmit::outputs)
             .filteredOn(asset -> asset.getId().equals(DATABASE + ".marts.orders"))
@@ -151,7 +151,7 @@ class ResultParserTableScopeTest {
 
     @Test
     void shouldKeepTheIdsUnscopedWhenTheDatabaseIsUnknown() throws Exception {
-        ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, TableScope.NONE);
+        ResultParser.parseManifestWithAssets(runContext, fixture("manifest-carts.json"), fixture("run_results-carts-build.json"), true, TableScope.NONE, true);
 
         Asset orders = emitOf(runContext.assets().emitted(), "analytics.marts.orders").outputs().getFirst();
         assertThat(orders.getPartOf()).isNull();

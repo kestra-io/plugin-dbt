@@ -1,0 +1,10 @@
+{
+  "metadata": {
+    "dbt_version": "1.11.17"
+  },
+  "args": {
+    "which": "test"
+  },
+  "results": [],
+  "elapsed_time": 0.1
+}

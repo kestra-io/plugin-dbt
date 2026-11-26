@@ -534,6 +534,28 @@ class DbtCLITest {
         assertThat(tableIds(runContext), containsInAnyOrder("postgres:pg.internal:analytics.marts.orders", "postgres:pg.internal:analytics.marts.payments"));
     }
 
+    @Test
+    void shouldRecordTheTablesOfEveryCommandWhenSeveralCommandsRan() throws Exception {
+        var task = fakeDbt(List.of("dbt seed", "dbt run", "dbt test")).build();
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        copyCartsArtifacts(runContext, "target", "run_results-carts-test.json");
+
+        task.run(runContext);
+
+        assertThat(tableIds(runContext), containsInAnyOrder("analytics.marts.orders", "analytics.marts.payments"));
+    }
+
+    @Test
+    void shouldRecordNoTableWhenTheOnlyCommandWritingRunResultsBuiltNothing() throws Exception {
+        var task = fakeDbt(List.of("dbt deps", "dbt test")).build();
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        copyCartsArtifacts(runContext, "target", "run_results-carts-test.json");
+
+        task.run(runContext);
+
+        assertThat(tableIds(runContext), empty());
+    }
+
     private static DbtCLI.DbtCLIBuilder<?, ?> fakeDbt(List<String> commands) {
         return DbtCLI.builder()
             .id(IdUtils.create())

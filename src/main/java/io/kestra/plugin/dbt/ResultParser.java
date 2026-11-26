@@ -154,15 +154,19 @@ public abstract class ResultParser {
      */
     public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, File runResultsFile, boolean parseRunResults)
         throws IOException, IllegalVariableEvaluationException {
-        return parseManifestWithAssets(runContext, file, runResultsFile, parseRunResults, TableScope.NONE);
+        return parseManifestWithAssets(runContext, file, runResultsFile, parseRunResults, TableScope.NONE, true);
     }
 
-    /** {@code scope} is the Database the tables belong to, which their ids start with. */
-    public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, File runResultsFile, boolean parseRunResults, TableScope scope)
-        throws IOException, IllegalVariableEvaluationException {
+    /**
+     * @param scope the Database the tables belong to, which their ids start with
+     * @param runResultsCoverRun false when the run ran several dbt commands, so run_results lists only the last one's
+     *        nodes and every node of the manifest is written
+     */
+    public static ManifestResult parseManifestWithAssets(RunContext runContext, File file, File runResultsFile, boolean parseRunResults, TableScope scope,
+        boolean runResultsCoverRun) throws IOException, IllegalVariableEvaluationException {
         var parsed = readRunResultQuietly(runResultsFile);
         var runResultsUnreadable = parseRunResults && parsed == null && runResultsFile != null && runResultsFile.exists();
-        return parseManifestWithAssets(runContext, file, true, Map.of(), parseRunResults ? parsed : null, parsed, runResultsUnreadable, scope);
+        return parseManifestWithAssets(runContext, file, true, Map.of(), parseRunResults ? parsed : null, runResultsCoverRun ? parsed : null, runResultsUnreadable, scope);
     }
 
     /**
@@ -249,17 +253,20 @@ public abstract class ResultParser {
      */
     public static URI parseRunResult(RunContext runContext, File file, Manifest manifest, boolean attachAssets, RunResult preParsed)
         throws IOException, IllegalVariableEvaluationException {
-        return parseRunResult(runContext, file, manifest, attachAssets, preParsed, TableScope.NONE);
+        return parseRunResult(runContext, file, manifest, attachAssets, preParsed, TableScope.NONE, true);
     }
 
-    /** {@code scope} must be the one the manifest was parsed with, so both writes of a table agree. */
-    public static URI parseRunResult(RunContext runContext, File file, Manifest manifest, boolean attachAssets, RunResult preParsed, TableScope scope)
-        throws IOException, IllegalVariableEvaluationException {
+    /**
+     * @param scope must be the one the manifest was parsed with, so both writes of a table agree
+     * @param runResultsCoverRun as for {@link #parseManifestWithAssets(RunContext, File, File, boolean, TableScope, boolean)}
+     */
+    public static URI parseRunResult(RunContext runContext, File file, Manifest manifest, boolean attachAssets, RunResult preParsed, TableScope scope,
+        boolean runResultsCoverRun) throws IOException, IllegalVariableEvaluationException {
         RunResult result = preParsed != null ? preParsed : MAPPER.readValue(file, RunResult.class);
 
         Map<String, ModelAsset> modelAssets = (manifest == null || !attachAssets) ? Map.of() : extractAssetNodes(manifest, scope);
         String projectId = manifest == null ? null : Optional.ofNullable(projectAsset(runContext, manifest)).map(Asset::getId).orElse(null);
-        boolean building = isBuildingCommand(result);
+        boolean building = !runResultsCoverRun || isBuildingCommand(result);
 
         // Emit one dynamic taskrun per dbt model (the UI timeline "bars"), attaching that model's
         // own status/message/failures as logs riding with its taskrun so they render inline under
