@@ -592,7 +592,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                     ? so
                     : ScriptOutput.builder().exitCode(1).outputFiles(new HashMap<>()).build();
 
-                parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, tableScope(runContext, profilesString, commandsWrapper.getWorkingDirectory(), projectWorkingDirectory, rCommands), runResultsCoverRun(rCommands));
+                parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, tableScope(runContext, profilesString, commandsWrapper.getWorkingDirectory(), projectWorkingDirectory, rCommands), runResults.getExitCode() != 0 || runResultsCoverRun(rCommands));
                 Output dbtOutput = Output.builder()
                     .warningDetected(hasWarning.get())
                     .outputFiles(runResults.getOutputFiles())
@@ -603,7 +603,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                 throw new RunnableTaskException(e.getMessage(), dbtOutput);
             }
 
-            parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, tableScope(runContext, profilesString, commandsWrapper.getWorkingDirectory(), projectWorkingDirectory, rCommands), runResultsCoverRun(rCommands));
+            parseRunResults(runContext, projectWorkingDirectory, runResults, storeManifestKvStore, tableScope(runContext, profilesString, commandsWrapper.getWorkingDirectory(), projectWorkingDirectory, rCommands), runResults.getExitCode() != 0 || runResultsCoverRun(rCommands));
 
             return Output.builder()
                 .warningDetected(hasWarning.get())

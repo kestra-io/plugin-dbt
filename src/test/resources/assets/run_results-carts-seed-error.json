@@ -1,0 +1,20 @@
+{
+  "metadata": {
+    "dbt_version": "1.11.17"
+  },
+  "args": {
+    "which": "seed"
+  },
+  "results": [
+    {
+      "status": "error",
+      "unique_id": "seed.carts.raw_carts",
+      "adapter_response": {},
+      "timing": [],
+      "execution_time": 0.01,
+      "message": "Database Error",
+      "failures": null
+    }
+  ],
+  "elapsed_time": 0.1
+}

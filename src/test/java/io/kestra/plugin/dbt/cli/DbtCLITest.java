@@ -557,6 +557,19 @@ class DbtCLITest {
     }
 
     @Test
+    void shouldRecordOnlyTheTablesRunResultsReportBuiltWhenAnEarlierCommandFailed() throws Exception {
+        var task = fakeDbt(List.of("dbt seed", "dbt run"))
+            .beforeCommands(Property.ofValue(List.of("dbt() { return 1; }")))
+            .build();
+        var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
+        copyCartsArtifacts(runContext, "target", "run_results-carts-seed-error.json");
+
+        assertThrows(RunnableTaskException.class, () -> task.run(runContext));
+
+        assertThat(tableIds(runContext), empty());
+    }
+
+    @Test
     void shouldRecordNoTableWhenTheOnlyCommandWritingRunResultsBuiltNothing() throws Exception {
         var task = fakeDbt(List.of("dbt deps", "dbt test")).build();
         var runContext = TestsUtils.mockRunContext(runContextFactory, task, Map.of());
