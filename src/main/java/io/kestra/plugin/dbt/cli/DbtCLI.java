@@ -632,6 +632,16 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
 
     private TableScope tableScope(RunContext runContext, String profilesString, Path workingDirectory, Path projectWorkingDirectory, List<String> commands)
         throws IllegalVariableEvaluationException {
+        TableScope scope = locateTableScope(runContext, profilesString, workingDirectory, projectWorkingDirectory, commands);
+        scope.databaseId(null).ifPresentOrElse(
+            id -> runContext.logger().info("The tables dbt builds are recorded under the Database asset '{}'.", id),
+            () -> runContext.logger().debug("Cannot tell from profiles.yml which database dbt connects to, so the table ids are not scoped by a Database asset. Set `databaseAsset` to name it.")
+        );
+        return scope;
+    }
+
+    private TableScope locateTableScope(RunContext runContext, String profilesString, Path workingDirectory, Path projectWorkingDirectory, List<String> commands)
+        throws IllegalVariableEvaluationException {
         String rDatabaseAsset = runContext.render(this.databaseAsset).as(String.class).orElse(null);
         if (rDatabaseAsset != null && !rDatabaseAsset.isBlank()) {
             return new TableScope(rDatabaseAsset, null);
@@ -646,11 +656,7 @@ public class DbtCLI extends AbstractExecScript implements RunnableTask<DbtCLI.Ou
                 .map(DbtCLI::readQuietly)
                 .orElse(null);
         }
-        Optional<ProfileLocator.Target> target = ProfileLocator.locate(profilesContent, projectWorkingDirectory, commands, rEnv);
-        if (target.isEmpty()) {
-            runContext.logger().warn("Cannot tell from profiles.yml which database dbt connects to, so the table ids are not scoped by a Database asset. Set `databaseAsset` to name it.");
-        }
-        return new TableScope(null, target.orElse(null));
+        return new TableScope(null, ProfileLocator.locate(profilesContent, projectWorkingDirectory, commands, rEnv).orElse(null));
     }
 
     private static String readQuietly(Path file) {
